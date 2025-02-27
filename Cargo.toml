@@ -1,0 +1,11 @@
+[package]
+name = "clion_game"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+gl = "0.14.0"
+glam = "0.30.0"
