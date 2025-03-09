@@ -654,6 +654,29 @@ int main(int, char**)
             log_error("Failed to load image 1");
             startup_error = true;
         } else {
+            unsigned char my_data[] = {
+                0xff, 0x00, 0x00,
+                0x00, 0xff, 0x00,
+                0xff, 0x00, 0x00,
+                0x00, 0xff, 0x00,
+
+                0x00, 0x00, 0xff,
+                0xff, 0xff, 0xff,
+                0x00, 0x00, 0xff,
+                0xff, 0xff, 0xff,
+
+                0xff,
+                0x00, 0x00, 0xff,
+                0x00, 0x00, 0xff,
+                0x00, 0x00, 0xff,
+                0x00, 0x00, 0xff,
+                0x00, 0x00, 0xff,
+                0x00, 0x00, 0xff,
+                0x00, 0x00, 0xff,
+                0x00, 0x00, 0xff,
+                0x00, 0x00, 0xff,
+                0x00, 0x00, 0xff,
+            };
             log("Successfully loaded image 1");
 
             glGenTextures(1, &texture);
@@ -663,12 +686,12 @@ int main(int, char**)
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);	// set texture wrapping to GL_REPEAT (default wrapping method)
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
             // set texture filtering parameters
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
 
 
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 4, 2, 0, GL_RGB, GL_UNSIGNED_BYTE, my_data);
             glGenerateMipmap(GL_TEXTURE_2D);
             stbi_image_free(data);
         }
