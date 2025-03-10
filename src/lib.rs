@@ -119,7 +119,7 @@ fn draw_debug_shapes(state: &mut State) {
     unsafe {
         gl::BindVertexArray(state.debug_vao.id);
         state.debug_vbo.bind_data(&state.debug_verts, gl::DYNAMIC_DRAW);
-        state.debug_ebo.bind_data(&state.debug_vert_indices, gl::DYNAMIC_DRAW);
+        state.debug_ebo.bind_data(&state.debug_vert_indices, Primitive::LineStrip, gl::DYNAMIC_DRAW);
 
         // Vertex Position Attribute
         gl::VertexAttribPointer(0, 3, gl::FLOAT, gl::FALSE, (3 * u32size_of::<f32>()) as i32, std::ptr::null());
@@ -200,9 +200,10 @@ fn debug_box(state: &mut State, position: Vec3, size: Vec3, _color: Vec3) {
     }
 }
 
-#[derive(Clone)]
-enum ShaderDataType {
+#[derive(Copy, Clone, Debug)]
+pub enum ShaderDataType {
     Float,
+    Vec2,
     Vec3,
     Vec4,
     Mat4,
@@ -215,6 +216,7 @@ impl fmt::Display for ShaderDataType {
             "{}",
             match self {
                 ShaderDataType::Float => "float",
+                ShaderDataType::Vec2 => "vec2",
                 ShaderDataType::Vec3 => "vec3",
                 ShaderDataType::Vec4 => "vec4",
                 ShaderDataType::Mat4 => "mat4",
@@ -334,7 +336,7 @@ impl Drop for VertexShader {
     }
 }
 
-struct FragmentShader {
+pub struct FragmentShader {
     id: gl::types::GLuint,
     inputs: Vec<ShaderSymbol>,
     uniform_inputs: Vec<ShaderSymbol>,
@@ -423,9 +425,15 @@ impl ShaderProgram {
     }
 }
 
+//struct AttrInfo {
+//    offset,
+//}
+
 #[derive(Debug)]
 struct VertexArray {
-    id: GLuint
+    id: GLuint,
+    //attrs: Vec::<AttrInfo>,
+    //stride: u32,
 }
 
 impl VertexArray {
@@ -452,6 +460,12 @@ impl VertexBufferObject {
         }
     }
 
+    fn create_with_data<T>(data: &[T], mode: GLuint) -> Self {
+        let vbo = Self::create();
+        vbo.bind_data(data, mode);
+        vbo
+    }
+
     fn bind_data<T>(&self, data: &[T], mode: GLuint) {
         unsafe {
             gl::BindBuffer(gl::ARRAY_BUFFER, self.id);
@@ -460,7 +474,8 @@ impl VertexBufferObject {
     }
 }
 
-enum Primitive {
+#[derive(Copy, Clone, Debug)]
+pub enum Primitive {
     Points,
     Lines,
     LineLoop,
@@ -470,9 +485,24 @@ enum Primitive {
     TriangleFan,
 }
 
+impl Primitive {
+    fn to_gl(&self) -> GLenum {
+        match self {
+            Primitive::Points => gl::POINTS,
+            Primitive::Lines => gl::LINES,
+            Primitive::LineLoop => gl::LINE_LOOP,
+            Primitive::LineStrip => gl::LINE_STRIP,
+            Primitive::Triangles => gl::TRIANGLES,
+            Primitive::TriangleStrip => gl::TRIANGLE_STRIP,
+            Primitive::TriangleFan => gl::TRIANGLE_FAN,
+       }
+    }
+}
+
 #[derive(Debug)]
 struct ElementBufferObject {
     id: GLuint,
+    primitive_type: Primitive
 }
 
 impl ElementBufferObject {
@@ -480,19 +510,27 @@ impl ElementBufferObject {
         unsafe {
             let mut id: GLuint = 0;
             gl::GenBuffers(1, &mut id as *mut GLuint);
-            Self { id }
+            let primitive_type = Primitive::Triangles;
+            Self { id, primitive_type }
         }
     }
 
-    fn bind_data<T>(&self, data: &[T], mode: GLuint) {
+    fn create_with_data<T>(data: &[T], primitive_type: Primitive, mode: GLuint) -> Self {
+        let mut ebo = Self::create();
+        ebo.bind_data(data, primitive_type, mode);
+        ebo
+    }
+
+    fn bind_data<T>(&mut self, data: &[T], primitive_type: Primitive, mode: GLuint) {
         unsafe {
+            self.primitive_type = primitive_type;
             gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, self.id);
             gl::BufferData(gl::ELEMENT_ARRAY_BUFFER, (data.len() * size_of::<T>()) as isize, data.as_ptr().cast(), mode);
         }
     }
 }
 
-enum VertVec {
+pub enum VertVec {
     Float(Vec<f32>),
     Vec2(Vec<Vec2>),
     Vec3(Vec<Vec3>),
@@ -518,6 +556,15 @@ impl VertVec {
         }
    }
 
+   fn to_shader_type(&self) -> ShaderDataType {
+       match self {
+           VertVec::Float(_) => ShaderDataType::Float,
+           VertVec::Vec2(_) => ShaderDataType::Vec2,
+           VertVec::Vec3(_) => ShaderDataType::Vec3,
+           VertVec::Mat4(_) => ShaderDataType::Mat4,
+       }
+   }
+
    fn len(&self) -> usize {
        match self {
            VertVec::Float(v) => v.len(),
@@ -528,13 +575,112 @@ impl VertVec {
    }
 }
 
-
-struct MeshData {
-    verts: HashMap<String, VertVec>,
-    indices: Vec<u32>,
+#[derive(Copy, Clone, Debug)]
+struct VertexAttribute {
+    data_type: ShaderDataType,
+    offset: u32,
 }
 
-fn create_test_mesh() -> MeshData {
+impl VertexAttribute {
+    fn new(data_type: ShaderDataType, offset: u32) -> Self {
+        Self {
+            offset,
+            data_type,
+        }
+    }
+}
+struct Mesh {
+    // NOTE: Does not include VertexArray since vertex arrays are specific to the shader program being used
+    vbo: VertexBufferObject,
+    ebo: ElementBufferObject,
+    stride: u32,
+    attribs: HashMap<String, VertexAttribute>,
+    index_count: u32,
+}
+
+impl Mesh {
+    fn attribute(&self, name: &str) -> Option<VertexAttribute> {
+        self.attribs.get(name).copied()
+    }
+
+    fn create(data: &MeshDataRaw) -> Result<Self, String> {
+        log_opengl_errors();
+
+        println!("Getting vert count");
+        let vert_count = data.verts.values().map(|v| v.len()).max().unwrap_or(0);
+        if vert_count == 0 {
+            return Err("No verts in mesh data!".to_string());
+        }
+
+        log_opengl_errors();
+        println!("Getting vert attribs");
+        let mut vert_attribs: Vec<(&str, &VertVec)> = vec![];
+        for (name, vert_vec) in data.verts.iter() {
+            vert_attribs.push((name, vert_vec));
+        }
+
+        log_opengl_errors();
+        println!("Pushing vert data");
+        let mut vert_data: Vec<f32> = vec![];
+        for idx in 0..vert_count {
+            for (_, vert_attrib) in vert_attribs.iter() {
+                match vert_attrib {
+                    VertVec::Float(v) => vert_data.push(v[idx]),
+                    VertVec::Vec2(v) => {
+                        let p = v[idx];
+                        vert_data.push(p.x);
+                        vert_data.push(p.y);
+                    },
+                    VertVec::Vec3(v) => {
+                        let p = v[idx];
+                        vert_data.push(p.x);
+                        vert_data.push(p.y);
+                        vert_data.push(p.z);
+                    },
+                    VertVec::Mat4(_v) => todo!(),
+                }
+            }
+        }
+
+        log_opengl_errors();
+        println!("Creating buffers");
+
+        let vbo = VertexBufferObject::create_with_data(&vert_data, gl::STATIC_DRAW);
+        let ebo = ElementBufferObject::create_with_data(&data.indices, data.primitive_type, gl::STATIC_DRAW);
+
+        let stride: u32 = vert_attribs.iter().map(|(_, a)| a.element_size()).sum();
+
+        let mut attribs = HashMap::new();
+        let mut offset = 0;
+        for (attrib_name, attrib_vec) in vert_attribs.iter() {
+            attribs.insert(
+                attrib_name.to_string(),
+                VertexAttribute::new(attrib_vec.to_shader_type(), offset),
+            );
+            offset += attrib_vec.element_size();
+        }
+
+        let index_count = data.indices.len() as u32;
+
+        log_opengl_errors();
+        println!("Returning Mesh");
+        Ok(Self {
+            vbo,
+            ebo,
+            stride,
+            attribs,
+            index_count,
+        })
+    }
+}
+
+struct MeshDataRaw {
+    verts: HashMap<String, VertVec>,
+    indices: Vec<u32>,
+    primitive_type: Primitive,
+}
+
+fn create_test_mesh() -> MeshDataRaw {
     let mut my_box = box_mesh(Vec3::new(1.0, 1.0, 1.0));
     let len = my_box.verts.get("aPos").unwrap().len();
 
@@ -550,7 +696,7 @@ fn create_test_mesh() -> MeshData {
     my_box
 }
 
-fn box_mesh(size: Vec3) -> MeshData {
+fn box_mesh(size: Vec3) -> MeshDataRaw {
     let positions = vec![
         // POS X
         Vec3::new( size.x,  size.y,  size.z)/2.0f32,
@@ -630,13 +776,17 @@ fn box_mesh(size: Vec3) -> MeshData {
     verts.insert("aPos".to_string(), VertVec::Vec3(positions));
     verts.insert("aNormal".to_string(), VertVec::Vec3(normals));
 
-    MeshData {
+    let primitive_type = Primitive::Triangles;
+
+    MeshDataRaw {
         verts,
-        indices
+        indices,
+        primitive_type,
     }
 }
 
-struct StaticMesh {
+pub struct StaticMesh {
+    // TODO: It seems like the model/view/projection locations should be a property of the shader
     shader: Rc<ShaderProgram>,
     vao: VertexArray,
     vbo: VertexBufferObject,
@@ -649,7 +799,7 @@ struct StaticMesh {
 }
 
 impl StaticMesh {
-    fn create(shader: Rc<ShaderProgram>, mesh: &MeshData) -> Result<Self, String> {
+    fn create(shader: Rc<ShaderProgram>, mesh: &MeshDataRaw) -> Result<Self, String> {
         // Check that the mesh has the vertex inputs the shader needs
         log_opengl_errors();
         println!("Getting vert count");
@@ -669,7 +819,7 @@ impl StaticMesh {
         println!("Creating buffers");
         let vao = VertexArray::create();
         let vbo = VertexBufferObject::create();
-        let ebo = ElementBufferObject::create();
+        let mut ebo = ElementBufferObject::create();
 
         unsafe { gl::BindVertexArray(vao.id) };
 
@@ -705,7 +855,7 @@ impl StaticMesh {
         }
 
         vbo.bind_data(&vert_data, gl::STATIC_DRAW);
-        ebo.bind_data(&mesh.indices, gl::STATIC_DRAW);
+        ebo.bind_data(&mesh.indices, mesh.primitive_type, gl::STATIC_DRAW);
 
         log_opengl_errors();
         println!("Setting up VAO pointers");
@@ -766,7 +916,7 @@ impl StaticMesh {
             gl::UniformMatrix4fv(self.view_loc, 1, gl::FALSE, &view.to_cols_array() as *const gl::types::GLfloat);
             gl::UniformMatrix4fv(self.projection_loc, 1, gl::FALSE, &projection.to_cols_array() as *const gl::types::GLfloat);
 
-            gl::DrawElements(gl::TRIANGLES, self.index_count as i32, gl::UNSIGNED_INT, std::ptr::null());
+            gl::DrawElements(self.ebo.primitive_type.to_gl(), self.index_count as i32, gl::UNSIGNED_INT, std::ptr::null());
         }
     }
 }
@@ -869,7 +1019,7 @@ fn init_state() -> State {
     println!("Starting default shader compilation");
     let default_shader = ShaderProgram::create(default_vertex_shader, default_fragment_shader).expect("Could not link default shader");
     println!("Default shader created");
-    let default_shader = Rc::new(default_shader);
+    let _default_shader = Rc::new(default_shader);
 
     println!("Creating vert color shader");
     let vert_color_shader = ShaderProgram::create(
@@ -1092,10 +1242,26 @@ fn frame(state: &mut State, delta: f32) {
 
         log_window();
 
-        draw_debug_shapes(state);
-        state.test_mesh.transform = Mat4::from_translation(Vec3::new(1.0, 0.0, 0.0));
+        state.test_mesh.transform = Mat4::from_translation(Vec3::new(1.2, 0.2, -0.2));
         state.test_mesh.draw(state.view, state.projection);
         log_opengl_errors();
+
+        let my_box = box_mesh(Vec3::new(1.0, 1.0, 1.0));
+        let positions = match my_box.verts.get("aPos").unwrap() {
+            VertVec::Vec3(v) => v,
+            _ => panic!("Expected aPos to be a Vec3"),
+        };
+        let normals = match my_box.verts.get("aNormal").unwrap() {
+            VertVec::Vec3(v) => v,
+            _ => panic!("Expected aNormal to be a Vec3"),
+        };
+        for (pos, norm) in positions.iter().zip(normals.iter()) {
+            let start = state.test_mesh.transform.transform_point3(*pos);
+            let end = state.test_mesh.transform.transform_point3(pos + norm*0.2);
+            debug_line(state, &[start, end]);
+        }
+
+        draw_debug_shapes(state);
 
         if state.frame_num == 0 {
             println!("Finished first frame");
