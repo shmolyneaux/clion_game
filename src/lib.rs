@@ -209,6 +209,18 @@ pub enum ShaderDataType {
     Mat4,
 }
 
+impl ShaderDataType {
+   fn component_count(&self) -> u32 {
+        match self {
+            ShaderDataType::Float => 1,
+            ShaderDataType::Vec2 => 2,
+            ShaderDataType::Vec3 => 3,
+            ShaderDataType::Vec4 => 4,
+            ShaderDataType::Mat4 => 16,
+        }
+   }
+}
+
 impl fmt::Display for ShaderDataType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
@@ -387,6 +399,7 @@ fn compile_shader(src: &CStr, shader_type: gl::types::GLuint) -> Result<gl::type
 
 struct ShaderProgram {
     id: gl::types::GLuint,
+    // TODO: we shouldn't need to store the vertex/fragment shader OpenGL handles after the program is linked
     vert: VertexShader,
     frag: FragmentShader,
 }
@@ -432,6 +445,7 @@ impl ShaderProgram {
 #[derive(Debug)]
 struct VertexArray {
     id: GLuint,
+    // TODO: should have an Rc to the vbo/ebo so they're not freed?
     //attrs: Vec::<AttrInfo>,
     //stride: u32,
 }
@@ -442,6 +456,13 @@ impl VertexArray {
             let mut id: GLuint = 0;
             gl::GenVertexArrays(1, &mut id as *mut GLuint);
             Self { id }
+        }
+    }
+
+    fn bind(&self, vbo: &VertexBufferObject, ebo: &ElementBufferObject) {
+        unsafe {
+            gl::BindBuffer(gl::ARRAY_BUFFER, vbo.id);
+            gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, ebo.id);
         }
     }
 }
@@ -786,108 +807,38 @@ fn box_mesh(size: Vec3) -> MeshDataRaw {
 }
 
 pub struct StaticMesh {
-    // TODO: It seems like the model/view/projection locations should be a property of the shader
     shader: Rc<ShaderProgram>,
     vao: VertexArray,
-    vbo: VertexBufferObject,
-    ebo: ElementBufferObject,
-    index_count: u32,
-    model_loc: GLint,
-    view_loc: GLint,
-    projection_loc: GLint,
     transform: Mat4,
+    mesh: Rc<Mesh>,
+    // TODO: should model/view/projection uniform locations be cached (here or in the ShaderProgram)?
 }
 
 impl StaticMesh {
-    fn create(shader: Rc<ShaderProgram>, mesh: &MeshDataRaw) -> Result<Self, String> {
-        // Check that the mesh has the vertex inputs the shader needs
+    fn create(shader: Rc<ShaderProgram>, mesh: Rc<Mesh>) -> Result<Self, String> {
         log_opengl_errors();
-        println!("Getting vert count");
-        let mut vert_count = 0;
-        for input in shader.vert.inputs.iter() {
-            match mesh.verts.get(&input.name) {
-                Some(vert_attribute) => vert_count = vert_attribute.len(),
-                None => return Err(format!("Shader expected vert attribute {} which is not in mesh", input.name)),
-            }
-        }
+        println!("Creating vao");
 
-        if vert_count == 0 {
-            return Err("No verts in mesh data!".to_string());
-        }
-
-        log_opengl_errors();
-        println!("Creating buffers");
         let vao = VertexArray::create();
-        let vbo = VertexBufferObject::create();
-        let mut ebo = ElementBufferObject::create();
-
         unsafe { gl::BindVertexArray(vao.id) };
-
-        log_opengl_errors();
-        println!("Getting vert attribs");
-        let mut vert_attribs: Vec<&VertVec> = vec![];
-        for input in shader.vert.inputs.iter() {
-            vert_attribs.push(mesh.verts.get(&input.name).unwrap());
-        }
-
-        // TODO: figure out how to make this bytes with properly supported endianness so that we can use non-float inputs
-        log_opengl_errors();
-        println!("Pushing vert data");
-        let mut vert_data: Vec<f32> = vec![];
-        for idx in 0..vert_count {
-            for vert_attrib in vert_attribs.iter() {
-                match vert_attrib {
-                    VertVec::Float(v) => vert_data.push(v[idx]),
-                    VertVec::Vec2(v) => {
-                        let p = v[idx];
-                        vert_data.push(p.x);
-                        vert_data.push(p.y);
-                    },
-                    VertVec::Vec3(v) => {
-                        let p = v[idx];
-                        vert_data.push(p.x);
-                        vert_data.push(p.y);
-                        vert_data.push(p.z);
-                    },
-                    VertVec::Mat4(_v) => todo!(),
-                }
-            }
-        }
-
-        vbo.bind_data(&vert_data, gl::STATIC_DRAW);
-        ebo.bind_data(&mesh.indices, mesh.primitive_type, gl::STATIC_DRAW);
 
         log_opengl_errors();
         println!("Setting up VAO pointers");
         unsafe {
-            let stride: u32 = vert_attribs.iter().map(|a| a.element_size()).sum();
-
-            let mut offset = 0;
-            for (idx, attribute) in vert_attribs.iter().enumerate() {
-                println!(
-                    "gl::VertexAttribPointer({} as GLuint, {} as GLint, gl::FLOAT, gl::FALSE, {} as i32, {} as *const std::ffi::c_void)",
-                    idx, attribute.component_count(), stride, offset,
-                );
-                gl::VertexAttribPointer(idx as GLuint, attribute.component_count() as GLint, gl::FLOAT, gl::FALSE, stride as i32, offset as *const std::ffi::c_void);
-                println!(
-                    "gl::EnableVertexAttribArray({} as u32)",
-                    idx,
-               );
-                gl::EnableVertexAttribArray(idx as u32);
+            let stride = mesh.stride as i32;
+            for (idx, attribute) in shader.vert.inputs.iter().enumerate() {
+                let idx = idx as GLuint;
+                let offset = match mesh.attribute(&attribute.name) {
+                    None => return Err(format!("Attribute {} doesn't exist for mesh", attribute.name)),
+                    Some(mesh_attribute) => mesh_attribute.offset, // TODO: check for matching types
+                };
+                gl::VertexAttribPointer(idx, attribute.data_type.component_count() as GLint, gl::FLOAT, gl::FALSE, stride, offset as *const std::ffi::c_void);
+                gl::EnableVertexAttribArray(idx);
                 log_opengl_errors();
-
-                offset += attribute.element_size();
             }
         }
 
-        let index_count = mesh.indices.len() as u32;
-
-        log_opengl_errors();
-        println!("Getting uniform location");
-        // TODO: data-driven uniform loc retrieval
-        let model_loc = shader.uniform_location(c"model");
-        let view_loc = shader.uniform_location(c"view");
-        let projection_loc = shader.uniform_location(c"projection");
+        vao.bind(&mesh.vbo, &mesh.ebo);
 
         let transform = Mat4::IDENTITY;
 
@@ -896,27 +847,33 @@ impl StaticMesh {
         Ok(Self {
             shader,
             vao,
-            vbo,
-            ebo,
-            index_count,
-            model_loc,
-            view_loc,
-            projection_loc,
             transform,
+            mesh,
         })
     }
 
     fn draw(&self, view: Mat4, projection: Mat4) {
         unsafe {
+            println!("in StaticMesh.draw drawing vao {}", self.vao.id);
             gl::BindVertexArray(self.vao.id);
 
             gl::UseProgram(self.shader.id);
 
-            gl::UniformMatrix4fv(self.model_loc, 1, gl::FALSE, &self.transform.to_cols_array() as *const gl::types::GLfloat);
-            gl::UniformMatrix4fv(self.view_loc, 1, gl::FALSE, &view.to_cols_array() as *const gl::types::GLfloat);
-            gl::UniformMatrix4fv(self.projection_loc, 1, gl::FALSE, &projection.to_cols_array() as *const gl::types::GLfloat);
+            gl::UniformMatrix4fv(self.shader.uniform_location(c"model"), 1, gl::FALSE, &self.transform.to_cols_array() as *const gl::types::GLfloat);
+            gl::UniformMatrix4fv(self.shader.uniform_location(c"view"), 1, gl::FALSE, &view.to_cols_array() as *const gl::types::GLfloat);
+            gl::UniformMatrix4fv(self.shader.uniform_location(c"projection"), 1, gl::FALSE, &projection.to_cols_array() as *const gl::types::GLfloat);
 
-            gl::DrawElements(self.ebo.primitive_type.to_gl(), self.index_count as i32, gl::UNSIGNED_INT, std::ptr::null());
+           println!("Model loc: {}", self.shader.uniform_location(c"model"));
+           println!("View loc: {}", self.shader.uniform_location(c"view"));
+           println!("Projection loc: {}", self.shader.uniform_location(c"projection"));
+
+            println!("Drawing elements");
+            println!(
+                "gl::DrawElements({}, {} as i32, gl::UNSIGNED_INT, std::ptr::null())",
+                self.mesh.ebo.primitive_type.to_gl(), self.mesh.index_count,
+            );
+            gl::DrawElements(self.mesh.ebo.primitive_type.to_gl(), self.mesh.index_count as i32, gl::UNSIGNED_INT, std::ptr::null());
+            println!("fin Drawing elements");
         }
     }
 }
@@ -1055,7 +1012,7 @@ fn init_state() -> State {
     println!("Creating test mesh");
     let test_mesh = StaticMesh::create(
         vert_color_shader.clone(),
-        &create_test_mesh(),
+        Rc::new(Mesh::create(&create_test_mesh()).unwrap()),
     ).expect("Can't create the test mesh");
     log_opengl_errors();
 
@@ -1243,8 +1200,10 @@ fn frame(state: &mut State, delta: f32) {
         log_window();
 
         state.test_mesh.transform = Mat4::from_translation(Vec3::new(1.2, 0.2, -0.2));
+        println!("Drawing test mesh");
         state.test_mesh.draw(state.view, state.projection);
         log_opengl_errors();
+        println!("Drew test mesh");
 
         let my_box = box_mesh(Vec3::new(1.0, 1.0, 1.0));
         let positions = match my_box.verts.get("aPos").unwrap() {
