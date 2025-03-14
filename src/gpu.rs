@@ -9,6 +9,7 @@ pub enum ShaderDataType {
     Vec3,
     Vec4,
     Mat4,
+    Sampler2D,
 }
 
 impl ShaderDataType {
@@ -19,6 +20,7 @@ impl ShaderDataType {
             ShaderDataType::Vec3 => 3,
             ShaderDataType::Vec4 => 4,
             ShaderDataType::Mat4 => 16,
+            ShaderDataType::Sampler2D => panic!("sampler2D does not have a component count"),
         }
    }
 }
@@ -34,6 +36,7 @@ impl fmt::Display for ShaderDataType {
                 ShaderDataType::Vec3 => "vec3",
                 ShaderDataType::Vec4 => "vec4",
                 ShaderDataType::Mat4 => "mat4",
+                ShaderDataType::Sampler2D => "sampler2D",
             }
         )
     }
@@ -45,6 +48,7 @@ pub enum ShaderValue {
     Vec3(Vec3),
     Vec4(Vec4),
     Mat4(Mat4),
+    Sampler2D(GLuint),
 }
 
 #[derive(Clone)]
@@ -520,6 +524,7 @@ pub struct StaticMesh {
     pub vao: VertexArray,
     pub transform: Mat4,
     pub mesh: Rc<Mesh>,
+    pub uniform_override: HashMap<String, ShaderValue>,
     // TODO: should model/view/projection uniform locations be cached (here or in the ShaderProgram)?
 }
 
@@ -550,6 +555,7 @@ impl StaticMesh {
         vao.bind(&mesh.vbo, &mesh.ebo);
 
         let transform = Mat4::IDENTITY;
+        let uniform_override = HashMap::new();
 
         log_opengl_errors();
         println!("Returning StaticMesh");
@@ -558,6 +564,7 @@ impl StaticMesh {
             vao,
             transform,
             mesh,
+            uniform_override,
         })
     }
 
@@ -571,8 +578,9 @@ impl StaticMesh {
 
             ctx.insert("model".to_string(), ShaderValue::Mat4(self.transform));
 
+            let mut texture_unit = 0;
             for uniform_info in self.shader.uniforms() {
-                match (uniform_info.data_type, ctx.get(&uniform_info.name).unwrap()) {
+                match (uniform_info.data_type, self.uniform_override.get(&uniform_info.name).or_else(|| ctx.get(&uniform_info.name)).unwrap()) {
                     (ShaderDataType::Float, ShaderValue::Float(_v)) => todo!(),
                     (ShaderDataType::Vec2, ShaderValue::Vec2(_v)) => todo!(),
                     (ShaderDataType::Vec3, ShaderValue::Vec3(_v)) => todo!(),
@@ -584,6 +592,25 @@ impl StaticMesh {
                             gl::FALSE,
                             &v.to_cols_array() as *const gl::types::GLfloat
                         );
+                    }
+                    (ShaderDataType::Sampler2D, ShaderValue::Sampler2D(v)) => {
+                        gl::ActiveTexture(
+                            match texture_unit {
+                                0 => gl::TEXTURE0,
+                                1 => gl::TEXTURE1,
+                                2 => gl::TEXTURE2,
+                                3 => gl::TEXTURE3,
+                                4 => gl::TEXTURE4,
+                                5 => gl::TEXTURE5,
+                                _ => todo!("Add the other texture unit constants"),
+                            }
+                        );
+                        gl::BindTexture(gl::TEXTURE_2D, *v);
+                        gl::Uniform1i(
+                            self.shader.uniform_location(&CString::new(uniform_info.name.clone()).unwrap()),
+                            texture_unit,
+                        );
+                        texture_unit += 1;
                     }
                     _ => todo!(),
                 }

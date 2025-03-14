@@ -121,10 +121,57 @@ fn log_window() {
     });
 }
 
+fn gen_test_texture() -> GLuint {
+    let mut texture: GLuint = 0;
+
+    let my_data: Vec<u8> = vec![
+        0xff, 0x00, 0x00,
+        0x00, 0xff, 0x00,
+        0xff, 0x00, 0x00,
+        0x00, 0xff, 0x00,
+
+        0x00, 0x00, 0xff,
+        0xff, 0xff, 0xff,
+        0x00, 0x00, 0xff,
+        0xff, 0xff, 0xff,
+    ];
+    log("Successfully loaded image 1");
+
+    unsafe {
+        gl::GenTextures(1, &mut texture as *mut u32);
+        gl::BindTexture(gl::TEXTURE_2D, texture);
+
+        // set the texture wrapping parameters
+        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::REPEAT as i32);
+        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::REPEAT as i32);
+        // set texture filtering parameters
+        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as i32);
+        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as i32);
+
+        gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGB as i32, 4, 2, 0, gl::RGB, gl::UNSIGNED_BYTE, my_data.as_ptr().cast());
+        gl::GenerateMipmap(gl::TEXTURE_2D);
+    }
+
+    log(format!("Created texture in Rust {}", texture));
+
+    texture
+}
 
 fn create_test_mesh() -> MeshDataRaw {
     let mut my_box = box_mesh(Vec3::new(1.0, 1.0, 1.0));
     let len = my_box.verts.get("aPos").unwrap().len();
+
+    let mut uvs = vec![Vec2::new(0.0, 0.0); len];
+    match my_box.verts.get("aPos").unwrap() {
+        VertVec::Vec3(positions) => {
+            for (uv, pos) in uvs.iter_mut().zip(positions.iter()) {
+                uv.x = pos.x;
+                uv.y = pos.y;
+            }
+        },
+        _ => panic!("Why is aPos not a Vec3?"),
+    }
+    my_box.verts.insert("aUV".to_string(), VertVec::Vec2(uvs));
 
     let mut color = vec![Vec3::new(1.0, 0.0, 1.0); len];
     for (idx, vert_color) in color.iter_mut().enumerate() {
@@ -132,7 +179,6 @@ fn create_test_mesh() -> MeshDataRaw {
         vert_color.y = idx as f32 / len as f32;
         vert_color.z = idx as f32 / len as f32;
     }
-
     my_box.verts.insert("aColor".to_string(), VertVec::Vec3(color));
 
     my_box
@@ -268,12 +314,45 @@ fn init_state() -> State {
         ).expect("Could not build color shader");
     let vert_color_shader = Rc::new(vert_color_shader);
 
+    let texture_shader = ShaderProgram::create(
+        ShaderBuilder::new()
+            .with_input(ShaderSymbol::new(ShaderDataType::Vec3, "aPos"))
+            .with_input(ShaderSymbol::new(ShaderDataType::Vec2, "aUV"))
+            .with_uniform(ShaderSymbol::new(ShaderDataType::Mat4, "model"))
+            .with_uniform(ShaderSymbol::new(ShaderDataType::Mat4, "projection"))
+            .with_uniform(ShaderSymbol::new(ShaderDataType::Mat4, "view"))
+            .with_output(ShaderSymbol::new(ShaderDataType::Vec2, "uv"))
+            .with_code(
+                r#"
+                    void main() {
+                        gl_Position = projection * view * model * vec4(aPos, 1.0);
+                        uv = aUV;
+                    }
+                "#.to_string()
+            ).build_vertex_shader().unwrap(),
+        ShaderBuilder::new()
+            .with_input(ShaderSymbol::new(ShaderDataType::Vec2, "uv"))
+            .with_output(ShaderSymbol::new(ShaderDataType::Vec4, "FragColor"))
+            .with_uniform(ShaderSymbol::new(ShaderDataType::Sampler2D, "texture1"))
+            .with_code(
+                r#"
+                    void main() {
+                        FragColor = texture(texture1, uv);
+                    }
+                "#.to_string()
+            ).build_fragment_shader().unwrap()
+        ).expect("Could not build texture shader");
+    let texture_shader = Rc::new(texture_shader);
+
+    let generated_texture = gen_test_texture();
+
     log_opengl_errors();
     println!("Creating test mesh");
-    let test_mesh = StaticMesh::create(
-        vert_color_shader.clone(),
+    let mut test_mesh = StaticMesh::create(
+        texture_shader.clone(),
         Rc::new(Mesh::create(&create_test_mesh()).unwrap()),
     ).expect("Can't create the test mesh");
+    test_mesh.uniform_override.insert("texture1".to_string(), gpu::ShaderValue::Sampler2D(generated_texture));
     log_opengl_errors();
 
     println!("State initialized!");
@@ -460,13 +539,12 @@ fn frame(state: &mut State, delta: f32) {
         log_window();
 
         state.test_mesh.transform = Mat4::from_translation(Vec3::new(1.2, 0.2, -0.2));
-        println!("Drawing test mesh");
         let mut ctx = HashMap::new();
         ctx.insert("view".to_string(), ShaderValue::Mat4(state.view));
         ctx.insert("projection".to_string(), ShaderValue::Mat4(state.projection));
+
         state.test_mesh.draw(&mut ctx);
         log_opengl_errors();
-        println!("Drew test mesh");
 
         let my_box = box_mesh(Vec3::new(1.0, 1.0, 1.0));
         let positions = match my_box.verts.get("aPos").unwrap() {
