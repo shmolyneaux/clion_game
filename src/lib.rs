@@ -1,3 +1,4 @@
+#[macro_use]
 use gl;
 use std::collections::HashMap;
 use std::fmt;
@@ -17,7 +18,7 @@ mod debug_draw;
 
 use crate::gpu::*;
 use crate::debug_draw::{draw_debug_shapes, debug_line, debug_line_loop, debug_box};
-use crate::mesh_gen::box_mesh;
+use crate::mesh_gen::{box_mesh, quad_mesh};
 
 type ImGuiWindowFlags = core::ffi::c_int;
 unsafe extern "C" {
@@ -99,6 +100,27 @@ thread_local! {
     static DEBUG_LOG: RefCell<Vec<CString>> = RefCell::default();
 }
 
+macro_rules! log_opengl_errors {
+    () => {
+        unsafe {
+            loop {
+                let err = gl::GetError();
+                match err {
+                    gl::NO_ERROR => break,
+                    gl::INVALID_ENUM => log(format!("[{}:{}] OpenGL Error INVALID_ENUM: An unacceptable value is specified for an enumerated argument.", file!(), line!())),
+                    gl::INVALID_VALUE => log(format!("[{}:{}] OpenGL Error INVALID_VALUE: A numeric argument is out of range.", file!(), line!())),
+                    gl::INVALID_OPERATION => log(format!("[{}:{}] OpenGL Error INVALID_OPERATION: The specified operation is not allowed in the current state.", file!(), line!())),
+                    gl::INVALID_FRAMEBUFFER_OPERATION => log(format!("[{}:{}] OpenGL Error INVALID_FRAMEBUFFER_OPERATION: The framebuffer object is not complete.", file!(), line!())),
+                    gl::OUT_OF_MEMORY => log(format!("[{}:{}] OpenGL Error OUT_OF_MEMORY: Not enough memory to execute the command.", file!(), line!())),
+                    gl::STACK_UNDERFLOW => log(format!("[{}:{}] OpenGL Error STACK_UNDERFLOW: Stack underflow detected.", file!(), line!())),
+                    gl::STACK_OVERFLOW => log(format!("[{}:{}] OpenGL Error STACK_OVERFLOW: Stack overflow detected.", file!(), line!())),
+                    _ => log(format!("[{}:{}] OpenGL Error: Unknown error code {}", file!(), line!(), err)),
+                }
+            }
+        }
+    };
+}
+
 fn log<T: AsRef<str>>(s: T) {
     logc(CString::new(s.as_ref().to_string()).unwrap());
 }
@@ -121,34 +143,36 @@ fn log_window() {
     });
 }
 
-fn gen_test_texture() -> GLuint {
+fn gen_cpu_texture() -> GLuint {
     let mut texture: GLuint = 0;
 
-    let my_data: Vec<u8> = vec![
-        0xff, 0x00, 0x00,
-        0x00, 0xff, 0x00,
-        0xff, 0x00, 0x00,
-        0x00, 0xff, 0x00,
+    let width: i32 = 128;
+    let height: i32 = 128;
 
-        0x00, 0x00, 0xff,
-        0xff, 0xff, 0xff,
-        0x00, 0x00, 0xff,
-        0xff, 0xff, 0xff,
+    let mut my_data: Vec<u8> = vec![
+        0xff; (width*height*3) as usize
     ];
-    log("Successfully loaded image 1");
+
+    for x in 0..width {
+        for y in 0..height {
+            my_data[((y*height + x)*3) as usize] = 0xff;//x as u8;
+            my_data[((y*height + x)*3+1) as usize] = 0x0;//y as u8;
+            my_data[((y*height + x)*3+2) as usize] = 0xff;
+        }
+    }
 
     unsafe {
         gl::GenTextures(1, &mut texture as *mut u32);
         gl::BindTexture(gl::TEXTURE_2D, texture);
 
         // set the texture wrapping parameters
-        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::REPEAT as i32);
-        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::REPEAT as i32);
+        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE as i32);
+        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE as i32);
         // set texture filtering parameters
-        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as i32);
-        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as i32);
+        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32);
+        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32);
 
-        gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGB as i32, 4, 2, 0, gl::RGB, gl::UNSIGNED_BYTE, my_data.as_ptr().cast());
+        gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGB as i32, width, height, 0, gl::RGB, gl::UNSIGNED_BYTE, my_data.as_ptr().cast());
         gl::GenerateMipmap(gl::TEXTURE_2D);
     }
 
@@ -157,8 +181,8 @@ fn gen_test_texture() -> GLuint {
     texture
 }
 
-fn create_test_mesh() -> MeshDataRaw {
-    let mut my_box = box_mesh(Vec3::new(1.0, 1.0, 1.0));
+fn fbo_test_mesh(size: Vec3) -> MeshDataRaw {
+    let mut my_box = box_mesh(Vec3::new(2.0,2.0,2.0));
     let len = my_box.verts.get("aPos").unwrap().len();
 
     let mut uvs = vec![Vec2::new(0.0, 0.0); len];
@@ -184,10 +208,121 @@ fn create_test_mesh() -> MeshDataRaw {
     my_box
 }
 
+fn state_test_mesh() -> MeshDataRaw {
+    let mut my_box = box_mesh(Vec3::new(1.0, 1.0, 1.0));
+    let len = my_box.verts.get("aPos").unwrap().len();
+
+    let mut uvs = vec![Vec2::new(0.0, 0.0); len];
+    match my_box.verts.get("aPos").unwrap() {
+        VertVec::Vec3(positions) => {
+            for (uv, pos) in uvs.iter_mut().zip(positions.iter()) {
+                uv.x = pos.x + 0.5;
+                uv.y = pos.y + 0.5;
+            }
+        },
+        _ => panic!("Why is aPos not a Vec3?"),
+    }
+    my_box.verts.insert("aUV".to_string(), VertVec::Vec2(uvs));
+
+    let mut color = vec![Vec3::new(1.0, 0.0, 1.0); len];
+    for (idx, vert_color) in color.iter_mut().enumerate() {
+        vert_color.x = idx as f32 / len as f32;
+        vert_color.y = idx as f32 / len as f32;
+        vert_color.z = idx as f32 / len as f32;
+    }
+    my_box.verts.insert("aColor".to_string(), VertVec::Vec3(color));
+
+    my_box
+}
+
 const fn compile_time_checks() {
     assert!(2 + 2 == 4);
 }
 
+fn gen_fbo_texture(code: &str) -> u32 {
+     let view = Mat4::IDENTITY;
+     let projection = Mat4::IDENTITY;
+
+     let texture_shader = ShaderProgram::create(
+         ShaderBuilder::new()
+             .with_input(ShaderSymbol::new(ShaderDataType::Vec3, "aPos"))
+             .with_input(ShaderSymbol::new(ShaderDataType::Vec2, "aUV"))
+             .with_output(ShaderSymbol::new(ShaderDataType::Vec2, "uv"))
+             .with_code(
+                 r#"
+                     void main() {
+                         gl_Position = vec4(aPos, 1.0);
+                         uv = aUV;
+                     }
+                 "#.to_string()
+             ).build_vertex_shader().unwrap(),
+         ShaderBuilder::new()
+             .with_input(ShaderSymbol::new(ShaderDataType::Vec2, "uv"))
+             .with_output(ShaderSymbol::new(ShaderDataType::Vec4, "FragColor"))
+             .with_code(code.to_string())
+             .build_fragment_shader().unwrap()
+         ).expect("Could not build texture shader");
+     let texture_shader = Rc::new(texture_shader);
+
+     let generated_texture = gen_cpu_texture();
+     let mut my_quad = quad_mesh();
+
+     println!("Creating test mesh");
+     let mut test_mesh = StaticMesh::create(
+         texture_shader.clone(),
+         Rc::new(
+             Mesh::create(
+                 &fbo_test_mesh(Vec3::new(1.0, 1.0, 1.0))
+             ).unwrap()),
+     ).expect("Can't create the test mesh");
+     test_mesh.uniform_override.insert("texture1".to_string(), gpu::ShaderValue::Sampler2D(generated_texture));
+
+     let mut fbo: GLuint = 0;
+     let mut texture: GLuint = 0;
+
+     unsafe {
+         // Step 1: Create a framebuffer
+         gl::GenFramebuffers(1, &mut fbo as *mut u32);
+         gl::BindFramebuffer(gl::FRAMEBUFFER, fbo);
+
+         // Step 2: Create a texture to render into
+         gl::GenTextures(1, &mut texture as *mut u32);
+         gl::BindTexture(gl::TEXTURE_2D, texture);
+         gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGB as i32, 128, 128, 0, gl::RGB, gl::UNSIGNED_BYTE, std::ptr::null_mut());
+
+         // Setup texture parameters
+         gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32);
+         gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32);
+
+         // Step 3: Attach the texture to the framebuffer
+         gl::FramebufferTexture2D(gl::FRAMEBUFFER, gl::COLOR_ATTACHMENT0, gl::TEXTURE_2D, texture, 0);
+
+         // Step 4: Check if framebuffer is complete
+         if gl::CheckFramebufferStatus(gl::FRAMEBUFFER) != gl::FRAMEBUFFER_COMPLETE {
+             log("Error: Framebuffer is not complete!");
+         }
+
+         // Step 5: Render to the framebuffer
+         gl::BindFramebuffer(gl::FRAMEBUFFER, fbo);
+         gl::Viewport(0, 0, 128, 128); // Set viewport size to match the texture
+
+         // Clear and render the scene
+         gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
+
+         test_mesh.transform = Mat4::from_translation(Vec3::new(1.2, 0.2, -0.2));
+         let mut ctx = HashMap::new();
+         ctx.insert("view".to_string(), ShaderValue::Mat4(view));
+         ctx.insert("projection".to_string(), ShaderValue::Mat4(projection));
+         test_mesh.draw(&mut ctx);
+
+         // Step 6: Switch back to the default framebuffer
+         gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
+     }
+
+     log(format!("Created FBO texture {}", texture));
+
+     texture
+}
 fn init_state() -> State {
     println!("Starting Rust state initialization");
 
@@ -344,18 +479,28 @@ fn init_state() -> State {
         ).expect("Could not build texture shader");
     let texture_shader = Rc::new(texture_shader);
 
-    let generated_texture = gen_test_texture();
+    let generated_texture = gen_cpu_texture();
 
-    log_opengl_errors();
     println!("Creating test mesh");
     let mut test_mesh = StaticMesh::create(
         texture_shader.clone(),
-        Rc::new(Mesh::create(&create_test_mesh()).unwrap()),
+        Rc::new(Mesh::create(&state_test_mesh()).unwrap()),
     ).expect("Can't create the test mesh");
     test_mesh.uniform_override.insert("texture1".to_string(), gpu::ShaderValue::Sampler2D(generated_texture));
-    log_opengl_errors();
 
     println!("State initialized!");
+
+    let texture: GLuint = gen_fbo_texture(
+         r#"
+             void main() {
+                 float value = smoothstep(0.8, 1.0, uv.x*uv.x + uv.y*uv.y);
+                 FragColor = vec4(value, value, value, 1.0);
+             }
+         "#
+    );
+
+    test_mesh.uniform_override.insert("texture1".to_string(), gpu::ShaderValue::Sampler2D(texture));
+
 
     State {
         frame_num,
@@ -391,28 +536,6 @@ pub extern "C" fn rust_init() -> i32 {
         *value = Some(initial_state);
     });
     0
-}
-
-fn log_opengl_errors() {
-    unsafe {
-        loop {
-            let err = gl::GetError();
-            match err {
-                gl::NO_ERROR => break,
-                gl::INVALID_ENUM => log("OpenGL Error INVALID_ENUM: An unacceptable value is specified for an enumerated argument. The offending command is ignored and has no other side effect than to set the error flag."),
-                gl::INVALID_VALUE => log("OpenGL Error INVALID_VALUE: A numeric argument is out of range. The offending command is ignored and has no other side effect than to set the error flag."),
-                gl::INVALID_OPERATION => log("OpenGL Error INVALID_OPERATION: The specified operation is not allowed in the current state. The offending command is ignored and has no other side effect than to set the error flag."),
-                gl::INVALID_FRAMEBUFFER_OPERATION => log("OpenGL Error INVALID_FRAMEBUFFER_OPERATION: The framebuffer object is not complete. The offending command is ignored and has no other side effect than to set the error flag."),
-                gl::OUT_OF_MEMORY => log("OpenGL Error OUT_OF_MEMORY: There is not enough memory left to execute the command. The state of the GL is undefined, except for the state of the error flags, after this error is recorded."),
-                gl::STACK_UNDERFLOW => log("OpenGL Error STACK_UNDERFLOW: An attempt has been made to perform an operation that would cause an internal stack to underflow."),
-                gl::STACK_OVERFLOW => log("OpenGL Error STACK_OVERFLOW: An attempt has been made to perform an operation that would cause an internal stack to overflow. "),
-                _ => log("OpenGL Error: Unknown OpenGL error"),
-            }
-            if err == gl::NO_ERROR {
-                break;
-            }
-        }
-    }
 }
 
 fn frame(state: &mut State, delta: f32) {
@@ -544,7 +667,6 @@ fn frame(state: &mut State, delta: f32) {
         ctx.insert("projection".to_string(), ShaderValue::Mat4(state.projection));
 
         state.test_mesh.draw(&mut ctx);
-        log_opengl_errors();
 
         let my_box = box_mesh(Vec3::new(1.0, 1.0, 1.0));
         let positions = match my_box.verts.get("aPos").unwrap() {
@@ -562,6 +684,9 @@ fn frame(state: &mut State, delta: f32) {
         }
 
         draw_debug_shapes(state);
+
+        // Log errors each frame. This call can be copied to wherever necessary to trace back to the bad call.
+        log_opengl_errors!();
 
         if state.frame_num == 0 {
             println!("Finished first frame");

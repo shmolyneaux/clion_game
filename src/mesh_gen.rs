@@ -93,3 +93,34 @@ pub fn box_mesh(size: Vec3) -> MeshDataRaw {
         primitive_type,
     }
 }
+
+pub fn quad_mesh() -> MeshDataRaw {
+    let positions = vec![
+        Vec3::new(-1.0, -1.0, 0.0)*0.9,
+        Vec3::new(-1.0,  1.0, 0.0)*0.9,
+        Vec3::new( 1.0, -1.0, 0.0)*0.9,
+        Vec3::new( 1.0,  1.0, 0.0)*0.9,
+    ];
+    let uvs = vec![
+        Vec2::new( 0.0, 0.0),
+        Vec2::new( 0.0, 1.0),
+        Vec2::new( 1.0, 0.0),
+        Vec2::new( 1.0, 1.0),
+    ];
+
+    let indices = vec![
+        0+0, 0+1, 0+2, 0+1, 0+2, 0+3,
+    ];
+
+    let mut verts = HashMap::new();
+    verts.insert("aPos".to_string(), VertVec::Vec3(positions));
+    verts.insert("aUV".to_string(), VertVec::Vec2(uvs));
+
+    let primitive_type = Primitive::Triangles;
+
+    MeshDataRaw {
+        verts,
+        indices,
+        primitive_type,
+    }
+}
