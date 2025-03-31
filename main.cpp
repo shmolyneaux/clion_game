@@ -80,6 +80,14 @@ extern "C" {
         ImGui::TextV(fmt,args);
         va_end(args);
     }
+
+    bool igWantCaptureKeyboard() {
+        return ImGui::GetIO().WantCaptureKeyboard;
+    }
+
+    bool igWantCaptureMouse() {
+        return ImGui::GetIO().WantCaptureMouse;
+    }
 }
 
 // Function to log error messages
@@ -131,7 +139,7 @@ void error_window() {
     ImGui::SetNextWindowSize(ImVec2(600, 300), ImGuiCond_FirstUseEver);       // Set default size: 400x300
     ImGui::SetNextWindowPos(ImVec2(20, 350), ImGuiCond_FirstUseEver);        // Set default position: (100, 100)
 
-    ImGui::Begin("Message log");
+    ImGui::Begin("Message log", nullptr, ImGuiWindowFlags_NoFocusOnAppearing);
 
     for (const auto &error : logs) {
         ImGui::Text("%s", error.c_str());
@@ -693,19 +701,43 @@ int main(int, char**)
         } else {
             log("Successfully loaded image 2");
 
+            GLuint fbo, genTexture;
+
+            glGenFramebuffers(1, &fbo);
+            glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+
             glGenTextures(1, &texture2);
             glBindTexture(GL_TEXTURE_2D, texture2);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 512, 512, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
 
-            // set the texture wrapping parameters
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);	// set texture wrapping to GL_REPEAT (default wrapping method)
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-            // set texture filtering parameters
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width2, height2, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
-            glGenerateMipmap(GL_TEXTURE_2D);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture2, 0);
+            if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+                std::cerr << "Error: Framebuffer is not complete!" << std::endl;
+            }
+            glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+            glViewport(0, 0, 512, 512); // Set viewport size to match the texture
+
+            glClear(GL_COLOR_BUFFER_BIT);
+            glClearColor(1.0, 0.0f, 0.0f, 1.0f);
+
+            //glGenTextures(1, &texture2);
+            //glBindTexture(GL_TEXTURE_2D, texture2);
+
+            //// set the texture wrapping parameters
+            //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);	// set texture wrapping to GL_REPEAT (default wrapping method)
+            //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+            //// set texture filtering parameters
+            //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+            //glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width2, height2, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+            //glGenerateMipmap(GL_TEXTURE_2D);
             stbi_image_free(data);
+
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
         }
 
 
@@ -812,7 +844,7 @@ int main(int, char**)
             }
             if (event.type == SDL_KEYDOWN) {
                 if (event.key.keysym.scancode == SDL_SCANCODE_ESCAPE) {
-                    SDL_SetRelativeMouseMode(SDL_FALSE);
+                    //SDL_SetRelativeMouseMode(SDL_FALSE);
                     mouse_captured = false;
                 }
             }
@@ -862,7 +894,9 @@ int main(int, char**)
 
             int vert_count = sizeof(indices1) / sizeof(indices1[0]);
 
-            ImGui::Begin("Graphics Test");
+            bool open = true;
+            ImGui::Begin("Graphics Test", &open, ImGuiWindowFlags_NoFocusOnAppearing);
+            ImGui::Text("Want keyboard capture: %d", ImGui::GetIO().WantCaptureKeyboard);
             ImGui::Text("Time elapsed: %.3f", elapsed);
             ImGui::Text("Vertex count: %d", vert_count);
             ImGui::Text("rust_frame(%f)=%d", delta, rust_frame(delta));
@@ -913,6 +947,7 @@ int main(int, char**)
 
 
             const Uint8* keyStates = SDL_GetKeyboardState(NULL);
+            //const Uint8* mouseStates = SDL_GetMouseState(NULL);
 
             glm::vec3 direction;
             direction.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
