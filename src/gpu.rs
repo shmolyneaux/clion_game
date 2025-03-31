@@ -1,3 +1,5 @@
+#![allow(unused_variables, unused_mut, unused_imports)]
+
 use crate::*;
 
 pub static END_PRIMITIVE: u32 = 0xFFFF_FFFF;
@@ -386,14 +388,14 @@ impl VertVec {
         }
    }
 
-   pub fn component_count(&self) -> u32 {
-        match self {
-            VertVec::Float(_) => 1,
-            VertVec::Vec2(_) => 2,
-            VertVec::Vec3(_) => 3,
-            VertVec::Mat4(_) => 16,
-        }
-   }
+   // pub fn component_count(&self) -> u32 {
+   //      match self {
+   //          VertVec::Float(_) => 1,
+   //          VertVec::Vec2(_) => 2,
+   //          VertVec::Vec3(_) => 3,
+   //          VertVec::Mat4(_) => 16,
+   //      }
+   // }
 
    pub fn to_shader_type(&self) -> ShaderDataType {
        match self {
@@ -443,7 +445,7 @@ impl Mesh {
     }
 
     pub fn create(data: &MeshDataRaw) -> Result<Self, String> {
-        log_opengl_errors();
+        log_opengl_errors!();
 
         println!("Getting vert count");
         let vert_count = data.verts.values().map(|v| v.len()).max().unwrap_or(0);
@@ -451,14 +453,14 @@ impl Mesh {
             return Err("No verts in mesh data!".to_string());
         }
 
-        log_opengl_errors();
+        log_opengl_errors!();
         println!("Getting vert attribs");
         let mut vert_attribs: Vec<(&str, &VertVec)> = vec![];
         for (name, vert_vec) in data.verts.iter() {
             vert_attribs.push((name, vert_vec));
         }
 
-        log_opengl_errors();
+        log_opengl_errors!();
         println!("Pushing vert data");
         let mut vert_data: Vec<f32> = vec![];
         for idx in 0..vert_count {
@@ -481,7 +483,7 @@ impl Mesh {
             }
         }
 
-        log_opengl_errors();
+        log_opengl_errors!();
         println!("Creating buffers");
 
         let vbo = VertexBufferObject::create_with_data(&vert_data, gl::STATIC_DRAW);
@@ -501,7 +503,7 @@ impl Mesh {
 
         let index_count = data.indices.len() as u32;
 
-        log_opengl_errors();
+        log_opengl_errors!();
         println!("Returning Mesh");
         Ok(Self {
             vbo,
@@ -530,13 +532,13 @@ pub struct StaticMesh {
 
 impl StaticMesh {
     pub fn create(shader: Rc<ShaderProgram>, mesh: Rc<Mesh>) -> Result<Self, String> {
-        log_opengl_errors();
+        log_opengl_errors!();
         println!("Creating vao");
 
         let vao = VertexArray::create();
         unsafe { gl::BindVertexArray(vao.id) };
 
-        log_opengl_errors();
+        log_opengl_errors!();
         println!("Setting up VAO pointers");
         unsafe {
             let stride = mesh.stride as i32;
@@ -548,7 +550,7 @@ impl StaticMesh {
                 };
                 gl::VertexAttribPointer(idx, attribute.data_type.component_count() as GLint, gl::FLOAT, gl::FALSE, stride, offset as *const std::ffi::c_void);
                 gl::EnableVertexAttribArray(idx);
-                log_opengl_errors();
+                log_opengl_errors!();
             }
         }
 
@@ -557,7 +559,7 @@ impl StaticMesh {
         let transform = Mat4::IDENTITY;
         let uniform_override = HashMap::new();
 
-        log_opengl_errors();
+        log_opengl_errors!();
         println!("Returning StaticMesh");
         Ok(Self {
             shader,

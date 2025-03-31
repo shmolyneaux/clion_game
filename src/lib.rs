@@ -1,3 +1,5 @@
+#![allow(unused_variables, unused_mut, unused_imports, unused_attributes, unused_unsafe)]
+
 #[macro_use]
 use gl;
 use std::collections::HashMap;
@@ -8,9 +10,12 @@ use glam::{Vec2, Vec3, Vec4, Mat4};
 use std::ffi::CString;
 use std::ffi::CStr;
 
+use std::slice;
+
 use std::mem::size_of;
 
 use std::cell::RefCell;
+use core::ffi::c_int;
 
 mod gpu;
 mod mesh_gen;
@@ -20,18 +25,58 @@ use crate::gpu::*;
 use crate::debug_draw::{draw_debug_shapes, debug_line, debug_line_loop, debug_box};
 use crate::mesh_gen::{box_mesh, quad_mesh};
 
-type ImGuiWindowFlags = core::ffi::c_int;
+type ImGuiWindowFlags = c_int;
 unsafe extern "C" {
     fn SDL_GL_GetProcAddress(proc: *const i8) -> *mut std::ffi::c_void;
-    fn SDL_GetKeyboardState(numkeys: *const i32) -> *const u8;
+    fn SDL_GetKeyboardState(numkeys: *mut i32) -> *const u8;
     fn SDL_GetRelativeMouseState(x: *mut i32, y: *mut i32) -> u32;
+    fn SDL_SetRelativeMouseMode(enabled: bool);
     fn igBegin(name: *const core::ffi::c_char, p_open: *mut bool, flags: ImGuiWindowFlags) -> bool;
     fn igEnd();
     fn igText(fmt: *const core::ffi::c_char, ...);
+    fn igWantCaptureKeyboard() -> bool;
+    fn igWantCaptureMouse() -> bool;
 }
 
 const fn u32size_of<T>() -> u32 {
     size_of::<T>() as u32
+}
+
+struct KeyState {
+    keys: Vec<u8>,
+    last_keys: Vec<u8>,
+}
+
+impl KeyState {
+    fn new() -> Self {
+        unsafe {
+            let mut numkeys: i32 = 0;
+            SDL_GetKeyboardState(&mut numkeys as *mut i32);
+
+            let keys = Vec::with_capacity(numkeys as usize);
+            let last_keys = Vec::with_capacity(numkeys as usize);
+            Self {
+                keys,
+                last_keys,
+            }
+        }
+    }
+
+    fn pressed(&self, sdl_key: usize) -> bool {
+        self.keys[sdl_key] == 1
+    }
+
+    fn released(&self, sdl_key: usize) -> bool {
+        self.keys[sdl_key] == 0
+    }
+
+    fn just_pressed(&self, sdl_key: usize) -> bool {
+        self.keys[sdl_key] == 1 && self.keys[sdl_key] != self.last_keys[sdl_key]
+    }
+
+    fn just_released(&self, sdl_key: usize) -> bool {
+        self.keys[sdl_key] == 0 && self.keys[sdl_key] != self.last_keys[sdl_key]
+    }
 }
 
 pub struct State {
@@ -61,6 +106,8 @@ pub struct State {
     mouse_captured: bool,
 
     test_mesh: StaticMesh,
+
+    keys: KeyState,
 }
 
 pub static SDL_SCANCODE_A: usize = 4;
@@ -92,6 +139,28 @@ pub static SDL_SCANCODE_Z: usize = 29;
 pub static SDL_SCANCODE_ESCAPE: usize = 41;
 pub static SDL_SCANCODE_LSHIFT: usize = 225;
 
+pub static IMGUI_WINDOW_FLAGS_NONE: c_int                         = 0;
+pub static IMGUI_WINDOW_FLAGS_NO_TITLE_BAR: c_int                 = 1 << 0;   // Disable title-bar
+pub static IMGUI_WINDOW_FLAGS_NO_RESIZE: c_int                    = 1 << 1;   // Disable user resizing with the lower-right grip
+pub static IMGUI_WINDOW_FLAGS_NO_MOVE: c_int                      = 1 << 2;   // Disable user moving the window
+pub static IMGUI_WINDOW_FLAGS_NO_SCROLLBAR: c_int                 = 1 << 3;   // Disable scrollbars (window can still scroll with mouse or programmatically)
+pub static IMGUI_WINDOW_FLAGS_NO_SCROLL_WITH_MOUSE: c_int         = 1 << 4;   // Disable user vertically scrolling with mouse wheel. On child window, mouse wheel will be forwarded to the parent unless NoScrollbar is also set.
+pub static IMGUI_WINDOW_FLAGS_NO_COLLAPSE: c_int                  = 1 << 5;   // Disable user collapsing window by double-clicking on it. Also referred to as Window Menu Button (e.g. within a docking node).
+pub static IMGUI_WINDOW_FLAGS_ALWAYS_AUTO_RESIZE: c_int           = 1 << 6;   // Resize every window to its content every frame
+pub static IMGUI_WINDOW_FLAGS_NO_BACKGROUND: c_int                = 1 << 7;   // Disable drawing background color (WindowBg, etc.) and outside border. Similar as using SetNextWindowBgAlpha(0.0f).
+pub static IMGUI_WINDOW_FLAGS_NO_SAVED_SETTINGS: c_int            = 1 << 8;   // Never load/save settings in .ini file
+pub static IMGUI_WINDOW_FLAGS_NO_MOUSE_INPUTS: c_int              = 1 << 9;   // Disable catching mouse, hovering test with pass through.
+pub static IMGUI_WINDOW_FLAGS_MENU_BAR: c_int                     = 1 << 10;  // Has a menu-bar
+pub static IMGUI_WINDOW_FLAGS_HORIZONTAL_SCROLLBAR: c_int         = 1 << 11;  // Allow horizontal scrollbar to appear (off by default). You may use SetNextWindowContentSize(ImVec2(width,0.0f)); prior to calling Begin() to specify width. Read code in imgui_demo in the "Horizontal Scrolling" section.
+pub static IMGUI_WINDOW_FLAGS_NO_FOCUS_ON_APPEARING: c_int        = 1 << 12;  // Disable taking focus when transitioning from hidden to visible state
+pub static IMGUI_WINDOW_FLAGS_NO_BRING_TO_FRONT_ON_FOCUS: c_int   = 1 << 13;  // Disable bringing window to front when taking focus (e.g. clicking on it or programmatically giving it focus)
+pub static IMGUI_WINDOW_FLAGS_ALWAYS_VERTICAL_SCROLLBAR: c_int    = 1 << 14;  // Always show vertical scrollbar (even if ContentSize.y < Size.y)
+pub static IMGUI_WINDOW_FLAGS_ALWAYS_HORIZONTAL_SCROLLBAR: c_int  = 1 << 15;  // Always show horizontal scrollbar (even if ContentSize.x < Size.x)
+pub static IMGUI_WINDOW_FLAGS_NO_NAV_INPUTS: c_int                = 1 << 16;  // No keyboard/gamepad navigation within the window
+pub static IMGUI_WINDOW_FLAGS_NO_NAV_FOCUS: c_int                 = 1 << 17;  // No focusing toward this window with keyboard/gamepad navigation (e.g. skipped by CTRL+TAB)
+pub static IMGUI_WINDOW_FLAGS_UNSAVED_DOCUMENT: c_int             = 1 << 18;  // Display a dot next to the title. When used in a tab/docking context, tab is selected when clicking the X + closure is not assumed (will wait for user to stop submitting the tab). Otherwise closure is assumed when pressing the X, so if you keep submitting the tab may reappear at end of tab bar.
+pub static IMGUI_WINDOW_FLAGS_NO_DOCKING: c_int                   = 1 << 19;  // Disable docking of this window
+
 thread_local! {
     static STATE_REFCELL: RefCell<Option<State>> = RefCell::default();
 }
@@ -100,6 +169,7 @@ thread_local! {
     static DEBUG_LOG: RefCell<Vec<CString>> = RefCell::default();
 }
 
+#[macro_export]
 macro_rules! log_opengl_errors {
     () => {
         unsafe {
@@ -121,6 +191,16 @@ macro_rules! log_opengl_errors {
     };
 }
 
+trait BitCheck {
+    fn bit(&self, n: u32) -> bool;
+}
+
+impl BitCheck for u32 {
+    fn bit(&self, n: u32) -> bool {
+        (self >> n) & 1 != 0
+    }
+}
+
 fn log<T: AsRef<str>>(s: T) {
     logc(CString::new(s.as_ref().to_string()).unwrap());
 }
@@ -134,7 +214,11 @@ fn log_window() {
     DEBUG_LOG.with_borrow(|logs| {
         unsafe {
             let mut open = true;
-            igBegin(c"Rust Log Window".as_ptr(), &mut open as *mut bool, 0);
+            igBegin(
+                c"Rust Log Window".as_ptr(),
+                &mut open as *mut bool,
+                IMGUI_WINDOW_FLAGS_NO_FOCUS_ON_APPEARING,
+            );
             for line in logs.iter() {
                 igText(line.as_ptr());
             }
@@ -501,6 +585,9 @@ fn init_state() -> State {
 
     test_mesh.uniform_override.insert("texture1".to_string(), gpu::ShaderValue::Sampler2D(texture));
 
+    let mut numkeys: i32 = 0;
+    unsafe { SDL_GetKeyboardState(&mut numkeys as *mut i32) };
+    let keys = KeyState::new();
 
     State {
         frame_num,
@@ -521,6 +608,7 @@ fn init_state() -> State {
         yaw,
         mouse_captured,
         test_mesh,
+        keys,
     }
 }
 
@@ -538,11 +626,28 @@ pub extern "C" fn rust_init() -> i32 {
     0
 }
 
+fn update_keys(state: &mut State) {
+    // Move the keys from the last frame to `last_keys`
+    std::mem::swap(&mut state.keys.keys, &mut state.keys.last_keys);
+
+    // Copy the SDL key state to state.keys
+    unsafe {
+        let mut numkeys: i32 = 0;
+        let key_state = SDL_GetKeyboardState(&mut numkeys as *mut i32);
+        let src_slice = slice::from_raw_parts(key_state, numkeys as usize);
+        state.keys.keys.clear();
+        state.keys.keys.reserve(numkeys as usize);
+        state.keys.keys.extend_from_slice(src_slice);
+    }
+}
+
 fn frame(state: &mut State, delta: f32) {
     if state.frame_num == 0 {
         println!("Starting first frame");
     }
     unsafe {
+        update_keys(state);
+
         let test = vec![0.1, 0.1, 0.12, 1.0];
         gl::ClearColor(
             test[0],
@@ -597,35 +702,38 @@ fn frame(state: &mut State, delta: f32) {
             );
         }
 
-
-        let key_state = SDL_GetKeyboardState(std::ptr::null());
-
         let base_camera_speed = 2.0f32;
-        let camera_speed = if *key_state.add(SDL_SCANCODE_LSHIFT) != 0 {
+        let camera_speed = if state.keys.pressed(SDL_SCANCODE_LSHIFT) {
             base_camera_speed*5.0
         } else {
             base_camera_speed
         };
 
-        if *key_state.add(SDL_SCANCODE_S) != 0 {
+        if state.keys.pressed(SDL_SCANCODE_S) {
             state.camera_pos -= delta*camera_speed*state.camera_front;
         }
-        if *key_state.add(SDL_SCANCODE_W) != 0 {
+        if state.keys.pressed(SDL_SCANCODE_W)  {
             state.camera_pos += delta*camera_speed*state.camera_front;
         }
-        if *key_state.add(SDL_SCANCODE_D) != 0{
+        if state.keys.pressed(SDL_SCANCODE_D) {
             state.camera_pos += state.camera_front.cross(state.camera_up).normalize() * delta*camera_speed;
         }
-        if *key_state.add(SDL_SCANCODE_A) != 0{
+        if state.keys.pressed(SDL_SCANCODE_A) {
             state.camera_pos -= state.camera_front.cross(state.camera_up).normalize() * delta*camera_speed;
         }
 
         let mut xrel: i32 = 0;
         let mut yrel: i32 = 0;
 
-        SDL_GetRelativeMouseState(&mut xrel as *mut i32, &mut yrel as *mut i32);
-        if *key_state.add(SDL_SCANCODE_ESCAPE) != 0 {
+        let button_bitmask = SDL_GetRelativeMouseState(&mut xrel as *mut i32, &mut yrel as *mut i32);
+        if state.keys.pressed(SDL_SCANCODE_ESCAPE) {
+            SDL_SetRelativeMouseMode(false);
             state.mouse_captured = false;
+        }
+
+        if button_bitmask.bit(1) && !igWantCaptureMouse() {
+            SDL_SetRelativeMouseMode(true);
+            state.mouse_captured = true;
         }
 
         let camera_sensitivity = 0.1;
@@ -651,12 +759,18 @@ fn frame(state: &mut State, delta: f32) {
         );
 
         let mut open = true;
-        igBegin(c"From Rust".as_ptr(), &mut open as *mut bool, 0);
+        igBegin(c"From Rust".as_ptr(), &mut open as *mut bool, IMGUI_WINDOW_FLAGS_NO_FOCUS_ON_APPEARING);
         igText(c"Some text from Rust".as_ptr());
+        igText(CString::new(format!("Mouse button 0: {}", button_bitmask.bit(0))).unwrap().as_ptr());
+        igText(CString::new(format!("Mouse button 1: {}", button_bitmask.bit(1))).unwrap().as_ptr());
+        igText(CString::new(format!("Mouse button 2: {}", button_bitmask.bit(2))).unwrap().as_ptr());
+        igText(CString::new(format!("Mouse button 3: {}", button_bitmask.bit(3))).unwrap().as_ptr());
         igText(CString::new(format!("Camera Position: {} {} {}", state.camera_pos[0], state.camera_pos[1], state.camera_pos[2])).unwrap().as_ptr());
         igText(CString::new(format!("Camera Front: {} {} {}", state.camera_front[0], state.camera_front[1], state.camera_front[2])).unwrap().as_ptr());
         igText(CString::new(format!("Camera Pitch: {}", state.pitch)).unwrap().as_ptr());
         igText(CString::new(format!("Camera Yaw: {}", state.yaw)).unwrap().as_ptr());
+        igText(CString::new(format!("Want mouse capture {}", igWantCaptureMouse())).unwrap().as_ptr());
+        igText(CString::new(format!("Want keyboard capture {}", igWantCaptureKeyboard())).unwrap().as_ptr());
         igEnd();
 
         log_window();
