@@ -30,7 +30,8 @@ unsafe extern "C" {
     fn SDL_GL_GetProcAddress(proc: *const i8) -> *mut std::ffi::c_void;
     fn SDL_GetKeyboardState(numkeys: *mut i32) -> *const u8;
     fn SDL_GetRelativeMouseState(x: *mut i32, y: *mut i32) -> u32;
-    fn SDL_SetRelativeMouseMode(enabled: bool);
+    fn SDL_SetRelativeMouseMode(enabled: bool) -> i32;
+    fn SHM_GetDrawableSize(display_w: *mut i32, display_h: *mut i32);
     fn igBegin(name: *const core::ffi::c_char, p_open: *mut bool, flags: ImGuiWindowFlags) -> bool;
     fn igEnd();
     fn igText(fmt: *const core::ffi::c_char, ...);
@@ -348,9 +349,6 @@ fn gen_fbo_texture(code: &str) -> u32 {
          ).expect("Could not build texture shader");
      let texture_shader = Rc::new(texture_shader);
 
-     let generated_texture = gen_cpu_texture();
-     let mut my_quad = quad_mesh();
-
      println!("Creating test mesh");
      let mut test_mesh = StaticMesh::create(
          texture_shader.clone(),
@@ -359,7 +357,6 @@ fn gen_fbo_texture(code: &str) -> u32 {
                  &fbo_test_mesh(Vec3::new(1.0, 1.0, 1.0))
              ).unwrap()),
      ).expect("Can't create the test mesh");
-     test_mesh.uniform_override.insert("texture1".to_string(), gpu::ShaderValue::Sampler2D(generated_texture));
 
      let mut fbo: GLuint = 0;
      let mut texture: GLuint = 0;
@@ -393,11 +390,7 @@ fn gen_fbo_texture(code: &str) -> u32 {
          // Clear and render the scene
          gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
 
-         test_mesh.transform = Mat4::from_translation(Vec3::new(1.2, 0.2, -0.2));
-         let mut ctx = HashMap::new();
-         ctx.insert("view".to_string(), ShaderValue::Mat4(view));
-         ctx.insert("projection".to_string(), ShaderValue::Mat4(projection));
-         test_mesh.draw(&mut ctx);
+         test_mesh.draw(&mut HashMap::new());
 
          // Step 6: Switch back to the default framebuffer
          gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
@@ -408,6 +401,7 @@ fn gen_fbo_texture(code: &str) -> u32 {
      texture
 }
 fn init_state() -> State {
+    log_opengl_errors!();
     println!("Starting Rust state initialization");
 
     println!("Generating arrays/buffers");
@@ -421,6 +415,7 @@ fn init_state() -> State {
     let debug_verts = Vec::new();
     let debug_vert_indices = Vec::new();
 
+     log_opengl_errors!();
     let debug_vertex_shader = ShaderBuilder::new()
         .with_input(ShaderSymbol::new(ShaderDataType::Vec3, "aPos"))
         .with_uniform(ShaderSymbol::new(ShaderDataType::Mat4, "projection"))
@@ -434,6 +429,7 @@ fn init_state() -> State {
         )
         .build_vertex_shader()
         .expect("Could not compile debug vertex shader");
+     log_opengl_errors!();
 
     let debug_fragment_shader = ShaderBuilder::new()
         .with_output(ShaderSymbol::new(ShaderDataType::Vec4, "FragColor"))
@@ -454,6 +450,7 @@ fn init_state() -> State {
     let debug_shader_program = Rc::new(debug_shader_program);
     println!("Shader program now in RC");
 
+     log_opengl_errors!();
 
     let debug_view_loc = debug_shader_program.uniform_location(c"view");
     let debug_projection_loc = debug_shader_program.uniform_location(c"projection");
@@ -497,6 +494,7 @@ fn init_state() -> State {
         )
         .build_fragment_shader()
         .expect("Could not compiled default fragment shader");
+     log_opengl_errors!();
 
     println!("Starting default shader compilation");
     let default_shader = ShaderProgram::create(default_vertex_shader, default_fragment_shader).expect("Could not link default shader");
@@ -563,16 +561,12 @@ fn init_state() -> State {
         ).expect("Could not build texture shader");
     let texture_shader = Rc::new(texture_shader);
 
-    let generated_texture = gen_cpu_texture();
-
     println!("Creating test mesh");
     let mut test_mesh = StaticMesh::create(
         texture_shader.clone(),
         Rc::new(Mesh::create(&state_test_mesh()).unwrap()),
     ).expect("Can't create the test mesh");
-    test_mesh.uniform_override.insert("texture1".to_string(), gpu::ShaderValue::Sampler2D(generated_texture));
 
-    println!("State initialized!");
 
     let texture: GLuint = gen_fbo_texture(
          r#"
@@ -582,6 +576,7 @@ fn init_state() -> State {
              }
          "#
     );
+    log_opengl_errors!();
 
     test_mesh.uniform_override.insert("texture1".to_string(), gpu::ShaderValue::Sampler2D(texture));
 
@@ -589,6 +584,7 @@ fn init_state() -> State {
     unsafe { SDL_GetKeyboardState(&mut numkeys as *mut i32) };
     let keys = KeyState::new();
 
+    println!("State initialized!");
     State {
         frame_num,
         debug_vao,
@@ -731,7 +727,7 @@ fn frame(state: &mut State, delta: f32) {
             state.mouse_captured = false;
         }
 
-        if button_bitmask.bit(1) && !igWantCaptureMouse() {
+        if button_bitmask.bit(0) && !igWantCaptureMouse() {
             SDL_SetRelativeMouseMode(true);
             state.mouse_captured = true;
         }
@@ -754,23 +750,16 @@ fn frame(state: &mut State, delta: f32) {
 
         state.view = Mat4::look_at_rh(state.camera_pos, state.camera_pos + state.camera_front, state.camera_up);
 
+        let mut display_w: i32 = 0;
+        let mut display_h: i32 = 0;
+        SHM_GetDrawableSize(&mut display_w as *mut i32, &mut display_h as *mut i32);
         state.projection = Mat4::perspective_rh_gl(
-            f32::to_radians(45.0), 1280.0f32 / 720.0f32, 0.1f32, 100.0f32
+            f32::to_radians(45.0), display_w as f32 / display_h as f32, 0.1f32, 100.0f32
         );
 
         let mut open = true;
         igBegin(c"From Rust".as_ptr(), &mut open as *mut bool, IMGUI_WINDOW_FLAGS_NO_FOCUS_ON_APPEARING);
-        igText(c"Some text from Rust".as_ptr());
-        igText(CString::new(format!("Mouse button 0: {}", button_bitmask.bit(0))).unwrap().as_ptr());
-        igText(CString::new(format!("Mouse button 1: {}", button_bitmask.bit(1))).unwrap().as_ptr());
-        igText(CString::new(format!("Mouse button 2: {}", button_bitmask.bit(2))).unwrap().as_ptr());
-        igText(CString::new(format!("Mouse button 3: {}", button_bitmask.bit(3))).unwrap().as_ptr());
-        igText(CString::new(format!("Camera Position: {} {} {}", state.camera_pos[0], state.camera_pos[1], state.camera_pos[2])).unwrap().as_ptr());
-        igText(CString::new(format!("Camera Front: {} {} {}", state.camera_front[0], state.camera_front[1], state.camera_front[2])).unwrap().as_ptr());
-        igText(CString::new(format!("Camera Pitch: {}", state.pitch)).unwrap().as_ptr());
-        igText(CString::new(format!("Camera Yaw: {}", state.yaw)).unwrap().as_ptr());
-        igText(CString::new(format!("Want mouse capture {}", igWantCaptureMouse())).unwrap().as_ptr());
-        igText(CString::new(format!("Want keyboard capture {}", igWantCaptureKeyboard())).unwrap().as_ptr());
+        igText(CString::new(format!("Display size: {}x{}", display_w, display_h)).unwrap().as_ptr());
         igEnd();
 
         log_window();

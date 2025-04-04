@@ -578,6 +578,7 @@ impl StaticMesh {
             gl::BindVertexArray(self.vao.id);
             gl::UseProgram(self.shader.id);
 
+            // TODO: This should be a chained hash map sort of thing, rather than requiring a mutable hashmap
             ctx.insert("model".to_string(), ShaderValue::Mat4(self.transform));
 
             let mut texture_unit = 0;

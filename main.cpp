@@ -59,6 +59,8 @@ char* exe_path() {
 // Global vector to store error logs
 std::vector<std::string> logs;
 
+SDL_Window* window;
+
 extern "C" int rust_init();
 extern "C" int rust_frame(float delta);
 
@@ -87,6 +89,10 @@ extern "C" {
 
     bool igWantCaptureMouse() {
         return ImGui::GetIO().WantCaptureMouse;
+    }
+
+    void SHM_GetDrawableSize(int *display_w, int *display_h) {
+        SDL_GL_GetDrawableSize(window, display_w, display_h);
     }
 }
 
@@ -190,10 +196,6 @@ void init_debug_drawing() {
 }
 
 void draw_debug_shapes() {
-    while (glGetError() != GL_NO_ERROR) {
-        log_error("OpenGL Error before debug draw");
-    }
-
     glBindVertexArray(BoxVAO);
     glBindBuffer(GL_ARRAY_BUFFER, BoxVBO);
     glBufferData(
@@ -214,10 +216,6 @@ void draw_debug_shapes() {
     glUniformMatrix4fv(debugProjectionLoc, 1, GL_FALSE, glm::value_ptr(projection));
 
     glDrawElements(GL_LINE_STRIP, debug_vert_indices.size(), GL_UNSIGNED_INT, 0);
-
-    while (glGetError() != GL_NO_ERROR) {
-        log_error("OpenGL Error after debug draw");
-    }
 
     debug_verts.clear();
     debug_vert_indices.clear();
@@ -418,7 +416,7 @@ int main(int, char**)
             | SDL_WINDOW_RESIZABLE
             | SDL_WINDOW_ALLOW_HIGHDPI
             );
-    SDL_Window* window = SDL_CreateWindow("CLion Game", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 720, window_flags);
+    window = SDL_CreateWindow("CLion Game", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 720, window_flags);
     if (window == nullptr)
     {
         log_error("SDL_CreateWindow Error:");
@@ -443,8 +441,12 @@ int main(int, char**)
         return -1;
     }
 
+
     glEnable(GL_DEPTH_TEST);
+
+    #ifndef __EMSCRIPTEN__
     glEnable(GL_PRIMITIVE_RESTART_FIXED_INDEX);
+    #endif
 
     // CHECK: Is GLEW not needed for the web?
     glewExperimental = GL_TRUE;
@@ -455,302 +457,6 @@ int main(int, char**)
         SDL_Quit();
         return -1;
     }
-
-    // Vertex Shader Source Code
-    const char* debugVertexShaderSource = R"(#version 300 es
-    precision highp float;
-    layout (location = 0) in vec3 aPos;
-
-    uniform mat4 view;
-    uniform mat4 projection;
-
-    void main() {
-        gl_Position = projection * view * vec4(aPos, 1.0);
-    }
-    )";
-
-    // Fragment Shader Source Code
-    const char* debugFragmentShaderSource = R"(#version 300 es
-    precision highp float;
-    out vec4 FragColor;
-
-    void main() {
-        FragColor = vec4(1.0, 0.0, 0.0, 1.0);
-    }
-    )";
-
-    // Vertex Shader Source Code
-    const char* vertexShaderSource = R"(#version 300 es
-    precision highp float;
-    layout (location = 0) in vec3 aPos;
-    layout (location = 1) in vec3 aColor;
-    layout (location = 2) in vec2 aTexCoord;
-
-    out vec3 vertexColor;
-    out vec2 TexCoord;
-
-    uniform mat4 model;
-    uniform mat4 view;
-    uniform mat4 projection;
-
-    void main() {
-        gl_Position = projection * view * model * vec4(aPos, 1.0);
-        vertexColor = aColor;
-        TexCoord = aTexCoord;
-    }
-    )";
-
-    // Fragment Shader Source Code
-    const char* fragmentShaderSource = R"(#version 300 es
-    precision highp float;
-    out vec4 FragColor;
-
-    in vec3 vertexColor;
-    in vec2 TexCoord;
-
-    uniform sampler2D texture1;
-    uniform sampler2D texture2;
-
-    void main() {
-        vec2 flippedTexCoord = vec2(TexCoord.x, 1.0 - TexCoord.y);
-        FragColor = mix(texture(texture1, TexCoord), texture(texture2, flippedTexCoord), 0.2);
-    }
-    )";
-
-    float vertices1[] = {
-        // positions          // colors           // texture coords
-        // Bottom quad
-        0.5f,  0.5f, 0.0f,   1.0f, 0.0f, 0.0f,   1.0f, 1.0f,   // back right
-        0.5f, -0.5f, 0.0f,   0.0f, 1.0f, 0.0f,   1.0f, 0.0f,   // front right
-       -0.5f, -0.5f, 0.0f,   0.0f, 0.0f, 1.0f,   0.0f, 0.0f,   // front left
-       -0.5f,  0.5f, 0.0f,   1.0f, 1.0f, 0.0f,   0.0f, 1.0f,   // back left
-
-        // Top quad
-        0.5f,  0.5f, 1.0f,   1.0f, 0.0f, 0.0f,   1.0f, 1.0f,   // back right
-        0.5f, -0.5f, 1.0f,   0.0f, 1.0f, 0.0f,   1.0f, 0.0f,   // front right
-       -0.5f, -0.5f, 1.0f,   0.0f, 0.0f, 1.0f,   0.0f, 0.0f,   // front left
-       -0.5f,  0.5f, 1.0f,   1.0f, 1.0f, 0.0f,   0.0f, 1.0f,   // back left
-    };
-
-    unsigned int indices1[] = {
-        0, 3, 2,
-        0, 2, 1,
-
-        4, 7, 6,
-        4, 6, 5,
-
-        0, 1, 5,
-        5, 4, 0,
-
-        2, 3, 7,
-        7, 6, 2,
-
-        3, 0, 4,
-        4, 7, 3,
-
-        2, 1, 5,
-        6, 5, 2,
-    };
-
-
-    void* glGenBuffersPtr = SDL_GL_GetProcAddress("glGenBuffers");
-    if (glGenBuffersPtr) {
-        printf("Address of glGenBuffers C++: %p\n", glGenBuffersPtr);
-    } else {
-        printf("Failed to retrieve gl address!\n");
-    }
-
-    // Create Vertex Array Object and Buffers
-    GLuint VAO1, VBO1, EBO1;
-    glGenVertexArrays(1, &VAO1);
-    ((void (*)(GLsizei, GLuint*)) glGenBuffersPtr)(1, &VBO1);
-    ((void (*)(GLsizei, GLuint*)) glGenBuffersPtr)(1, &EBO1);
-
-    printf("VAO: %i\n", VAO1);
-    printf("VBO: %i\n", VBO1);
-    printf("EBO: %i\n", EBO1);
-
-    // VAO1
-
-    // Vertex indices
-    glBindVertexArray(VAO1);
-    glBindBuffer(GL_ARRAY_BUFFER, VBO1);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices1), vertices1, GL_STATIC_DRAW);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO1);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices1), indices1, GL_STATIC_DRAW);
-
-    // Vertex Position Attribute
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
-    glEnableVertexAttribArray(0);
-    // Vertex Color Attribute
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
-    glEnableVertexAttribArray(1);
-    // Vertex UV Attribute
-    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
-    glEnableVertexAttribArray(2);
-
-    // Unbind Buffers
-    glBindVertexArray(0);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
-
-    // Compile Vertex Shader
-    GLuint vertexShader = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(vertexShader, 1, &vertexShaderSource, nullptr);
-    glCompileShader(vertexShader);
-    log_error("Compiling vertex shader");
-    checkShaderCompilation(vertexShader);
-
-    // Compile Fragment Shader
-    GLuint fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(fragmentShader, 1, &fragmentShaderSource, nullptr);
-    glCompileShader(fragmentShader);
-    log_error("Compiling fragment shader");
-    checkShaderCompilation(fragmentShader);
-
-    // Link Shaders into a Program
-    GLuint shaderProgram = glCreateProgram();
-    glAttachShader(shaderProgram, vertexShader);
-    glAttachShader(shaderProgram, fragmentShader);
-    glLinkProgram(shaderProgram);
-    log_error("Linking shader program");
-    checkProgramLinking(shaderProgram);
-
-    // Delete Shaders as they're no longer needed
-    glDeleteShader(vertexShader);
-    glDeleteShader(fragmentShader);
-
-    GLuint debugVertexShader = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(debugVertexShader, 1, &debugVertexShaderSource, nullptr);
-    glCompileShader(debugVertexShader);
-    log_error("Compiling debug vertex shader");
-    checkShaderCompilation(debugVertexShader);
-
-    GLuint debugFragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(debugFragmentShader, 1, &debugFragmentShaderSource, nullptr);
-    glCompileShader(debugFragmentShader);
-    log_error("Compiling debug fragment shader");
-    checkShaderCompilation(debugFragmentShader);
-
-    debugShaderProgram = glCreateProgram();
-    glAttachShader(debugShaderProgram, debugVertexShader);
-    glAttachShader(debugShaderProgram, debugFragmentShader);
-    glLinkProgram(debugShaderProgram);
-    log_error("Linking debug shader program");
-    checkProgramLinking(debugShaderProgram);
-
-    glDeleteShader(debugVertexShader);
-    glDeleteShader(debugFragmentShader);
-
-    log_error("EXE Path:");
-    log_error(exe_path());
-    log_error("Loading image");
-
-    int width, height, nrChannels;
-    int width2, height2, nrChannels2;
-    unsigned char *data = nullptr;
-    unsigned int texture, texture2;
-
-    unsigned char my_data[] = {
-        0xff, 0x00, 0x00,
-        0x00, 0xff, 0x00,
-        0xff, 0x00, 0x00,
-        0x00, 0xff, 0x00,
-
-        0x00, 0x00, 0xff,
-        0xff, 0xff, 0xff,
-        0x00, 0x00, 0xff,
-        0xff, 0xff, 0xff,
-
-        0xff,
-        0x00, 0x00, 0xff,
-        0x00, 0x00, 0xff,
-        0x00, 0x00, 0xff,
-        0x00, 0x00, 0xff,
-        0x00, 0x00, 0xff,
-        0x00, 0x00, 0xff,
-        0x00, 0x00, 0xff,
-        0x00, 0x00, 0xff,
-        0x00, 0x00, 0xff,
-        0x00, 0x00, 0xff,
-    };
-    log("Successfully loaded image 1");
-
-    glGenTextures(1, &texture);
-    glBindTexture(GL_TEXTURE_2D, texture);
-
-    // set the texture wrapping parameters
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);	// set texture wrapping to GL_REPEAT (default wrapping method)
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    // set texture filtering parameters
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-
-
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 4, 2, 0, GL_RGB, GL_UNSIGNED_BYTE, my_data);
-    glGenerateMipmap(GL_TEXTURE_2D);
-
-    #ifndef __EMSCRIPTEN__
-        std::filesystem::path cwd = std::filesystem::current_path();
-        std::cout << "Current working directory: " << cwd << std::endl;
-        data = stbi_load("../awesomeface.png", &width2, &height2, &nrChannels2, 0);
-        if (!data) {
-            log_error("Failed to load image 2");
-            startup_error = true;
-        } else {
-            log("Successfully loaded image 2");
-
-            GLuint fbo, genTexture;
-
-            glGenFramebuffers(1, &fbo);
-            glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-
-            glGenTextures(1, &texture2);
-            glBindTexture(GL_TEXTURE_2D, texture2);
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 512, 512, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
-
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture2, 0);
-            if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-                std::cerr << "Error: Framebuffer is not complete!" << std::endl;
-            }
-            glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-            glViewport(0, 0, 512, 512); // Set viewport size to match the texture
-
-            glClear(GL_COLOR_BUFFER_BIT);
-            glClearColor(1.0, 0.0f, 0.0f, 1.0f);
-
-            //glGenTextures(1, &texture2);
-            //glBindTexture(GL_TEXTURE_2D, texture2);
-
-            //// set the texture wrapping parameters
-            //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);	// set texture wrapping to GL_REPEAT (default wrapping method)
-            //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-            //// set texture filtering parameters
-            //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-            //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-            //glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width2, height2, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
-            //glGenerateMipmap(GL_TEXTURE_2D);
-            stbi_image_free(data);
-
-            glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        }
-
-
-    #else
-        log_error("No image loading in emscripten");
-    #endif
-
-
-
-
-    // TODO: properly free
-
-
 
     SDL_GL_MakeCurrent(window, gl_context);
     SDL_GL_SetSwapInterval(1); // Enable vsync
@@ -781,17 +487,6 @@ int main(int, char**)
     bool show_another_window = false;
     ImVec4 clear_color = ImVec4(0.102f, 0.102f, 0.114f, 1.00f);
     glClearColor(clear_color.x * clear_color.w, clear_color.y * clear_color.w, clear_color.z * clear_color.w, clear_color.w);
-
-    glm::vec3 cameraPos   = glm::vec3(0.0f, 2.8f,  7.7f);
-    glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, -1.0f);
-    glm::vec3 cameraUp    = glm::vec3(0.0f, 1.0f,  0.0f);
-
-    float pitch = -20.0f;
-    float yaw = -90.0f;
-
-    int start_ticks = SDL_GetTicks();
-    int last_ticks = SDL_GetTicks();
-
 
     Uint64 frequency = SDL_GetPerformanceFrequency();
     Uint64 ticks = 0;
@@ -842,23 +537,6 @@ int main(int, char**)
             if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE && event.window.windowID == SDL_GetWindowID(window)) {
                 done = true;
             }
-            if (event.type == SDL_KEYDOWN) {
-                if (event.key.keysym.scancode == SDL_SCANCODE_ESCAPE) {
-                    //SDL_SetRelativeMouseMode(SDL_FALSE);
-                    mouse_captured = false;
-                }
-            }
-            if (event.type == SDL_MOUSEMOTION && mouse_captured) {
-                float CAMERA_SENSITIVITY = 0.1f;
-                float xrel = event.motion.xrel;
-                float yrel = event.motion.yrel;
-
-                yaw += xrel*CAMERA_SENSITIVITY;
-                pitch -= yrel*CAMERA_SENSITIVITY;
-
-                if (pitch > 89.0f) pitch = 89.0f;
-                if (pitch < -89.0f) pitch = -89.0f;
-            }
         }
 
         // Skip rendering when minimized
@@ -886,167 +564,11 @@ int main(int, char**)
                 ImGui::ShowDemoWindow(&show_demo_window);
             }
 
-            // simple_window(&clear_color, &show_demo_window, &show_another_window) ;
-
             if (show_another_window) {
                 example_window(&show_another_window);
             }
 
-            int vert_count = sizeof(indices1) / sizeof(indices1[0]);
-
-            bool open = true;
-            ImGui::Begin("Graphics Test", &open, ImGuiWindowFlags_NoFocusOnAppearing);
-            ImGui::Text("Want keyboard capture: %d", ImGui::GetIO().WantCaptureKeyboard);
-            ImGui::Text("Time elapsed: %.3f", elapsed);
-            ImGui::Text("Vertex count: %d", vert_count);
-            ImGui::Text("rust_frame(%f)=%d", delta, rust_frame(delta));
-            ImGui::Text("Camera Position: %f %f %f", cameraPos[0], cameraPos[1], cameraPos[2]);
-            ImGui::Text("Camera Front: %f %f %f", cameraFront[0], cameraFront[1], cameraFront[2]);
-            ImGui::Text("Camera Pitch: %f", pitch);
-            ImGui::Text("Camera Yaw: %f", yaw);
-            ImGui::Text(
-                "%f %f %f %f\n"
-                "%f %f %f %f\n"
-                "%f %f %f %f\n"
-                "%f %f %f %f"
-                , view[0][0]
-                , view[0][1]
-                , view[0][2]
-                , view[0][3]
-                , view[1][0]
-                , view[1][1]
-                , view[1][2]
-                , view[1][3]
-                , view[2][0]
-                , view[2][1]
-                , view[2][2]
-                , view[2][3]
-                , view[3][0]
-                , view[3][1]
-                , view[3][2]
-                , view[3][3]);
-            ImGui::End();
-
-            unsigned int modelLoc = glGetUniformLocation(shaderProgram, "model");
-            unsigned int viewLoc = glGetUniformLocation(shaderProgram, "view");
-            unsigned int projectionLoc = glGetUniformLocation(shaderProgram, "projection");
-
-            debugViewLoc = glGetUniformLocation(debugShaderProgram, "view");
-            debugProjectionLoc = glGetUniformLocation(debugShaderProgram, "projection");
-
-            glUseProgram(shaderProgram);
-
-            glActiveTexture(GL_TEXTURE0);
-            glBindTexture(GL_TEXTURE_2D, texture);
-            glActiveTexture(GL_TEXTURE1);
-            glBindTexture(GL_TEXTURE_2D, texture2);
-            glBindVertexArray(VAO1);
-
-            glUniform1i(glGetUniformLocation(shaderProgram, "texture1"), 0);
-            glUniform1i(glGetUniformLocation(shaderProgram, "texture2"), 1);
-
-
-            const Uint8* keyStates = SDL_GetKeyboardState(NULL);
-            //const Uint8* mouseStates = SDL_GetMouseState(NULL);
-
-            glm::vec3 direction;
-            direction.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
-            direction.y = sin(glm::radians(pitch));
-            direction.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
-            cameraFront = glm::normalize(direction);
-
-            float cameraSpeed = 2.0;
-            if (keyStates[SDL_SCANCODE_LSHIFT]) {
-                cameraSpeed *= 5.0f;
-            }
-
-            if (keyStates[SDL_SCANCODE_W]) {
-                cameraPos += delta*cameraSpeed*cameraFront;
-            }
-            if (keyStates[SDL_SCANCODE_S]) {
-                cameraPos -= delta*cameraSpeed*cameraFront;
-            }
-            if (keyStates[SDL_SCANCODE_D]) {
-                cameraPos += glm::normalize(glm::cross(cameraFront, cameraUp)) * delta*cameraSpeed;
-            }
-            if (keyStates[SDL_SCANCODE_A]) {
-                cameraPos -= glm::normalize(glm::cross(cameraFront, cameraUp)) * delta*cameraSpeed;
-            }
-
-            if (keyStates[SDL_SCANCODE_SPACE]) {
-                cameraPos.y += delta*cameraSpeed;
-            }
-            if (keyStates[SDL_SCANCODE_LCTRL]) {
-                cameraPos.y -= delta*cameraSpeed;
-            }
-
-            view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
-
-            projection = glm::mat4(1.0f);
-            projection = glm::perspective(glm::radians(45.0f), (float)display_w / (float)display_h, 0.1f, 100.0f);
-
-            glUniformMatrix4fv(viewLoc, 1, GL_FALSE, glm::value_ptr(view));
-            glUniformMatrix4fv(projectionLoc, 1, GL_FALSE, glm::value_ptr(projection));
-
-            glm::vec3 cubePositions[] = {
-                glm::vec3( 0.0f,  0.0f,  0.0f),
-                glm::vec3( 2.0f,  5.0f, -15.0f),
-                glm::vec3(-1.5f, -2.2f, -2.5f),
-                glm::vec3(-3.8f, -2.0f, -12.3f),
-                glm::vec3( 2.4f, -0.4f, -3.5f),
-                glm::vec3(-1.7f,  3.0f, -7.5f),
-                glm::vec3( 1.3f, -2.0f, -2.5f),
-                glm::vec3( 1.5f,  2.0f, -2.5f),
-                glm::vec3( 1.5f,  0.2f, -1.5f),
-                glm::vec3(-1.3f,  1.0f, -1.5f)
-            };
-
-            glBindBuffer(GL_ARRAY_BUFFER, VBO1);
-            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO1);
-            for (unsigned int i = 0; i < sizeof(cubePositions) / sizeof(cubePositions[0]); i++) {
-                glm::mat4 model = glm::mat4(1.0f);
-                model = glm::translate(model, cubePositions[i]);
-
-                float angle = i * elapsed * glm::radians(20.0f);
-                model = glm::rotate(model, angle, glm::vec3(0.5f, 1.0f, 0.0f));
-                glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-
-                glDrawElements(GL_TRIANGLES, vert_count, GL_UNSIGNED_INT, 0);
-            }
-
-            debug_box(
-                glm::vec3(-2.0f, 0.0f, 0.0f),
-                glm::vec3(1.0f, 1.0f, 1.0f)
-            );
-            debug_box(
-                glm::vec3(0.0f, 0.0f, 0.0f),
-                glm::vec3(1.0f, 1.0f, 1.0f)
-            );
-            debug_box(
-                glm::vec3(2.0f, 0.0f, 0.0f),
-                glm::vec3(1.0f, 1.0f, 1.0f)
-            );
-
-            glm::vec3 points[] = {
-                glm::vec3(-1.1f, .0f, .0f),
-                glm::vec3(-1.2f, 1.0f, .0f),
-                glm::vec3(-1.4f, 2.0f, .0f),
-                glm::vec3(-1.6f, 4.0f, .0f),
-            };
-
-            auto slice = Slice(points);
-            debug_lines(slice);
-
-            glm::vec3 circle[8] = {glm::vec3(0.0f, 0.0f, 0.0f),};
-            auto circle_slice = Slice(circle);
-
-            for (auto [i, p]  : circle_slice.enumerate()) {
-                p.x = cos(2*3.141592*i/circle_slice.size());
-                p.y = sin(2*3.141592*i/circle_slice.size());
-            }
-            debug_lines(circle_slice, true);
-
-            draw_debug_shapes();
+            rust_frame(delta);
         } else {
             ImGui::Begin("STARTUP ERROR");
             ImGui::Text("Startup Error");
@@ -1072,7 +594,6 @@ int main(int, char**)
         }
 
         SDL_GL_SwapWindow(window);
-        last_ticks = ticks;
     }
 #ifdef __EMSCRIPTEN__
     EMSCRIPTEN_MAINLOOP_END;
