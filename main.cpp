@@ -83,6 +83,10 @@ extern "C" {
         va_end(args);
     }
 
+    void igSliderFloat(const char* label, float* v, float v_min, float v_max, const char* format) {
+        ImGui::SliderFloat(label, v, v_min, v_max, format);
+    }
+
     bool igWantCaptureKeyboard() {
         return ImGui::GetIO().WantCaptureKeyboard;
     }
@@ -603,6 +607,8 @@ int main(int, char**)
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplSDL2_Shutdown();
     ImGui::DestroyContext();
+
+    SDL_SCANCODE_LSHIFT;
 
     SDL_GL_DeleteContext(gl_context);
     SDL_DestroyWindow(window);

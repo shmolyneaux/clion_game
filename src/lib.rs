@@ -17,12 +17,14 @@ use std::mem::size_of;
 use std::cell::RefCell;
 use core::ffi::c_int;
 
+use glam::Vec3Swizzles;
+
 mod gpu;
 mod mesh_gen;
 mod debug_draw;
 
 use crate::gpu::*;
-use crate::debug_draw::{draw_debug_shapes, debug_line, debug_line_loop, debug_box};
+use crate::debug_draw::*;
 use crate::mesh_gen::{box_mesh, quad_mesh};
 
 type ImGuiWindowFlags = c_int;
@@ -35,6 +37,7 @@ unsafe extern "C" {
     fn igBegin(name: *const core::ffi::c_char, p_open: *mut bool, flags: ImGuiWindowFlags) -> bool;
     fn igEnd();
     fn igText(fmt: *const core::ffi::c_char, ...);
+    fn igSliderFloat(label: *const core::ffi::c_char, v: *mut f32, v_min: f32, v_max: f32, format: *const core::ffi::c_char);
     fn igWantCaptureKeyboard() -> bool;
     fn igWantCaptureMouse() -> bool;
 }
@@ -80,12 +83,18 @@ impl KeyState {
     }
 }
 
+#[derive(Default)]
+pub struct DebugState {
+    sphere_radius: f32,
+}
+
 pub struct State {
     frame_num: u64,
     view: Mat4,
     projection: Mat4,
 
     debug_shader_program: Rc<ShaderProgram>,
+    default_shader_program: Rc<ShaderProgram>,
 
     debug_view_loc: gl::types::GLint,
     debug_projection_loc: gl::types::GLint,
@@ -94,7 +103,7 @@ pub struct State {
     debug_vbo: VertexBufferObject,
     debug_ebo: ElementBufferObject,
 
-    debug_verts: Vec<Vec3>,
+    debug_verts: Vec<(Vec3, Vec3)>,
     debug_vert_indices: Vec<u32>,
 
     pitch: f32,
@@ -107,8 +116,11 @@ pub struct State {
     mouse_captured: bool,
 
     test_mesh: StaticMesh,
+    meshes: HashMap<String, StaticMesh>,
 
     keys: KeyState,
+
+    debug_state: DebugState,
 }
 
 pub static SDL_SCANCODE_A: usize = 4;
@@ -138,6 +150,7 @@ pub static SDL_SCANCODE_X: usize = 27;
 pub static SDL_SCANCODE_Y: usize = 28;
 pub static SDL_SCANCODE_Z: usize = 29;
 pub static SDL_SCANCODE_ESCAPE: usize = 41;
+pub static SDL_SCANCODE_LCTRL: usize = 224;
 pub static SDL_SCANCODE_LSHIFT: usize = 225;
 
 pub static IMGUI_WINDOW_FLAGS_NONE: c_int                         = 0;
@@ -211,7 +224,7 @@ fn logc(s: CString) {
     DEBUG_LOG.with_borrow_mut(|logs| logs.push(s));
 }
 
-fn log_window() {
+fn draw_log_window() {
     DEBUG_LOG.with_borrow(|logs| {
         unsafe {
             let mut open = true;
@@ -400,6 +413,49 @@ fn gen_fbo_texture(code: &str) -> u32 {
 
      texture
 }
+
+fn create_default_shader() -> Rc<ShaderProgram> {
+    let default_vertex_shader = ShaderBuilder::new()
+        .with_input(ShaderSymbol::new(ShaderDataType::Vec3, "aPos"))
+        .with_input(ShaderSymbol::new(ShaderDataType::Vec2, "aUV"))
+        .with_uniform(ShaderSymbol::new(ShaderDataType::Mat4, "projection"))
+        .with_uniform(ShaderSymbol::new(ShaderDataType::Mat4, "view"))
+        .with_output(ShaderSymbol::new(ShaderDataType::Vec2, "uv"))
+        .with_code(
+            r#"
+                void main() {
+                    gl_Position = projection * view * vec4(aPos, 1.0);
+                    uv = aUV;
+                }
+            "#.to_string()
+        )
+        .build_vertex_shader()
+        .expect("Could not compile default vertex shader");
+     log_opengl_errors!();
+
+    let default_fragment_shader = ShaderBuilder::new()
+        .with_input(ShaderSymbol::new(ShaderDataType::Vec2, "uv"))
+        .with_output(ShaderSymbol::new(ShaderDataType::Vec4, "FragColor"))
+        .with_code(
+            r#"
+                void main() {
+                    FragColor = vec4(uv, 0.0, 1.0);
+                }
+            "#.to_string()
+        )
+        .build_fragment_shader()
+        .expect("Could not compiled default fragment shader");
+
+    println!("Starting default shader compilation");
+    let default_shader_program = ShaderProgram::create(default_vertex_shader, default_fragment_shader).expect("Could not link default shader");
+    println!("Linked default shader");
+
+    let default_shader_program = Rc::new(default_shader_program);
+    println!("Shader program now in RC");
+
+    default_shader_program
+}
+
 fn init_state() -> State {
     log_opengl_errors!();
     println!("Starting Rust state initialization");
@@ -418,12 +474,15 @@ fn init_state() -> State {
      log_opengl_errors!();
     let debug_vertex_shader = ShaderBuilder::new()
         .with_input(ShaderSymbol::new(ShaderDataType::Vec3, "aPos"))
+        .with_input(ShaderSymbol::new(ShaderDataType::Vec3, "aColor"))
         .with_uniform(ShaderSymbol::new(ShaderDataType::Mat4, "projection"))
         .with_uniform(ShaderSymbol::new(ShaderDataType::Mat4, "view"))
+        .with_output(ShaderSymbol::new(ShaderDataType::Vec3, "color"))
         .with_code(
             r#"
                 void main() {
                     gl_Position = projection * view * vec4(aPos, 1.0);
+                    color = aColor;
                 }
             "#.to_string()
         )
@@ -432,11 +491,12 @@ fn init_state() -> State {
      log_opengl_errors!();
 
     let debug_fragment_shader = ShaderBuilder::new()
+        .with_input(ShaderSymbol::new(ShaderDataType::Vec3, "color"))
         .with_output(ShaderSymbol::new(ShaderDataType::Vec4, "FragColor"))
         .with_code(
             r#"
                 void main() {
-                    FragColor = vec4(0.0, 1.0, 0.0, 1.0);
+                    FragColor = vec4(color, 1.0);
                 }
             "#.to_string()
         )
@@ -450,7 +510,7 @@ fn init_state() -> State {
     let debug_shader_program = Rc::new(debug_shader_program);
     println!("Shader program now in RC");
 
-     log_opengl_errors!();
+    log_opengl_errors!();
 
     let debug_view_loc = debug_shader_program.uniform_location(c"view");
     let debug_projection_loc = debug_shader_program.uniform_location(c"projection");
@@ -584,6 +644,53 @@ fn init_state() -> State {
     unsafe { SDL_GetKeyboardState(&mut numkeys as *mut i32) };
     let keys = KeyState::new();
 
+    let mut meshes = HashMap::new();
+
+    let red_shader = ShaderProgram::create(
+        ShaderBuilder::new()
+            .with_input(ShaderSymbol::new(ShaderDataType::Vec3, "aPos"))
+            .with_input(ShaderSymbol::new(ShaderDataType::Vec3, "aNormal"))
+            .with_uniform(ShaderSymbol::new(ShaderDataType::Mat4, "model"))
+            .with_uniform(ShaderSymbol::new(ShaderDataType::Mat4, "projection"))
+            .with_uniform(ShaderSymbol::new(ShaderDataType::Mat4, "view"))
+            .with_output(ShaderSymbol::new(ShaderDataType::Vec3, "normal"))
+            .with_code(
+                r#"
+                    void main() {
+                        gl_Position = projection * view * model * vec4(aPos, 1.0);
+                        normal = aNormal;
+                    }
+                "#.to_string()
+            ).build_vertex_shader().unwrap(),
+        ShaderBuilder::new()
+            .with_input(ShaderSymbol::new(ShaderDataType::Vec3, "normal"))
+            .with_output(ShaderSymbol::new(ShaderDataType::Vec4, "FragColor"))
+            .with_uniform(ShaderSymbol::new(ShaderDataType::Vec3, "color"))
+            .with_code(
+                r#"
+                    void main() {
+                        FragColor = vec4(color, 1.0);
+                    }
+                "#.to_string()
+            ).build_fragment_shader().unwrap()
+        ).expect("Could not build red shader");
+    let red_shader = Rc::new(red_shader);
+
+    let mut my_box = box_mesh(Vec3::new(1.0, 1.0, 1.0));
+    let mut box_static_mesh = StaticMesh::create(
+        red_shader.clone(),
+        Rc::new(Mesh::create(&my_box).unwrap()),
+    ).expect("Can't create the test mesh");
+
+    meshes.insert("red box".to_string(), box_static_mesh);
+
+
+    let mut debug_state = DebugState::default();
+    debug_state.sphere_radius = 1.0;
+
+    let default_shader_program = create_default_shader();
+    log_opengl_errors!();
+
     println!("State initialized!");
     State {
         frame_num,
@@ -595,6 +702,7 @@ fn init_state() -> State {
         debug_view_loc,
         debug_projection_loc,
         debug_shader_program,
+        default_shader_program,
         debug_verts,
         debug_vert_indices,
         camera_pos,
@@ -605,6 +713,8 @@ fn init_state() -> State {
         mouse_captured,
         test_mesh,
         keys,
+        meshes,
+        debug_state,
     }
 }
 
@@ -637,6 +747,39 @@ fn update_keys(state: &mut State) {
     }
 }
 
+fn sdf_sphere(pos: Vec3) -> f32 {
+    (pos.x*pos.x + pos.y*pos.y + pos.z*pos.z).sqrt() - 1.0
+}
+
+fn sdf_vert_set(grid: &Vec<Vec<Vec<f32>>>, pos: (usize, usize, usize)) -> bool {
+    let x = pos.0;
+    let y = pos.1;
+    let z = pos.2;
+
+    let sign = grid[x][y][z].is_sign_positive();
+
+    (
+        sign != grid[x][y][z+1].is_sign_positive() ||
+        sign != grid[x][y+1][z].is_sign_positive() ||
+        sign != grid[x][y+1][z+1].is_sign_positive() ||
+        sign != grid[x+1][y][z].is_sign_positive() ||
+        sign != grid[x+1][y][z+1].is_sign_positive() ||
+        sign != grid[x+1][y+1][z].is_sign_positive() ||
+        sign != grid[x+1][y+1][z+1].is_sign_positive()
+    )
+}
+
+struct SdfCache {
+    sdf: fn(Vec3) -> f32,
+    cache: HashMap<(i32, i32, i32), f32>,
+    scale: f32,
+    resolution: u32,
+    bounds: (Vec3, Vec3),
+}
+
+impl SdfCache {
+}
+
 fn frame(state: &mut State, delta: f32) {
     if state.frame_num == 0 {
         println!("Starting first frame");
@@ -662,44 +805,49 @@ fn frame(state: &mut State, delta: f32) {
             ],
         );
 
-        debug_box(
-            state,
-            Vec3::new(-2.0f32, 1.0f32, 0.0f32),
-            Vec3::new(1.0f32, 1.0f32, 1.0f32),
-            Vec3::new(1.0f32, 1.0f32, 1.0f32),
-        );
-        debug_box(
-            state,
-            Vec3::new(0.0f32, 1.0f32, 0.0f32),
-            Vec3::new(1.0f32, 1.0f32, 1.0f32),
-            Vec3::new(1.0f32, 1.0f32, 1.0f32),
-        );
-        debug_box(
-            state,
-            Vec3::new(2.0f32, 1.0f32, 0.0f32),
-            Vec3::new(1.0f32, 1.0f32, 1.0f32),
-            Vec3::new(1.0f32, 1.0f32, 1.0f32),
-        );
 
-        for x in -10..=10 {
-            debug_line(
-                state,
-                &[
-                    Vec3::new(x as f32, 0.0f32, -10.0f32),
-                    Vec3::new(x as f32, 0.0f32, 10.0f32),
-                ]
-            );
-            debug_line(
-                state,
-                &[
-                    Vec3::new(10.0f32, 0.0f32, x as f32),
-                    Vec3::new(-10.0f32, 0.0f32, x as f32),
-                ]
-            );
-        }
+        // Some boxes
+        //debug_box(
+        //    state,
+        //    Vec3::new(-2.0f32, 1.0f32, 0.0f32),
+        //    Vec3::new(1.0f32, 1.0f32, 1.0f32),
+        //    Vec3::new(1.0f32, 1.0f32, 1.0f32),
+        //);
+        //debug_box(
+        //    state,
+        //    Vec3::new(0.0f32, 1.0f32, 0.0f32),
+        //    Vec3::new(1.0f32, 1.0f32, 1.0f32),
+        //    Vec3::new(1.0f32, 1.0f32, 1.0f32),
+        //);
+        //debug_box(
+        //    state,
+        //    Vec3::new(2.0f32, 1.0f32, 0.0f32),
+        //    Vec3::new(1.0f32, 1.0f32, 1.0f32),
+        //    Vec3::new(1.0f32, 1.0f32, 1.0f32),
+        //);
+
+        // Grid lines
+        //for x in -10..=10 {
+        //    debug_line(
+        //        state,
+        //        &[
+        //            Vec3::new(x as f32, 0.0f32, -10.0f32),
+        //            Vec3::new(x as f32, 0.0f32, 10.0f32),
+        //        ]
+        //    );
+        //    debug_line(
+        //        state,
+        //        &[
+        //            Vec3::new(10.0f32, 0.0f32, x as f32),
+        //            Vec3::new(-10.0f32, 0.0f32, x as f32),
+        //        ]
+        //    );
+        //}
 
         let base_camera_speed = 2.0f32;
-        let camera_speed = if state.keys.pressed(SDL_SCANCODE_LSHIFT) {
+        let camera_speed = if state.keys.pressed(SDL_SCANCODE_LCTRL) {
+            base_camera_speed*0.2
+        } else if state.keys.pressed(SDL_SCANCODE_LSHIFT) {
             base_camera_speed*5.0
         } else {
             base_camera_speed
@@ -757,17 +905,247 @@ fn frame(state: &mut State, delta: f32) {
             f32::to_radians(45.0), display_w as f32 / display_h as f32, 0.1f32, 100.0f32
         );
 
-        let mut open = true;
-        igBegin(c"From Rust".as_ptr(), &mut open as *mut bool, IMGUI_WINDOW_FLAGS_NO_FOCUS_ON_APPEARING);
-        igText(CString::new(format!("Display size: {}x{}", display_w, display_h)).unwrap().as_ptr());
-        igEnd();
 
-        log_window();
-
-        state.test_mesh.transform = Mat4::from_translation(Vec3::new(1.2, 0.2, -0.2));
         let mut ctx = HashMap::new();
         ctx.insert("view".to_string(), ShaderValue::Mat4(state.view));
         ctx.insert("projection".to_string(), ShaderValue::Mat4(state.projection));
+
+        let white = ShaderValue::Vec3(Vec3::new(1.0, 1.0, 1.0));
+        let black = ShaderValue::Vec3(Vec3::new(0.0, 0.0, 0.0));
+        let magenta = ShaderValue::Vec3(Vec3::new(1.0, 0.0, 1.0));
+
+        let mut grid = Vec::new();
+        for x in -10..10 {
+            let mut plane = Vec::new();
+            for y in -10..10 {
+                let mut line = Vec::new();
+                for z in -10..10 {
+                    let pos = Vec3::new(x as f32, y as f32, z as f32) / 9.0;
+                    let distance = sdf_sphere(pos/state.debug_state.sphere_radius);
+                    line.push(distance);
+                }
+                plane.push(line);
+            }
+            grid.push(plane);
+        }
+
+        for x in 0..grid.len() {
+            for y in 0..grid[0].len() {
+                for z in 0..grid[0][0].len() {
+                    if y != 1 && y != 2 && y != 3 {
+                        continue;
+                    }
+
+                    //let px = Vec3::new((x+1) as f32, (y+0) as f32, (z+0) as f32) / 10.0;
+                    //let pz = Vec3::new((x+0) as f32, (y+0) as f32, (z+1) as f32) / 10.0;
+                    //let nx = Vec3::new((x-1) as f32, (y+0) as f32, (z+0) as f32) / 10.0;
+                    //let nz = Vec3::new((x+0) as f32, (y+0) as f32, (z-1) as f32) / 10.0;
+
+                    let pos = Vec3::new(x as f32, y as f32, z as f32) / 10.0;
+
+                    let distance = grid[x][y][z];
+
+                    let mut red_box = state.meshes.get_mut("red box").unwrap();
+                    red_box.transform =
+                        Mat4::from_translation(pos) *
+                        Mat4::from_scale(Vec3::new(0.01, 0.01, 0.01));
+                    ctx.insert(
+                        "color".to_string(),
+                        if distance < 0.0 { black } else { white }
+                    );
+
+                    red_box.draw(&mut ctx);
+                }
+            }
+        }
+
+        for x in 0..grid.len()-1 {
+            for y in 0..grid[0].len()-1 {
+                for z in 0..grid[0][0].len()-1 {
+                    let mut drew_line = false;
+                    let pos = (Vec3::new(x as f32, y as f32, z as f32) + Vec3::new(0.5, 0.5, 0.5)) / 10.0;
+
+                    if sdf_vert_set(&grid, (x, y, z)) {
+                        let mut red_box = state.meshes.get_mut("red box").unwrap();
+                        red_box.transform =
+                            Mat4::from_translation(pos) *
+                            Mat4::from_scale(Vec3::new(0.02, 0.02, 0.02));
+                        ctx.insert(
+                            "color".to_string(),
+                            magenta,
+                        );
+
+                        //red_box.draw(&mut ctx);
+
+                        let sign = grid[x+1][y][z].is_sign_positive();
+                        if x+2 < grid.len() && sdf_vert_set(&grid, (x+1, y, z)) &&
+                            (
+                                grid[x+1][y][z+1].is_sign_positive() != sign ||
+                                grid[x+1][y+1][z].is_sign_positive() != sign ||
+                                grid[x+1][y+1][z+1].is_sign_positive() != sign
+                            )
+                        {
+                            debug_line(
+                                state,
+                                &[
+                                    pos,
+                                    pos + Vec3::new(0.1, 0.0, 0.0),
+                                ]
+                            );
+                            drew_line = true;
+                        }
+
+                        let sign = grid[x][y+1][z].is_sign_positive();
+                        if y+2 < grid.len() && sdf_vert_set(&grid, (x, y+1, z)) &&
+                            (
+                                grid[x][y+1][z+1].is_sign_positive() != sign ||
+                                grid[x+1][y+1][z].is_sign_positive() != sign ||
+                                grid[x+1][y+1][z+1].is_sign_positive() != sign
+                            )
+                        {
+                            debug_line(
+                                state,
+                                &[
+                                    pos,
+                                    pos + Vec3::new(0.0, 0.1, 0.0),
+                                ]
+                            );
+                            drew_line = true;
+                        }
+
+                        let sign = grid[x][y][z+1].is_sign_positive();
+                        if z+2 < grid.len() && sdf_vert_set(&grid, (x, y, z+1)) &&
+                            (
+                                grid[x][y+1][z+1].is_sign_positive() != sign ||
+                                grid[x+1][y][z+1].is_sign_positive() != sign ||
+                                grid[x+1][y+1][z+1].is_sign_positive() != sign
+                            )
+                        {
+                            debug_line(
+                                state,
+                                &[
+                                    pos,
+                                    pos + Vec3::new(0.0, 0.0, 0.1),
+                                ]
+                            );
+                            drew_line = true;
+                        }
+
+                        if drew_line {
+                            debug_line_color(
+                                state,
+                                &[
+                                    pos,
+                                    pos + Vec3::new(-0.1, 0.1, 0.1),
+                                ],
+                                Vec3::new(0.8, 0.0, 0.8),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        {
+            let mut index_count = 0;
+
+            let mut positions = Vec::new();
+            let mut uvs = Vec::new();
+            let mut indices = Vec::new();
+
+
+
+
+            for x in 0..grid.len()-1 {
+                for y in 0..grid[0].len()-1 {
+                    for z in 0..grid[0][0].len()-1 {
+                        let pos = (Vec3::new(x as f32, y as f32, z as f32) + Vec3::new(0.5, 0.5, 0.5)) / 10.0;
+
+                        if sdf_vert_set(&grid, (x, y, z)) {
+                            let mut red_box = state.meshes.get_mut("red box").unwrap();
+                            red_box.transform =
+                                Mat4::from_translation(pos) *
+                                Mat4::from_scale(Vec3::new(0.02, 0.02, 0.02));
+                            ctx.insert(
+                                "color".to_string(),
+                                magenta,
+                            );
+
+                            //red_box.draw(&mut ctx);
+
+                            let sign = grid[x+1][y][z].is_sign_positive();
+                            if x+2 < grid.len() && sdf_vert_set(&grid, (x+1, y, z)) &&
+                                (
+                                    grid[x+1][y][z+1].is_sign_positive() != sign ||
+                                    grid[x+1][y+1][z].is_sign_positive() != sign ||
+                                    grid[x+1][y+1][z+1].is_sign_positive() != sign
+                                )
+                            {
+                                let offset = pos + Vec3::new(0.05, -0.05, -0.05);
+                                positions.push(Vec3::new(-0.05, -0.05, 0.05)+offset);
+                                positions.push(Vec3::new(-0.05,  0.05, 0.05)+offset);
+                                positions.push(Vec3::new( 0.05, -0.05, 0.05)+offset);
+                                positions.push(Vec3::new( 0.05,  0.05, 0.05)+offset);
+
+
+                                uvs.push(pos.xy()+Vec2::new( 0.0, 0.0));
+                                uvs.push(pos.xy()+Vec2::new( 0.0, 0.05));
+                                uvs.push(pos.xy()+Vec2::new( 0.05, 0.0));
+                                uvs.push(pos.xy()+Vec2::new( 0.05, 0.05));
+
+                                indices.push(index_count+0);
+                                indices.push(index_count+1);
+                                indices.push(index_count+2);
+                                indices.push(index_count+1);
+                                indices.push(index_count+2);
+                                indices.push(index_count+3);
+
+                                index_count += 4;
+                            }
+                        }
+                    }
+                }
+            }
+
+            let mut verts = HashMap::new();
+            verts.insert("aPos".to_string(), VertVec::Vec3(positions));
+            verts.insert("aUV".to_string(), VertVec::Vec2(uvs));
+
+            let primitive_type = Primitive::Triangles;
+
+            let meshdata = MeshDataRaw {
+                verts,
+                indices,
+                primitive_type,
+            };
+
+            let mut generated = StaticMesh::create(
+                state.default_shader_program.clone(),
+                Rc::new(Mesh::create(&meshdata).unwrap()),
+            ).expect("Can't create the test mesh");
+
+            generated.draw(&mut ctx);
+        }
+
+
+
+        let mut open = true;
+        igBegin(c"From Rust".as_ptr(), &mut open as *mut bool, IMGUI_WINDOW_FLAGS_NO_FOCUS_ON_APPEARING);
+        igText(CString::new(format!("Display size: {}x{}", display_w, display_h)).unwrap().as_ptr());
+
+        igSliderFloat(
+            c"My Slider".as_ptr(),
+            &mut state.debug_state.sphere_radius as *mut f32,
+            0.001,
+            1.0,
+            c"%.3f".as_ptr(),
+        );
+
+        igEnd();
+
+        draw_log_window();
+
+        state.test_mesh.transform = Mat4::from_translation(Vec3::new(1.2, 0.2, -0.2));
 
         state.test_mesh.draw(&mut ctx);
 

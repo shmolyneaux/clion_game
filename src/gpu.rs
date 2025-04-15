@@ -44,6 +44,7 @@ impl fmt::Display for ShaderDataType {
     }
 }
 
+#[derive(Copy, Clone)]
 pub enum ShaderValue {
     Float(f32),
     Vec2(Vec2),
@@ -447,21 +448,18 @@ impl Mesh {
     pub fn create(data: &MeshDataRaw) -> Result<Self, String> {
         log_opengl_errors!();
 
-        println!("Getting vert count");
         let vert_count = data.verts.values().map(|v| v.len()).max().unwrap_or(0);
         if vert_count == 0 {
             return Err("No verts in mesh data!".to_string());
         }
 
         log_opengl_errors!();
-        println!("Getting vert attribs");
         let mut vert_attribs: Vec<(&str, &VertVec)> = vec![];
         for (name, vert_vec) in data.verts.iter() {
             vert_attribs.push((name, vert_vec));
         }
 
         log_opengl_errors!();
-        println!("Pushing vert data");
         let mut vert_data: Vec<f32> = vec![];
         for idx in 0..vert_count {
             for (_, vert_attrib) in vert_attribs.iter() {
@@ -484,7 +482,6 @@ impl Mesh {
         }
 
         log_opengl_errors!();
-        println!("Creating buffers");
 
         let vbo = VertexBufferObject::create_with_data(&vert_data, gl::STATIC_DRAW);
         let ebo = ElementBufferObject::create_with_data(&data.indices, data.primitive_type, gl::STATIC_DRAW);
@@ -504,7 +501,6 @@ impl Mesh {
         let index_count = data.indices.len() as u32;
 
         log_opengl_errors!();
-        println!("Returning Mesh");
         Ok(Self {
             vbo,
             ebo,
@@ -533,13 +529,11 @@ pub struct StaticMesh {
 impl StaticMesh {
     pub fn create(shader: Rc<ShaderProgram>, mesh: Rc<Mesh>) -> Result<Self, String> {
         log_opengl_errors!();
-        println!("Creating vao");
 
         let vao = VertexArray::create();
         unsafe { gl::BindVertexArray(vao.id) };
 
         log_opengl_errors!();
-        println!("Setting up VAO pointers");
         unsafe {
             let stride = mesh.stride as i32;
             for (idx, attribute) in shader.vert.inputs.iter().enumerate() {
@@ -560,7 +554,6 @@ impl StaticMesh {
         let uniform_override = HashMap::new();
 
         log_opengl_errors!();
-        println!("Returning StaticMesh");
         Ok(Self {
             shader,
             vao,
@@ -583,14 +576,41 @@ impl StaticMesh {
 
             let mut texture_unit = 0;
             for uniform_info in self.shader.uniforms() {
+                let loc = self.shader.uniform_location(&CString::new(uniform_info.name.clone()).unwrap());
                 match (uniform_info.data_type, self.uniform_override.get(&uniform_info.name).or_else(|| ctx.get(&uniform_info.name)).unwrap()) {
-                    (ShaderDataType::Float, ShaderValue::Float(_v)) => todo!(),
-                    (ShaderDataType::Vec2, ShaderValue::Vec2(_v)) => todo!(),
-                    (ShaderDataType::Vec3, ShaderValue::Vec3(_v)) => todo!(),
-                    (ShaderDataType::Vec4, ShaderValue::Vec4(_v)) => todo!(),
+                    (ShaderDataType::Float, ShaderValue::Float(v)) => {
+                        gl::Uniform1f(
+                            loc,
+                            *v,
+                        );
+                    }
+                    (ShaderDataType::Vec2, ShaderValue::Vec2(v)) => {
+                        gl::Uniform2f(
+                            loc,
+                            v.x,
+                            v.y,
+                        );
+                    }
+                    (ShaderDataType::Vec3, ShaderValue::Vec3(v)) => {
+                        gl::Uniform3f(
+                            loc,
+                            v.x,
+                            v.y,
+                            v.z,
+                        );
+                    }
+                    (ShaderDataType::Vec4, ShaderValue::Vec4(v)) => {
+                        gl::Uniform4f(
+                            loc,
+                            v.x,
+                            v.y,
+                            v.z,
+                            v.w,
+                        );
+                    }
                     (ShaderDataType::Mat4, ShaderValue::Mat4(v)) => {
                         gl::UniformMatrix4fv(
-                            self.shader.uniform_location(&CString::new(uniform_info.name.clone()).unwrap()),
+                            loc,
                             1,
                             gl::FALSE,
                             &v.to_cols_array() as *const gl::types::GLfloat
@@ -610,7 +630,7 @@ impl StaticMesh {
                         );
                         gl::BindTexture(gl::TEXTURE_2D, *v);
                         gl::Uniform1i(
-                            self.shader.uniform_location(&CString::new(uniform_info.name.clone()).unwrap()),
+                            loc,
                             texture_unit,
                         );
                         texture_unit += 1;
