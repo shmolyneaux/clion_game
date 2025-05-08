@@ -2,13 +2,14 @@
 
 #[macro_use]
 use gl;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::rc::Rc;
 use gl::types::*;
 use glam::{Vec2, Vec3, Vec4, Mat4};
 use std::ffi::CString;
 use std::ffi::CStr;
+
 
 use std::slice;
 
@@ -769,15 +770,42 @@ fn sdf_vert_set(grid: &Vec<Vec<Vec<f32>>>, pos: (usize, usize, usize)) -> bool {
     )
 }
 
-struct SdfCache {
-    sdf: fn(Vec3) -> f32,
-    cache: HashMap<(i32, i32, i32), f32>,
+struct SdfCache<F>
+where
+    F: Fn(Vec3) -> f32
+{
+    sdf: F,
+    cache: RefCell<HashMap<(i32, i32, i32), f32>>,
     scale: f32,
     resolution: u32,
     bounds: (Vec3, Vec3),
 }
 
-impl SdfCache {
+impl<F: Fn(Vec3) -> f32> SdfCache<F> {
+    fn new(sdf: F, scale: f32, resolution: u32) -> Self {
+        let cache = RefCell::new(HashMap::new());
+        let bounds = (Vec3::new(-1.0, -1.0, -1.0), Vec3::new(1.0, 1.0, 1.0));
+        Self {
+            sdf,
+            scale,
+            resolution,
+            bounds,
+            cache,
+        }
+    }
+
+    fn get(&self, coord: (i32, i32, i32)) -> f32 {
+        let mut cache = self.cache.borrow_mut();
+        match cache.get(&coord) {
+            Some(dist) => *dist,
+            None => {
+                let posf = Vec3::new(coord.0 as f32, coord.1 as f32, coord.2 as f32) * self.scale;
+                let dist = (self.sdf)(posf);
+                cache.insert(coord, dist);
+                dist
+            }
+        }
+    }
 }
 
 fn frame(state: &mut State, delta: f32) {
@@ -905,6 +933,12 @@ fn frame(state: &mut State, delta: f32) {
             f32::to_radians(45.0), display_w as f32 / display_h as f32, 0.1f32, 100.0f32
         );
 
+        let recip_radius = state.debug_state.sphere_radius.recip();
+        let mut sdf = SdfCache::new(
+            |pos| sdf_sphere(pos*recip_radius),
+            0.1,
+            20,
+       );
 
         let mut ctx = HashMap::new();
         ctx.insert("view".to_string(), ShaderValue::Mat4(state.view));
@@ -914,220 +948,196 @@ fn frame(state: &mut State, delta: f32) {
         let black = ShaderValue::Vec3(Vec3::new(0.0, 0.0, 0.0));
         let magenta = ShaderValue::Vec3(Vec3::new(1.0, 0.0, 1.0));
 
-        let mut grid = Vec::new();
+        let mut index_count = 0;
+        let mut positions = Vec::new();
+        let mut uvs = Vec::new();
+        let mut normals = Vec::new();
+        let mut indices = Vec::new();
+
+        // Vert coord to index
+        let mut vert_lookup = HashMap::new();
+        //let mut edges = HashH
+
         for x in -10..10 {
-            let mut plane = Vec::new();
             for y in -10..10 {
-                let mut line = Vec::new();
                 for z in -10..10 {
-                    let pos = Vec3::new(x as f32, y as f32, z as f32) / 9.0;
-                    let distance = sdf_sphere(pos/state.debug_state.sphere_radius);
-                    line.push(distance);
-                }
-                plane.push(line);
-            }
-            grid.push(plane);
-        }
+                    let coord = (x, y, z);
+                    let dist = sdf.get(coord);
+                    let mut is_vert = false;
 
-        for x in 0..grid.len() {
-            for y in 0..grid[0].len() {
-                for z in 0..grid[0][0].len() {
-                    if y != 1 && y != 2 && y != 3 {
-                        continue;
+                    // Logically, the vert is somewhere in the cube represented by 8 sample points. We know there's a
+                    // vert in the cube if there's a transition from negative to positive somewhere within the volume
+                    // of the cube
+                    for (offx, offy, offz) in [(0, 0, 1), (0, 1, 0), (0, 1, 1), (1, 0, 0), (1, 0, 1), (1, 1, 0), (1, 1, 1)] {
+                        if dist.is_sign_positive() != sdf.get((coord.0+offx, coord.1+offy, coord.2+offz)).is_sign_positive() {
+                            is_vert = true;
+                        }
                     }
 
-                    //let px = Vec3::new((x+1) as f32, (y+0) as f32, (z+0) as f32) / 10.0;
-                    //let pz = Vec3::new((x+0) as f32, (y+0) as f32, (z+1) as f32) / 10.0;
-                    //let nx = Vec3::new((x-1) as f32, (y+0) as f32, (z+0) as f32) / 10.0;
-                    //let nz = Vec3::new((x+0) as f32, (y+0) as f32, (z-1) as f32) / 10.0;
+                    if is_vert {
+                        let idx = indices.len() as u32;
+                        vert_lookup.insert(coord, idx);
 
-                    let pos = Vec3::new(x as f32, y as f32, z as f32) / 10.0;
+                        let posf = Vec3::new(x as f32, y as f32, z as f32);
+                        positions.push((posf + Vec3::new(0.0, 0.0, 0.0)) * 0.1);
+                        positions.push((posf + Vec3::new(0.0, 0.4, 0.0)) * 0.1);
+                        positions.push((posf + Vec3::new(0.4, 0.0, 0.0)) * 0.1);
 
-                    let distance = grid[x][y][z];
+                        uvs.push(Vec2::new(0.0, 0.0));
+                        uvs.push(Vec2::new(0.0, 1.0));
+                        uvs.push(Vec2::new(1.0, 0.0));
 
-                    let mut red_box = state.meshes.get_mut("red box").unwrap();
-                    red_box.transform =
-                        Mat4::from_translation(pos) *
-                        Mat4::from_scale(Vec3::new(0.01, 0.01, 0.01));
-                    ctx.insert(
-                        "color".to_string(),
-                        if distance < 0.0 { black } else { white }
-                    );
+                        indices.push(indices.len() as u32);
+                        indices.push(indices.len() as u32);
+                        indices.push(indices.len() as u32);
 
-                    red_box.draw(&mut ctx);
-                }
-            }
-        }
-
-        for x in 0..grid.len()-1 {
-            for y in 0..grid[0].len()-1 {
-                for z in 0..grid[0][0].len()-1 {
-                    let mut drew_line = false;
-                    let pos = (Vec3::new(x as f32, y as f32, z as f32) + Vec3::new(0.5, 0.5, 0.5)) / 10.0;
-
-                    if sdf_vert_set(&grid, (x, y, z)) {
-                        let mut red_box = state.meshes.get_mut("red box").unwrap();
-                        red_box.transform =
-                            Mat4::from_translation(pos) *
-                            Mat4::from_scale(Vec3::new(0.02, 0.02, 0.02));
-                        ctx.insert(
-                            "color".to_string(),
-                            magenta,
-                        );
-
-                        //red_box.draw(&mut ctx);
-
-                        let sign = grid[x+1][y][z].is_sign_positive();
-                        if x+2 < grid.len() && sdf_vert_set(&grid, (x+1, y, z)) &&
+                        let dx = sdf.get(
                             (
-                                grid[x+1][y][z+1].is_sign_positive() != sign ||
-                                grid[x+1][y+1][z].is_sign_positive() != sign ||
-                                grid[x+1][y+1][z+1].is_sign_positive() != sign
+                                coord.0+1,
+                                coord.1,
+                                coord.2
                             )
-                        {
-                            debug_line(
-                                state,
-                                &[
-                                    pos,
-                                    pos + Vec3::new(0.1, 0.0, 0.0),
-                                ]
-                            );
-                            drew_line = true;
-                        }
+                        ) - dist;
 
-                        let sign = grid[x][y+1][z].is_sign_positive();
-                        if y+2 < grid.len() && sdf_vert_set(&grid, (x, y+1, z)) &&
+                        let dy = sdf.get(
                             (
-                                grid[x][y+1][z+1].is_sign_positive() != sign ||
-                                grid[x+1][y+1][z].is_sign_positive() != sign ||
-                                grid[x+1][y+1][z+1].is_sign_positive() != sign
+                                coord.0,
+                                coord.1+1,
+                                coord.2
                             )
-                        {
-                            debug_line(
-                                state,
-                                &[
-                                    pos,
-                                    pos + Vec3::new(0.0, 0.1, 0.0),
-                                ]
-                            );
-                            drew_line = true;
-                        }
+                        ) - dist;
 
-                        let sign = grid[x][y][z+1].is_sign_positive();
-                        if z+2 < grid.len() && sdf_vert_set(&grid, (x, y, z+1)) &&
+                        let dz = sdf.get(
                             (
-                                grid[x][y+1][z+1].is_sign_positive() != sign ||
-                                grid[x+1][y][z+1].is_sign_positive() != sign ||
-                                grid[x+1][y+1][z+1].is_sign_positive() != sign
+                                coord.0,
+                                coord.1,
+                                coord.2+1
                             )
-                        {
-                            debug_line(
-                                state,
-                                &[
-                                    pos,
-                                    pos + Vec3::new(0.0, 0.0, 0.1),
-                                ]
-                            );
-                            drew_line = true;
-                        }
+                        ) - dist;
 
-                        if drew_line {
-                            debug_line_color(
-                                state,
-                                &[
-                                    pos,
-                                    pos + Vec3::new(-0.1, 0.1, 0.1),
-                                ],
-                                Vec3::new(0.8, 0.0, 0.8),
-                            );
-                        }
+                        let norm = Vec3::new(dx, dy, dz).normalize_or_zero();
+                        normals.push(norm);
+                        normals.push(norm);
+                        normals.push(norm);
+
+                        debug_line_color(
+                            state,
+                            &[
+                                posf*0.1,
+                                posf*0.1 + norm*0.05,
+                            ],
+                            Vec3::new(0.0, 0.0, 0.5),
+                        )
                     }
                 }
             }
         }
 
-        {
-            let mut index_count = 0;
+        let mut x_edges: HashSet<(i32, i32, i32)> = HashSet::new();
+        let mut y_edges: HashSet<(i32, i32, i32)> = HashSet::new();
+        let mut z_edges: HashSet<(i32, i32, i32)> = HashSet::new();
 
-            let mut positions = Vec::new();
-            let mut uvs = Vec::new();
-            let mut indices = Vec::new();
+        for (c0, _) in vert_lookup.iter() {
+            let cx = ((c0.0+1), (c0.1+0), (c0.2+0));
+            let cxz = ((c0.0+1), (c0.1+0), (c0.2+1));
+            let cxy = ((c0.0+1), (c0.1+1), (c0.2+0));
+            let cxyz = ((c0.0+1), (c0.1+1), (c0.2+1));
+            let cz = ((c0.0+0), (c0.1+0), (c0.2+1));
+            let cy = ((c0.0+0), (c0.1+1), (c0.2+0));
+            let cyz = ((c0.0+0), (c0.1+1), (c0.2+1));
 
+            // We only want an edge if the isosurface intersects with the
+            // face of the cube this edge is passing through.
 
-
-
-            for x in 0..grid.len()-1 {
-                for y in 0..grid[0].len()-1 {
-                    for z in 0..grid[0][0].len()-1 {
-                        let pos = (Vec3::new(x as f32, y as f32, z as f32) + Vec3::new(0.5, 0.5, 0.5)) / 10.0;
-
-                        if sdf_vert_set(&grid, (x, y, z)) {
-                            let mut red_box = state.meshes.get_mut("red box").unwrap();
-                            red_box.transform =
-                                Mat4::from_translation(pos) *
-                                Mat4::from_scale(Vec3::new(0.02, 0.02, 0.02));
-                            ctx.insert(
-                                "color".to_string(),
-                                magenta,
-                            );
-
-                            //red_box.draw(&mut ctx);
-
-                            let sign = grid[x+1][y][z].is_sign_positive();
-                            if x+2 < grid.len() && sdf_vert_set(&grid, (x+1, y, z)) &&
-                                (
-                                    grid[x+1][y][z+1].is_sign_positive() != sign ||
-                                    grid[x+1][y+1][z].is_sign_positive() != sign ||
-                                    grid[x+1][y+1][z+1].is_sign_positive() != sign
-                                )
-                            {
-                                let offset = pos + Vec3::new(0.05, -0.05, -0.05);
-                                positions.push(Vec3::new(-0.05, -0.05, 0.05)+offset);
-                                positions.push(Vec3::new(-0.05,  0.05, 0.05)+offset);
-                                positions.push(Vec3::new( 0.05, -0.05, 0.05)+offset);
-                                positions.push(Vec3::new( 0.05,  0.05, 0.05)+offset);
-
-
-                                uvs.push(pos.xy()+Vec2::new( 0.0, 0.0));
-                                uvs.push(pos.xy()+Vec2::new( 0.0, 0.05));
-                                uvs.push(pos.xy()+Vec2::new( 0.05, 0.0));
-                                uvs.push(pos.xy()+Vec2::new( 0.05, 0.05));
-
-                                indices.push(index_count+0);
-                                indices.push(index_count+1);
-                                indices.push(index_count+2);
-                                indices.push(index_count+1);
-                                indices.push(index_count+2);
-                                indices.push(index_count+3);
-
-                                index_count += 4;
-                            }
-                        }
-                    }
+            if vert_lookup.get(&cx).is_some() {
+                let dist = sdf.get(cx);
+                if dist.is_sign_positive() != sdf.get(cxz).is_sign_positive() ||
+                   dist.is_sign_positive() != sdf.get(cxy).is_sign_positive() ||
+                   dist.is_sign_positive() != sdf.get(cxyz).is_sign_positive()
+                {
+                    x_edges.insert(*c0);
                 }
             }
 
-            let mut verts = HashMap::new();
-            verts.insert("aPos".to_string(), VertVec::Vec3(positions));
-            verts.insert("aUV".to_string(), VertVec::Vec2(uvs));
+            if vert_lookup.get(&cy).is_some() {
+                let dist = sdf.get(cy);
+                if dist.is_sign_positive() != sdf.get(cxy).is_sign_positive() ||
+                   dist.is_sign_positive() != sdf.get(cyz).is_sign_positive() ||
+                   dist.is_sign_positive() != sdf.get(cxyz).is_sign_positive()
+                {
+                    y_edges.insert(*c0);
+                }
+            }
 
-            let primitive_type = Primitive::Triangles;
+            if vert_lookup.get(&cz).is_some() {
+                let dist = sdf.get(cz);
+                if dist.is_sign_positive() != sdf.get(cxz).is_sign_positive() ||
+                   dist.is_sign_positive() != sdf.get(cyz).is_sign_positive() ||
+                   dist.is_sign_positive() != sdf.get(cxyz).is_sign_positive()
+                {
+                    z_edges.insert(*c0);
+                }
+            }
+        }
 
-            let meshdata = MeshDataRaw {
-                verts,
-                indices,
-                primitive_type,
-            };
+        for coord in x_edges.iter() {
+            let v0 = Vec3::new(coord.0 as f32, coord.1 as f32, coord.2 as f32)*0.1;
+            let v1 = Vec3::new((coord.0+1) as f32, coord.1 as f32, coord.2 as f32)*0.1;
+            debug_line_color(
+                state,
+                &[
+                    v0,
+                    v1,
+                ],
+                Vec3::new(1.0, 0.8, 0.8),
+            )
+        }
 
-            let mut generated = StaticMesh::create(
-                state.default_shader_program.clone(),
-                Rc::new(Mesh::create(&meshdata).unwrap()),
-            ).expect("Can't create the test mesh");
+        for coord in y_edges.iter() {
+            let v0 = Vec3::new(coord.0 as f32, coord.1 as f32, coord.2 as f32)*0.1;
+            let v1 = Vec3::new(coord.0 as f32, (coord.1+1) as f32, coord.2 as f32)*0.1;
+            debug_line_color(
+                state,
+                &[
+                    v0,
+                    v1,
+                ],
+                Vec3::new(0.8, 1.0, 0.8),
+            )
+        }
 
-            generated.draw(&mut ctx);
+        for coord in z_edges.iter() {
+            let v0 = Vec3::new(coord.0 as f32, coord.1 as f32, coord.2 as f32)*0.1;
+            let v1 = Vec3::new(coord.0 as f32, coord.1 as f32, (coord.2+1) as f32)*0.1;
+            debug_line_color(
+                state,
+                &[
+                    v0,
+                    v1,
+                ],
+                Vec3::new(0.8, 0.8, 1.0),
+            )
         }
 
 
+        let mut verts = HashMap::new();
+        verts.insert("aPos".to_string(), VertVec::Vec3(positions));
+        verts.insert("aUV".to_string(), VertVec::Vec2(uvs));
+
+        let primitive_type = Primitive::Triangles;
+
+        let meshdata = MeshDataRaw {
+            verts,
+            indices,
+            primitive_type,
+        };
+
+        let mut generated = StaticMesh::create(
+            state.default_shader_program.clone(),
+            Rc::new(Mesh::create(&meshdata).unwrap()),
+        ).expect("Can't create the test mesh");
+
+        generated.draw(&mut ctx);
 
         let mut open = true;
         igBegin(c"From Rust".as_ptr(), &mut open as *mut bool, IMGUI_WINDOW_FLAGS_NO_FOCUS_ON_APPEARING);

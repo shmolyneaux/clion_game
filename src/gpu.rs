@@ -449,9 +449,9 @@ impl Mesh {
         log_opengl_errors!();
 
         let vert_count = data.verts.values().map(|v| v.len()).max().unwrap_or(0);
-        if vert_count == 0 {
-            return Err("No verts in mesh data!".to_string());
-        }
+        // if vert_count == 0 {
+        //     return Err("No verts in mesh data!".to_string());
+        // }
 
         log_opengl_errors!();
         let mut vert_attribs: Vec<(&str, &VertVec)> = vec![];
