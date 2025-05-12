@@ -977,57 +977,6 @@ fn frame(state: &mut State, delta: f32) {
                     if is_vert {
                         let idx = indices.len() as u32;
                         vert_lookup.insert(coord, idx);
-
-                        let posf = Vec3::new(x as f32, y as f32, z as f32);
-                        positions.push((posf + Vec3::new(0.0, 0.0, 0.0)) * 0.1);
-                        positions.push((posf + Vec3::new(0.0, 0.4, 0.0)) * 0.1);
-                        positions.push((posf + Vec3::new(0.4, 0.0, 0.0)) * 0.1);
-
-                        uvs.push(Vec2::new(0.0, 0.0));
-                        uvs.push(Vec2::new(0.0, 1.0));
-                        uvs.push(Vec2::new(1.0, 0.0));
-
-                        indices.push(indices.len() as u32);
-                        indices.push(indices.len() as u32);
-                        indices.push(indices.len() as u32);
-
-                        let dx = sdf.get(
-                            (
-                                coord.0+1,
-                                coord.1,
-                                coord.2
-                            )
-                        ) - dist;
-
-                        let dy = sdf.get(
-                            (
-                                coord.0,
-                                coord.1+1,
-                                coord.2
-                            )
-                        ) - dist;
-
-                        let dz = sdf.get(
-                            (
-                                coord.0,
-                                coord.1,
-                                coord.2+1
-                            )
-                        ) - dist;
-
-                        let norm = Vec3::new(dx, dy, dz).normalize_or_zero();
-                        normals.push(norm);
-                        normals.push(norm);
-                        normals.push(norm);
-
-                        debug_line_color(
-                            state,
-                            &[
-                                posf*0.1,
-                                posf*0.1 + norm*0.05,
-                            ],
-                            Vec3::new(0.0, 0.0, 0.5),
-                        )
                     }
                 }
             }
@@ -1081,42 +1030,202 @@ fn frame(state: &mut State, delta: f32) {
         }
 
         for coord in x_edges.iter() {
-            let v0 = Vec3::new(coord.0 as f32, coord.1 as f32, coord.2 as f32)*0.1;
-            let v1 = Vec3::new((coord.0+1) as f32, coord.1 as f32, coord.2 as f32)*0.1;
-            debug_line_color(
-                state,
-                &[
-                    v0,
-                    v1,
-                ],
-                Vec3::new(1.0, 0.8, 0.8),
-            )
+            if x_edges.contains(&(coord.0, coord.1+1, coord.2)) &&
+                y_edges.contains(coord) &&
+                y_edges.contains(&(coord.0+1, coord.1, coord.2))
+            {
+                let dist = sdf.get(*coord);
+
+                let dx = sdf.get(
+                    (
+                        coord.0+1,
+                        coord.1,
+                        coord.2
+                    )
+                ) - dist;
+
+                let dy = sdf.get(
+                    (
+                        coord.0,
+                        coord.1+1,
+                        coord.2
+                    )
+                ) - dist;
+
+                let dz = sdf.get(
+                    (
+                        coord.0,
+                        coord.1,
+                        coord.2+1
+                    )
+                ) - dist;
+
+                let norm = Vec3::new(dx, dy, dz).normalize_or_zero();
+                normals.push(norm);
+                normals.push(norm);
+                normals.push(norm);
+
+                normals.push(norm);
+                normals.push(norm);
+                normals.push(norm);
+
+                let posf = Vec3::new(coord.0 as f32, coord.1 as f32, coord.2 as f32);
+                positions.push((posf + Vec3::new(0.0, 0.0, 0.0)) * 0.1);
+                positions.push((posf + Vec3::new(0.0, 1.0, 0.0)) * 0.1);
+                positions.push((posf + Vec3::new(1.0, 0.0, 0.0)) * 0.1);
+
+                positions.push((posf + Vec3::new(1.0, 1.0, 0.0)) * 0.1);
+                positions.push((posf + Vec3::new(0.0, 1.0, 0.0)) * 0.1);
+                positions.push((posf + Vec3::new(1.0, 0.0, 0.0)) * 0.1);
+
+                uvs.push(Vec2::new(0.0, 0.0));
+                uvs.push(Vec2::new(0.0, 1.0));
+                uvs.push(Vec2::new(1.0, 0.0));
+
+                uvs.push(Vec2::new(1.0, 1.0));
+                uvs.push(Vec2::new(0.0, 1.0));
+                uvs.push(Vec2::new(1.0, 0.0));
+
+                indices.push(indices.len() as u32);
+                indices.push(indices.len() as u32);
+                indices.push(indices.len() as u32);
+
+                indices.push(indices.len() as u32);
+                indices.push(indices.len() as u32);
+                indices.push(indices.len() as u32);
+            }
+
+            if x_edges.contains(&(coord.0, coord.1, coord.2+1)) &&
+                z_edges.contains(coord) &&
+                z_edges.contains(&(coord.0+1, coord.1, coord.2))
+            {
+                let dist = sdf.get(*coord);
+
+                let dx = sdf.get(
+                    (
+                        coord.0+1,
+                        coord.1,
+                        coord.2
+                    )
+                ) - dist;
+
+                let dy = sdf.get(
+                    (
+                        coord.0,
+                        coord.1+1,
+                        coord.2
+                    )
+                ) - dist;
+
+                let dz = sdf.get(
+                    (
+                        coord.0,
+                        coord.1,
+                        coord.2+1
+                    )
+                ) - dist;
+
+                let norm = Vec3::new(dx, dy, dz).normalize_or_zero();
+                normals.push(norm);
+                normals.push(norm);
+                normals.push(norm);
+
+                normals.push(norm);
+                normals.push(norm);
+                normals.push(norm);
+
+                let posf = Vec3::new(coord.0 as f32, coord.1 as f32, coord.2 as f32);
+                positions.push((posf + Vec3::new(0.0, 0.0, 0.0)) * 0.1);
+                positions.push((posf + Vec3::new(0.0, 0.0, 1.0)) * 0.1);
+                positions.push((posf + Vec3::new(1.0, 0.0, 0.0)) * 0.1);
+
+                positions.push((posf + Vec3::new(1.0, 0.0, 1.0)) * 0.1);
+                positions.push((posf + Vec3::new(0.0, 0.0, 1.0)) * 0.1);
+                positions.push((posf + Vec3::new(1.0, 0.0, 0.0)) * 0.1);
+
+                uvs.push(Vec2::new(0.0, 0.0));
+                uvs.push(Vec2::new(0.0, 1.0));
+                uvs.push(Vec2::new(1.0, 0.0));
+
+                uvs.push(Vec2::new(1.0, 1.0));
+                uvs.push(Vec2::new(0.0, 1.0));
+                uvs.push(Vec2::new(1.0, 0.0));
+
+                indices.push(indices.len() as u32);
+                indices.push(indices.len() as u32);
+                indices.push(indices.len() as u32);
+
+                indices.push(indices.len() as u32);
+                indices.push(indices.len() as u32);
+                indices.push(indices.len() as u32);
+            }
         }
 
         for coord in y_edges.iter() {
-            let v0 = Vec3::new(coord.0 as f32, coord.1 as f32, coord.2 as f32)*0.1;
-            let v1 = Vec3::new(coord.0 as f32, (coord.1+1) as f32, coord.2 as f32)*0.1;
-            debug_line_color(
-                state,
-                &[
-                    v0,
-                    v1,
-                ],
-                Vec3::new(0.8, 1.0, 0.8),
-            )
-        }
+            if y_edges.contains(&(coord.0, coord.1, coord.2+1)) &&
+                z_edges.contains(coord) &&
+                z_edges.contains(&(coord.0, coord.1+1, coord.2))
+            {
+                let dist = sdf.get(*coord);
 
-        for coord in z_edges.iter() {
-            let v0 = Vec3::new(coord.0 as f32, coord.1 as f32, coord.2 as f32)*0.1;
-            let v1 = Vec3::new(coord.0 as f32, coord.1 as f32, (coord.2+1) as f32)*0.1;
-            debug_line_color(
-                state,
-                &[
-                    v0,
-                    v1,
-                ],
-                Vec3::new(0.8, 0.8, 1.0),
-            )
+                let dx = sdf.get(
+                    (
+                        coord.0+1,
+                        coord.1,
+                        coord.2
+                    )
+                ) - dist;
+
+                let dy = sdf.get(
+                    (
+                        coord.0,
+                        coord.1+1,
+                        coord.2
+                    )
+                ) - dist;
+
+                let dz = sdf.get(
+                    (
+                        coord.0,
+                        coord.1,
+                        coord.2+1
+                    )
+                ) - dist;
+
+                let norm = Vec3::new(dx, dy, dz).normalize_or_zero();
+                normals.push(norm);
+                normals.push(norm);
+                normals.push(norm);
+
+                normals.push(norm);
+                normals.push(norm);
+                normals.push(norm);
+
+                let posf = Vec3::new(coord.0 as f32, coord.1 as f32, coord.2 as f32);
+                positions.push((posf + Vec3::new(0.0, 0.0, 0.0)) * 0.1);
+                positions.push((posf + Vec3::new(0.0, 1.0, 0.0)) * 0.1);
+                positions.push((posf + Vec3::new(0.0, 0.0, 1.0)) * 0.1);
+
+                positions.push((posf + Vec3::new(0.0, 1.0, 1.0)) * 0.1);
+                positions.push((posf + Vec3::new(0.0, 1.0, 0.0)) * 0.1);
+                positions.push((posf + Vec3::new(0.0, 0.0, 1.0)) * 0.1);
+
+                uvs.push(Vec2::new(0.0, 0.0));
+                uvs.push(Vec2::new(0.0, 1.0));
+                uvs.push(Vec2::new(1.0, 0.0));
+
+                uvs.push(Vec2::new(1.0, 1.0));
+                uvs.push(Vec2::new(0.0, 1.0));
+                uvs.push(Vec2::new(1.0, 0.0));
+
+                indices.push(indices.len() as u32);
+                indices.push(indices.len() as u32);
+                indices.push(indices.len() as u32);
+
+                indices.push(indices.len() as u32);
+                indices.push(indices.len() as u32);
+                indices.push(indices.len() as u32);
+            }
         }
 
 
