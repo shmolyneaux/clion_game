@@ -975,8 +975,40 @@ fn frame(state: &mut State, delta: f32) {
                     }
 
                     if is_vert {
-                        let idx = indices.len() as u32;
+                        let dx = sdf.get(
+                            (
+                                coord.0+1,
+                                coord.1,
+                                coord.2
+                            )
+                        ) - dist;
+
+                        let dy = sdf.get(
+                            (
+                                coord.0,
+                                coord.1+1,
+                                coord.2
+                            )
+                        ) - dist;
+
+                        let dz = sdf.get(
+                            (
+                                coord.0,
+                                coord.1,
+                                coord.2+1
+                            )
+                        ) - dist;
+
+                        let idx = positions.len() as u32;
                         vert_lookup.insert(coord, idx);
+
+                        let posf = Vec3::new(coord.0 as f32, coord.1 as f32, coord.2 as f32);
+                        positions.push(posf * 0.1);
+
+                        let norm = Vec3::new(dx, dy, dz).normalize_or_zero();
+                        normals.push(norm);
+
+                        uvs.push(posf.xy() * 0.1);
                     }
                 }
             }
@@ -1034,130 +1066,56 @@ fn frame(state: &mut State, delta: f32) {
                 y_edges.contains(coord) &&
                 y_edges.contains(&(coord.0+1, coord.1, coord.2))
             {
-                let dist = sdf.get(*coord);
+                let coord0 = (coord.0+0, coord.1+0, coord.2+0);
+                let coord1 = (coord.0+0, coord.1+1, coord.2+0);
+                let coord2 = (coord.0+1, coord.1+0, coord.2+0);
 
-                let dx = sdf.get(
-                    (
-                        coord.0+1,
-                        coord.1,
-                        coord.2
-                    )
-                ) - dist;
+                let coord3 = (coord.0+1, coord.1+1, coord.2+0);
+                let coord4 = (coord.0+0, coord.1+1, coord.2+0);
+                let coord5 = (coord.0+1, coord.1+0, coord.2+0);
 
-                let dy = sdf.get(
-                    (
-                        coord.0,
-                        coord.1+1,
-                        coord.2
-                    )
-                ) - dist;
+                let idx0 = vert_lookup.get(&coord0).unwrap();
+                let idx1 = vert_lookup.get(&coord1).unwrap();
+                let idx2 = vert_lookup.get(&coord2).unwrap();
+                let idx3 = vert_lookup.get(&coord3).unwrap();
+                let idx4 = vert_lookup.get(&coord4).unwrap();
+                let idx5 = vert_lookup.get(&coord5).unwrap();
 
-                let dz = sdf.get(
-                    (
-                        coord.0,
-                        coord.1,
-                        coord.2+1
-                    )
-                ) - dist;
+                indices.push(*idx0);
+                indices.push(*idx1);
+                indices.push(*idx2);
 
-                let norm = Vec3::new(dx, dy, dz).normalize_or_zero();
-                normals.push(norm);
-                normals.push(norm);
-                normals.push(norm);
-
-                normals.push(norm);
-                normals.push(norm);
-                normals.push(norm);
-
-                let posf = Vec3::new(coord.0 as f32, coord.1 as f32, coord.2 as f32);
-                positions.push((posf + Vec3::new(0.0, 0.0, 0.0)) * 0.1);
-                positions.push((posf + Vec3::new(0.0, 1.0, 0.0)) * 0.1);
-                positions.push((posf + Vec3::new(1.0, 0.0, 0.0)) * 0.1);
-
-                positions.push((posf + Vec3::new(1.0, 1.0, 0.0)) * 0.1);
-                positions.push((posf + Vec3::new(0.0, 1.0, 0.0)) * 0.1);
-                positions.push((posf + Vec3::new(1.0, 0.0, 0.0)) * 0.1);
-
-                uvs.push(Vec2::new(0.0, 0.0));
-                uvs.push(Vec2::new(0.0, 1.0));
-                uvs.push(Vec2::new(1.0, 0.0));
-
-                uvs.push(Vec2::new(1.0, 1.0));
-                uvs.push(Vec2::new(0.0, 1.0));
-                uvs.push(Vec2::new(1.0, 0.0));
-
-                indices.push(indices.len() as u32);
-                indices.push(indices.len() as u32);
-                indices.push(indices.len() as u32);
-
-                indices.push(indices.len() as u32);
-                indices.push(indices.len() as u32);
-                indices.push(indices.len() as u32);
+                indices.push(*idx3);
+                indices.push(*idx4);
+                indices.push(*idx5);
             }
 
             if x_edges.contains(&(coord.0, coord.1, coord.2+1)) &&
                 z_edges.contains(coord) &&
                 z_edges.contains(&(coord.0+1, coord.1, coord.2))
             {
-                let dist = sdf.get(*coord);
+                let coord0 = (coord.0+0, coord.1+0, coord.2+0);
+                let coord1 = (coord.0+0, coord.1+0, coord.2+1);
+                let coord2 = (coord.0+1, coord.1+0, coord.2+0);
 
-                let dx = sdf.get(
-                    (
-                        coord.0+1,
-                        coord.1,
-                        coord.2
-                    )
-                ) - dist;
+                let coord3 = (coord.0+1, coord.1+0, coord.2+1);
+                let coord4 = (coord.0+0, coord.1+0, coord.2+1);
+                let coord5 = (coord.0+1, coord.1+0, coord.2+0);
 
-                let dy = sdf.get(
-                    (
-                        coord.0,
-                        coord.1+1,
-                        coord.2
-                    )
-                ) - dist;
+                let idx0 = vert_lookup.get(&coord0).unwrap();
+                let idx1 = vert_lookup.get(&coord1).unwrap();
+                let idx2 = vert_lookup.get(&coord2).unwrap();
+                let idx3 = vert_lookup.get(&coord3).unwrap();
+                let idx4 = vert_lookup.get(&coord4).unwrap();
+                let idx5 = vert_lookup.get(&coord5).unwrap();
 
-                let dz = sdf.get(
-                    (
-                        coord.0,
-                        coord.1,
-                        coord.2+1
-                    )
-                ) - dist;
+                indices.push(*idx0);
+                indices.push(*idx1);
+                indices.push(*idx2);
 
-                let norm = Vec3::new(dx, dy, dz).normalize_or_zero();
-                normals.push(norm);
-                normals.push(norm);
-                normals.push(norm);
-
-                normals.push(norm);
-                normals.push(norm);
-                normals.push(norm);
-
-                let posf = Vec3::new(coord.0 as f32, coord.1 as f32, coord.2 as f32);
-                positions.push((posf + Vec3::new(0.0, 0.0, 0.0)) * 0.1);
-                positions.push((posf + Vec3::new(0.0, 0.0, 1.0)) * 0.1);
-                positions.push((posf + Vec3::new(1.0, 0.0, 0.0)) * 0.1);
-
-                positions.push((posf + Vec3::new(1.0, 0.0, 1.0)) * 0.1);
-                positions.push((posf + Vec3::new(0.0, 0.0, 1.0)) * 0.1);
-                positions.push((posf + Vec3::new(1.0, 0.0, 0.0)) * 0.1);
-
-                uvs.push(Vec2::new(0.0, 0.0));
-                uvs.push(Vec2::new(0.0, 1.0));
-                uvs.push(Vec2::new(1.0, 0.0));
-
-                uvs.push(Vec2::new(1.0, 1.0));
-                uvs.push(Vec2::new(0.0, 1.0));
-                uvs.push(Vec2::new(1.0, 0.0));
-
-                indices.push(indices.len() as u32);
-                indices.push(indices.len() as u32);
-                indices.push(indices.len() as u32);
-
-                indices.push(indices.len() as u32);
-                indices.push(indices.len() as u32);
-                indices.push(indices.len() as u32);
+                indices.push(*idx3);
+                indices.push(*idx4);
+                indices.push(*idx5);
             }
         }
 
@@ -1166,65 +1124,28 @@ fn frame(state: &mut State, delta: f32) {
                 z_edges.contains(coord) &&
                 z_edges.contains(&(coord.0, coord.1+1, coord.2))
             {
-                let dist = sdf.get(*coord);
+                let coord0 = (coord.0+0, coord.1+0, coord.2+0);
+                let coord1 = (coord.0+0, coord.1+1, coord.2+0);
+                let coord2 = (coord.0+0, coord.1+0, coord.2+1);
 
-                let dx = sdf.get(
-                    (
-                        coord.0+1,
-                        coord.1,
-                        coord.2
-                    )
-                ) - dist;
+                let coord3 = (coord.0+0, coord.1+1, coord.2+1);
+                let coord4 = (coord.0+0, coord.1+1, coord.2+0);
+                let coord5 = (coord.0+0, coord.1+0, coord.2+1);
 
-                let dy = sdf.get(
-                    (
-                        coord.0,
-                        coord.1+1,
-                        coord.2
-                    )
-                ) - dist;
+                let idx0 = vert_lookup.get(&coord0).unwrap();
+                let idx1 = vert_lookup.get(&coord1).unwrap();
+                let idx2 = vert_lookup.get(&coord2).unwrap();
+                let idx3 = vert_lookup.get(&coord3).unwrap();
+                let idx4 = vert_lookup.get(&coord4).unwrap();
+                let idx5 = vert_lookup.get(&coord5).unwrap();
 
-                let dz = sdf.get(
-                    (
-                        coord.0,
-                        coord.1,
-                        coord.2+1
-                    )
-                ) - dist;
+                indices.push(*idx0);
+                indices.push(*idx1);
+                indices.push(*idx2);
 
-                let norm = Vec3::new(dx, dy, dz).normalize_or_zero();
-                normals.push(norm);
-                normals.push(norm);
-                normals.push(norm);
-
-                normals.push(norm);
-                normals.push(norm);
-                normals.push(norm);
-
-                let posf = Vec3::new(coord.0 as f32, coord.1 as f32, coord.2 as f32);
-                positions.push((posf + Vec3::new(0.0, 0.0, 0.0)) * 0.1);
-                positions.push((posf + Vec3::new(0.0, 1.0, 0.0)) * 0.1);
-                positions.push((posf + Vec3::new(0.0, 0.0, 1.0)) * 0.1);
-
-                positions.push((posf + Vec3::new(0.0, 1.0, 1.0)) * 0.1);
-                positions.push((posf + Vec3::new(0.0, 1.0, 0.0)) * 0.1);
-                positions.push((posf + Vec3::new(0.0, 0.0, 1.0)) * 0.1);
-
-                uvs.push(Vec2::new(0.0, 0.0));
-                uvs.push(Vec2::new(0.0, 1.0));
-                uvs.push(Vec2::new(1.0, 0.0));
-
-                uvs.push(Vec2::new(1.0, 1.0));
-                uvs.push(Vec2::new(0.0, 1.0));
-                uvs.push(Vec2::new(1.0, 0.0));
-
-                indices.push(indices.len() as u32);
-                indices.push(indices.len() as u32);
-                indices.push(indices.len() as u32);
-
-                indices.push(indices.len() as u32);
-                indices.push(indices.len() as u32);
-                indices.push(indices.len() as u32);
+                indices.push(*idx3);
+                indices.push(*idx4);
+                indices.push(*idx5);
             }
         }
 
