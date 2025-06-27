@@ -4,7 +4,8 @@ use crate::*;
 
 pub static END_PRIMITIVE: u32 = 0xFFFF_FFFF;
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Facet, Copy, Clone, Debug)]
+#[repr(u8)]
 pub enum ShaderDataType {
     Float,
     Vec2,
@@ -44,7 +45,8 @@ impl fmt::Display for ShaderDataType {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Facet, Copy, Clone)]
+#[repr(u8)]
 pub enum ShaderValue {
     Float(f32),
     Vec2(Vec2),
@@ -54,7 +56,7 @@ pub enum ShaderValue {
     Sampler2D(GLuint),
 }
 
-#[derive(Clone)]
+#[derive(Facet, Clone)]
 pub struct ShaderSymbol {
     data_type: ShaderDataType,
     name: String,
@@ -143,6 +145,7 @@ impl ShaderBuilder {
     }
 }
 
+#[derive(Facet)]
 pub struct VertexShader {
     id: gl::types::GLuint,
     inputs: Vec<ShaderSymbol>,
@@ -165,6 +168,7 @@ impl Drop for VertexShader {
     }
 }
 
+#[derive(Facet)]
 pub struct FragmentShader {
     id: gl::types::GLuint,
     inputs: Vec<ShaderSymbol>,
@@ -214,6 +218,7 @@ pub fn compile_shader(src: &CStr, shader_type: gl::types::GLuint) -> Result<gl::
     }
 }
 
+#[derive(Facet)]
 pub struct ShaderProgram {
     pub id: gl::types::GLuint,
     // TODO: we shouldn't need to store the vertex/fragment shader OpenGL handles after the program is linked
@@ -263,7 +268,7 @@ impl ShaderProgram {
 //    offset,
 //}
 
-#[derive(Debug)]
+#[derive(Facet, Debug)]
 pub struct VertexArray {
     pub id: GLuint,
     // TODO: should have an Rc to the vbo/ebo so they're not freed?
@@ -288,7 +293,7 @@ impl VertexArray {
     }
 }
 
-#[derive(Debug)]
+#[derive(Facet, Debug)]
 pub struct VertexBufferObject {
     id: GLuint
 }
@@ -316,7 +321,8 @@ impl VertexBufferObject {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Facet, Copy, Clone, Debug)]
+#[repr(u8)]
 pub enum Primitive {
     Points,
     Lines,
@@ -341,7 +347,7 @@ impl Primitive {
     }
 }
 
-#[derive(Debug)]
+#[derive(Facet, Debug)]
 pub struct ElementBufferObject {
     id: GLuint,
     primitive_type: Primitive
@@ -417,7 +423,7 @@ impl VertVec {
    }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Facet, Copy, Clone, Debug)]
 pub struct VertexAttribute {
     pub data_type: ShaderDataType,
     pub offset: u32,
@@ -431,6 +437,8 @@ impl VertexAttribute {
         }
     }
 }
+
+#[derive(Facet)]
 pub struct Mesh {
     // NOTE: Does not include VertexArray since vertex arrays are specific to the shader program being used
     pub vbo: VertexBufferObject,
@@ -517,6 +525,7 @@ pub struct MeshDataRaw {
     pub primitive_type: Primitive,
 }
 
+#[derive(Facet)]
 pub struct StaticMesh {
     pub shader: Rc<ShaderProgram>,
     pub vao: VertexArray,

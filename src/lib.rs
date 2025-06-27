@@ -10,6 +10,7 @@ use glam::{Vec2, Vec3, Vec4, Mat4};
 use std::ffi::CString;
 use std::ffi::CStr;
 
+use std::ops::{Add, Mul};
 
 use std::slice;
 
@@ -19,6 +20,12 @@ use std::cell::RefCell;
 use core::ffi::c_int;
 
 use glam::Vec3Swizzles;
+
+use facet::*;
+use facet_reflect::*;
+
+use std::fmt::Formatter;
+use std::borrow::Cow;
 
 mod gpu;
 mod mesh_gen;
@@ -37,16 +44,33 @@ unsafe extern "C" {
     fn SHM_GetDrawableSize(display_w: *mut i32, display_h: *mut i32);
     fn igBegin(name: *const core::ffi::c_char, p_open: *mut bool, flags: ImGuiWindowFlags) -> bool;
     fn igEnd();
+    fn igBeginDisabled();
+    fn igEndDisabled();
+    fn igIsItemHovered(flags: i32) -> bool;
+    fn igSetTooltip(text: *const core::ffi::c_char);
     fn igText(fmt: *const core::ffi::c_char, ...);
     fn igSliderFloat(label: *const core::ffi::c_char, v: *mut f32, v_min: f32, v_max: f32, format: *const core::ffi::c_char);
+    fn igCheckbox(label: *const core::ffi::c_char, value: *mut bool) -> bool;
     fn igWantCaptureKeyboard() -> bool;
     fn igWantCaptureMouse() -> bool;
+    fn igTreeNode(label: *const core::ffi::c_char) -> bool;
+    fn igTreePop();
+    fn igSHMNextItemOpenOnce();
+    fn igSameLine();
+
+    fn igBeginTable(label: *const core::ffi::c_char, columns: i32) -> bool;
+    fn igTableSetupColumn(label: *const core::ffi::c_char);
+    fn igTableHeadersRow();
+    fn igTableNextRow();
+    fn igTableSetColumnIndex(index: i32);
+    fn igEndTable();
 }
 
 const fn u32size_of<T>() -> u32 {
     size_of::<T>() as u32
 }
 
+#[derive(Facet)]
 struct KeyState {
     keys: Vec<u8>,
     last_keys: Vec<u8>,
@@ -84,11 +108,18 @@ impl KeyState {
     }
 }
 
-#[derive(Default)]
+#[derive(Facet, Default)]
 pub struct DebugState {
     sphere_radius: f32,
+    normal_shift: f32,
+    sdf_test_draw_normals: bool,
+    sdf_test_draw_hoop: bool,
+    sdf_test_draw_wireframe: bool,
 }
 
+
+#[derive(Facet)]
+/// -180.0 180.0
 pub struct State {
     frame_num: u64,
     view: Mat4,
@@ -107,13 +138,17 @@ pub struct State {
     debug_verts: Vec<(Vec3, Vec3)>,
     debug_vert_indices: Vec<u32>,
 
+    #[facet(range = (-90.0, 90.0))]
     pitch: f32,
+
+    #[facet(range = (-180.0, 180.0))]
     yaw: f32,
 
     camera_pos: Vec3,
     camera_front: Vec3,
     camera_up: Vec3,
 
+    #[facet(readonly)]
     mouse_captured: bool,
 
     test_mesh: StaticMesh,
@@ -123,6 +158,47 @@ pub struct State {
 
     debug_state: DebugState,
 }
+
+/// Parses a string of the form `"range =(-180.0, 180.0)"` into a tuple of two `f32` values.
+///
+/// This function expects the input to start with the exact prefix `"range = ("`,
+/// followed by two floating-point numbers separated by a comma and ending with a closing parenthesis.
+/// It trims any surrounding whitespace around the numbers, but does not tolerate malformed input.
+///
+/// # Examples
+///
+/// ```
+/// let s = "range = (-180.0, 180.0)";
+/// assert_eq!(parse_range(s), Some((-180.0, 180.0)));
+/// ```
+///
+/// Returns `Some((f32, f32))` if parsing succeeds, or `None` if the format is invalid.
+fn parse_facet_range(s: &str) -> Option<(f32, f32)> {
+    let prefix = "range = (";
+
+    let rest = s.strip_prefix(prefix)?.trim_start();
+
+    // Find the comma separating the two numbers
+    let comma_index = rest.find(',')?;
+
+    // Split around the comma
+    let (first_part, second_part_with_paren) = rest.split_at(comma_index);
+    let first = first_part.trim().parse::<f32>().ok()?;
+
+    // Skip comma and trim
+    let second_part = second_part_with_paren[1..].trim(); // skip the comma
+
+    // Should end with ')'
+    if !second_part.ends_with(')') {
+        return None;
+    }
+
+    let second_str = &second_part[..second_part.len() - 1]; // remove ')'
+    let second = second_str.trim().parse::<f32>().ok()?;
+
+    Some((first, second))
+}
+
 
 pub static SDL_SCANCODE_A: usize = 4;
 pub static SDL_SCANCODE_B: usize = 5;
@@ -175,6 +251,8 @@ pub static IMGUI_WINDOW_FLAGS_NO_NAV_INPUTS: c_int                = 1 << 16;  //
 pub static IMGUI_WINDOW_FLAGS_NO_NAV_FOCUS: c_int                 = 1 << 17;  // No focusing toward this window with keyboard/gamepad navigation (e.g. skipped by CTRL+TAB)
 pub static IMGUI_WINDOW_FLAGS_UNSAVED_DOCUMENT: c_int             = 1 << 18;  // Display a dot next to the title. When used in a tab/docking context, tab is selected when clicking the X + closure is not assumed (will wait for user to stop submitting the tab). Otherwise closure is assumed when pressing the X, so if you keep submitting the tab may reappear at end of tab bar.
 pub static IMGUI_WINDOW_FLAGS_NO_DOCKING: c_int                   = 1 << 19;  // Disable docking of this window
+
+pub static IMGUI_HOVERED_FLAGS_ALLOW_WHEN_DISABLED: c_int         = 1 << 10;  // IsItemHovered() only: Return true even if the item is disabled
 
 thread_local! {
     static STATE_REFCELL: RefCell<Option<State>> = RefCell::default();
@@ -240,6 +318,230 @@ fn draw_log_window() {
             igEnd();
         }
     });
+}
+
+fn format_shape_typename(shape: &Shape) -> String {
+    let mut output = String::new();
+    fmt::write(
+        &mut output,
+        format_args!("{}", FormatWrapper { func: shape.vtable.type_name()})
+    ).unwrap();
+    output
+}
+
+struct FormatWrapper {
+    func: TypeNameFn,
+}
+
+impl fmt::Display for FormatWrapper {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        (self.func)(f, TypeNameOpts::infinite())
+    }
+}
+
+fn imgui_debug<'a, T: Facet<'a>>(obj: &mut T) {
+    let poke = Peek::new(obj);
+
+    let mut open = true;
+    unsafe {
+        igBegin(c"State".as_ptr(), &mut open as *mut bool, IMGUI_WINDOW_FLAGS_NO_FOCUS_ON_APPEARING);
+        imgui_debug_inner(&poke, &[], "");
+        igEnd();
+    }
+}
+
+unsafe fn imgui_debug_inner(peek: &Peek, attributes: &[FieldAttribute], path: &str) {
+    let shape = peek.shape();
+    match (peek.scalar_type(), shape.def) {
+        (Some(ScalarType::Unit), _) => igText(CString::new(format!("()")).unwrap().as_ptr()),
+        (Some(ScalarType::Bool), _) => {
+            let mut readonly = false;
+            for attr in attributes.iter() {
+                let attr_str = match attr {
+                    FieldAttribute::Arbitrary(s) => s,
+                    _ => continue,
+                };
+                if *attr_str == "readonly" {
+                    readonly = true;
+                    break;
+                }
+            }
+
+            if readonly {
+                igText(CString::new(format!("{}", peek.get::<bool>().unwrap())).unwrap().as_ptr());
+            } else {
+                let ptr = unsafe { peek.data().thin().unwrap().as_ptr::<bool>() as *mut bool };
+                igCheckbox(
+                    CString::new(path).unwrap().as_ptr(),
+                    ptr,
+                );
+            }
+        },
+        (Some(ScalarType::Char), _) => igText(CString::new(format!("{}", peek.get::<char>().unwrap())).unwrap().as_ptr()),
+        (Some(ScalarType::Str), _) => igText(CString::new(format!("{}", peek.get::<&str>().unwrap())).unwrap().as_ptr()),
+        (Some(ScalarType::String), _) => igText(CString::new(format!("{}", peek.get::<String>().unwrap())).unwrap().as_ptr()),
+        (Some(ScalarType::CowStr), _) => igText(CString::new(format!("{}", peek.get::<Cow<str>>().unwrap())).unwrap().as_ptr()),
+        (Some(ScalarType::F32), _) => {
+            let ptr = unsafe { peek.data().thin().unwrap().as_ptr::<f32>() as *mut f32 };
+            let mut min = 0.0;
+            let mut max = 1.0;
+
+            for attr in attributes.iter() {
+                let attr_str = match attr {
+                    FieldAttribute::Arbitrary(s) => s,
+                    _ => continue,
+                };
+                if let Some(v) = parse_facet_range(attr_str) {
+                    min = v.0;
+                    max = v.1;
+                }
+            }
+            igSliderFloat(
+                CString::new(path).unwrap().as_ptr(),
+                ptr,
+                min,
+                max,
+                c"%.3f".as_ptr(),
+            );
+        },
+        (Some(ScalarType::F64), _) => igText(CString::new(format!("{}f64", peek.get::<f64>().unwrap())).unwrap().as_ptr()),
+        (Some(ScalarType::U8), _) => igText(CString::new(format!("{}u8", peek.get::<u8>().unwrap())).unwrap().as_ptr()),
+        (Some(ScalarType::U16), _) => igText(CString::new(format!("{}u16", peek.get::<u16>().unwrap())).unwrap().as_ptr()),
+        (Some(ScalarType::U32), _) => igText(CString::new(format!("{}u32", peek.get::<u32>().unwrap())).unwrap().as_ptr()),
+        (Some(ScalarType::U64), _) => igText(CString::new(format!("{}u64", peek.get::<u64>().unwrap())).unwrap().as_ptr()),
+        (Some(ScalarType::U128), _) => igText(CString::new(format!("{}u128", peek.get::<u128>().unwrap())).unwrap().as_ptr()),
+        (Some(ScalarType::USize), _) => igText(CString::new(format!("{}usize", peek.get::<usize>().unwrap())).unwrap().as_ptr()),
+        (Some(ScalarType::I8), _) => igText(CString::new(format!("{}i8", peek.get::<i8>().unwrap())).unwrap().as_ptr()),
+        (Some(ScalarType::I16), _) => igText(CString::new(format!("{}i16", peek.get::<i16>().unwrap())).unwrap().as_ptr()),
+        (Some(ScalarType::I32), _) => {
+            let ptr = unsafe { peek.data().thin().unwrap().as_ptr::<i32>() as *mut i32 };
+            igText(CString::new(format!("{}i32", peek.get::<i32>().unwrap())).unwrap().as_ptr());
+            // unsafe { *ptr = *ptr - 1 };
+        },
+        (Some(ScalarType::I64), _) => igText(CString::new(format!("{}i64", peek.get::<i64>().unwrap())).unwrap().as_ptr()),
+        (Some(ScalarType::I128), _) => igText(CString::new(format!("{}128", peek.get::<i128>().unwrap())).unwrap().as_ptr()),
+        (Some(ScalarType::ISize), _) => igText(CString::new(format!("{}isize", peek.get::<isize>().unwrap())).unwrap().as_ptr()),
+        (_, Def::Scalar(def)) => igText(CString::new(format!("Def::Scalar")).unwrap().as_ptr()),
+        (_, Def::List(def)) => {
+            let shape_typename = format_shape_typename(peek.shape());
+            let peek = peek.into_list_like().unwrap();
+            if peek.len() == 0 {
+                igText(CString::new(format!("[]")).unwrap().as_ptr());
+            }
+            else {
+                if igTreeNode(
+                    CString::new(
+                        format!(
+                            "{}##{}",
+                            shape_typename,
+                            path,
+                        )
+                    ).unwrap().as_ptr()
+                ) {
+                    for (idx, item) in peek.iter().enumerate() {
+                        imgui_debug_inner(
+                            &item,
+                            &[],
+                            &format!("{}[{}]", path, idx),
+                        );
+                    }
+                    igTreePop();
+                }
+            }
+        },
+        (_, Def::Map(def)) => igText(CString::new(format!("Def::Map")).unwrap().as_ptr()),
+        (_, Def::Set(def)) => igText(CString::new(format!("Def::Set")).unwrap().as_ptr()),
+        (_, Def::Array(def)) => {
+            let shape_typename = format_shape_typename(peek.shape());
+            let peek = peek.into_list_like().unwrap();
+            if peek.len() == 0 {
+                igText(CString::new(format!("[]")).unwrap().as_ptr());
+            }
+            else {
+                if igTreeNode(
+                    CString::new(
+                        format!(
+                            "{}##{}",
+                            shape_typename,
+                            path,
+                        )
+                    ).unwrap().as_ptr()
+                ) {
+                    for (idx, item) in peek.iter().enumerate() {
+                        imgui_debug_inner(
+                            &item,
+                            &[],
+                            &format!("{}[{}]", path, idx),
+                        );
+                    }
+                    igTreePop();
+                }
+            }
+        },
+        (_, Def::Slice(def)) => igText(CString::new(format!("Def::Slice")).unwrap().as_ptr()),
+        (_, Def::Option(def)) => igText(CString::new(format!("Def::Option")).unwrap().as_ptr()),
+        (_, Def::SmartPointer(def)) => igText(CString::new(format!("Def::SmartPointer")).unwrap().as_ptr()),
+        (_, Def::Undefined) => {
+            let ty = shape.ty;
+            match ty {
+                Type::Primitive(ty) => igText(CString::new(format!("Type::Primitive")).unwrap().as_ptr()),
+                Type::Sequence(ty) => igText(CString::new(format!("Type::Sequence")).unwrap().as_ptr()),
+                Type::User(UserType::Struct(ty)) => {
+                    // TODO: If this is a tuple struct with a single element, don't print the field
+                    if path == "" {
+                        igSHMNextItemOpenOnce();
+                    }
+                    if igTreeNode(
+                        CString::new(
+                            format!(
+                                "{}##{}",
+                                format_shape_typename(peek.shape()),
+                                path,
+                            )).unwrap().as_ptr()
+                    ) {
+                        let peek = peek.into_struct().unwrap();
+
+                        if igBeginTable(CString::new(path).unwrap().as_ptr(), 2) {
+                            // TODO:
+                            //     ImGui::TableSetupColumn("Key", ImGuiTableColumnFlags_WidthFixed);
+                            //     ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
+                            igTableSetupColumn(c"Attribute".as_ptr());
+                            igTableSetupColumn(c"Value".as_ptr());
+
+                            // Don't show the header row (we only keep it for specifying column info)
+                            // igTableHeadersRow();
+
+                            for field_idx in 0..peek.field_count() {
+                                igTableNextRow();
+
+                                igTableSetColumnIndex(0);
+                                let field = peek.field(field_idx).unwrap();
+                                let field_shape = ty.fields[field_idx];
+                                let field_name = field_shape.name;
+                                igText(CString::new(format!("{field_name}: ")).unwrap().as_ptr());
+
+                                igTableSetColumnIndex(1);
+                                imgui_debug_inner(
+                                    &field,
+                                    &field_shape.attributes,
+                                    &format!("{}.{}", path, field_name),
+                                );
+                            }
+
+                            igEndTable();
+                        }
+                        igTreePop();
+                    }
+                },
+                Type::User(UserType::Enum(ty)) => igText(CString::new(format!("UserType::Enum")).unwrap().as_ptr()),
+                Type::User(UserType::Union(ty)) => igText(CString::new(format!("UserType::Union")).unwrap().as_ptr()),
+                Type::User(UserType::Opaque) => igText(CString::new(format!("UserType::Opaque")).unwrap().as_ptr()),
+                Type::Pointer(ty) => igText(CString::new(format!("Type::Pointer")).unwrap().as_ptr()),
+                _ => igText(CString::new(format!("Can't debug {}", format_shape_typename(peek.shape()))).unwrap().as_ptr()),
+            }
+        },
+        _ => igText(CString::new(format!("Can't debug {}", format_shape_typename(peek.shape()))).unwrap().as_ptr()),
+    }
 }
 
 fn gen_cpu_texture() -> GLuint {
@@ -693,7 +995,7 @@ fn init_state() -> State {
     log_opengl_errors!();
 
     println!("State initialized!");
-    State {
+    let mut state = State {
         frame_num,
         debug_vao,
         debug_vbo,
@@ -716,7 +1018,9 @@ fn init_state() -> State {
         keys,
         meshes,
         debug_state,
-    }
+    };
+
+    state
 }
 
 #[unsafe(no_mangle)]
@@ -806,12 +1110,20 @@ impl<F: Fn(Vec3) -> f32> SdfCache<F> {
             }
         }
     }
+
+    fn get_nocache(&self, coord: Vec3) -> f32 {
+        let posf = Vec3::new(coord.x as f32, coord.y as f32, coord.z as f32) * self.scale;
+        (self.sdf)(posf)
+    }
 }
 
 fn frame(state: &mut State, delta: f32) {
     if state.frame_num == 0 {
         println!("Starting first frame");
     }
+
+    imgui_debug(state);
+
     unsafe {
         update_keys(state);
 
@@ -933,9 +1245,53 @@ fn frame(state: &mut State, delta: f32) {
             f32::to_radians(45.0), display_w as f32 / display_h as f32, 0.1f32, 100.0f32
         );
 
+        if state.debug_state.sdf_test_draw_hoop {
+            for v in 0..20 {
+                let v = v as f32;
+                debug_line_color(
+                    state,
+                    &[
+                        Vec3::new(
+                            v.mul(0.3).cos() * state.debug_state.sphere_radius,
+                            0.0,
+                            v.mul(0.3).sin() * state.debug_state.sphere_radius,
+                        ),
+                        Vec3::new(
+                            v.add(1.0).mul(0.3).cos() * state.debug_state.sphere_radius,
+                            0.0,
+                            v.add(1.0).mul(0.3).sin() * state.debug_state.sphere_radius,
+                        ),
+                    ],
+                    Vec3::new(1.0, 0.0, 1.0),
+                );
+            }
+
+            for v in 0..20 {
+                let v = v as f32;
+                debug_line_color(
+                    state,
+                    &[
+                        Vec3::new(
+                            v.mul(0.3).cos() * (0.02 + state.debug_state.sphere_radius),
+                            0.0,
+                            v.mul(0.3).sin() * (0.02 + state.debug_state.sphere_radius),
+                        ),
+                        Vec3::new(
+                            v.add(1.0).mul(0.3).cos() * (0.02 + state.debug_state.sphere_radius),
+                            0.0,
+                            v.add(1.0).mul(0.3).sin() * (0.02 + state.debug_state.sphere_radius),
+                        ),
+                    ],
+                    Vec3::new(1.0, 0.0, 1.0),
+                );
+            }
+        }
+
         let recip_radius = state.debug_state.sphere_radius.recip();
         let mut sdf = SdfCache::new(
-            |pos| sdf_sphere(pos*recip_radius),
+            |pos| sdf_sphere((pos)*recip_radius)
+                    .min(sdf_sphere((pos - Vec3::new(0.15, 0.15, 0.15))*recip_radius))
+                    ,
             0.1,
             20,
        );
@@ -975,40 +1331,52 @@ fn frame(state: &mut State, delta: f32) {
                     }
 
                     if is_vert {
-                        let dx = sdf.get(
-                            (
-                                coord.0+1,
-                                coord.1,
-                                coord.2
+                        let dx = sdf.get_nocache(
+                            Vec3::new(
+                                coord.0 as f32+0.1,
+                                coord.1 as f32,
+                                coord.2 as f32
                             )
                         ) - dist;
 
-                        let dy = sdf.get(
-                            (
-                                coord.0,
-                                coord.1+1,
-                                coord.2
+                        let dy = sdf.get_nocache(
+                            Vec3::new(
+                                coord.0 as f32,
+                                coord.1 as f32+0.1,
+                                coord.2 as f32
                             )
                         ) - dist;
 
-                        let dz = sdf.get(
-                            (
-                                coord.0,
-                                coord.1,
-                                coord.2+1
+                        let dz = sdf.get_nocache(
+                            Vec3::new(
+                                coord.0 as f32,
+                                coord.1 as f32,
+                                coord.2 as f32+0.1
                             )
                         ) - dist;
 
                         let idx = positions.len() as u32;
                         vert_lookup.insert(coord, idx);
 
-                        let posf = Vec3::new(coord.0 as f32, coord.1 as f32, coord.2 as f32);
-                        positions.push(posf * 0.1);
-
                         let norm = Vec3::new(dx, dy, dz).normalize_or_zero();
-                        normals.push(norm);
+                        let raw_posf = Vec3::new(coord.0 as f32, coord.1 as f32, coord.2 as f32);
+                        let pushed_posf = raw_posf - 10.0 * state.debug_state.sphere_radius * dist * norm;
 
-                        uvs.push(posf.xy() * 0.1);
+                        let posf = Vec3::lerp(raw_posf, pushed_posf, state.debug_state.normal_shift);
+
+                        if state.debug_state.sdf_test_draw_normals {
+                            debug_line(
+                                state,
+                                &[
+                                    raw_posf*0.1,
+                                    pushed_posf*0.1,
+                                ]
+                            );
+                        }
+
+                        positions.push(posf * 0.1);
+                        normals.push(norm);
+                        uvs.push(posf.xy() * 0.1 / state.debug_state.sphere_radius);
                     }
                 }
             }
@@ -1167,19 +1535,72 @@ fn frame(state: &mut State, delta: f32) {
             Rc::new(Mesh::create(&meshdata).unwrap()),
         ).expect("Can't create the test mesh");
 
-        generated.draw(&mut ctx);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if state.debug_state.sdf_test_draw_wireframe {
+                gl::PolygonMode(gl::FRONT_AND_BACK, gl::LINE);
+                generated.draw(&mut ctx);
+                gl::PolygonMode(gl::FRONT_AND_BACK, gl::FILL);
+            } else {
+                generated.draw(&mut ctx);
+            }
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            // Always use filled mode in WebGL (no glPolygonMode in WebGL)
+            generated.draw(&mut ctx);
+        }
 
         let mut open = true;
         igBegin(c"From Rust".as_ptr(), &mut open as *mut bool, IMGUI_WINDOW_FLAGS_NO_FOCUS_ON_APPEARING);
         igText(CString::new(format!("Display size: {}x{}", display_w, display_h)).unwrap().as_ptr());
 
-        igSliderFloat(
-            c"My Slider".as_ptr(),
-            &mut state.debug_state.sphere_radius as *mut f32,
-            0.001,
-            1.0,
-            c"%.3f".as_ptr(),
+        {
+            igSliderFloat(
+                c"Sphere Radius".as_ptr(),
+                &mut state.debug_state.sphere_radius as *mut f32,
+                0.001,
+                1.0,
+                c"%.3f".as_ptr(),
+            );
+
+            igSliderFloat(
+                c"Normal Factor".as_ptr(),
+                &mut state.debug_state.normal_shift as *mut f32,
+                0.001,
+                1.0,
+                c"%.3f".as_ptr(),
+            );
+
+            igCheckbox(
+                c"Show SDF Normals".as_ptr(),
+                &mut state.debug_state.sdf_test_draw_normals as *mut bool,
+            );
+
+            igCheckbox(
+                c"Show SDF Hoop".as_ptr(),
+                &mut state.debug_state.sdf_test_draw_hoop as *mut bool,
+            );
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            igBeginDisabled();
+        }
+
+        igCheckbox(
+            c"Show SDF Wireframe".as_ptr(),
+            &mut state.debug_state.sdf_test_draw_wireframe as *mut bool,
         );
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            igEndDisabled();
+            if igIsItemHovered(IMGUI_HOVERED_FLAGS_ALLOW_WHEN_DISABLED) {
+                igSetTooltip(c"WebGL 2 does not support LINE polygon mode".as_ptr())
+            }
+        }
 
         igEnd();
 

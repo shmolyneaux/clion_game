@@ -75,6 +75,24 @@ extern "C" {
         return ImGui::End();
     }
 
+    void igBeginDisabled() {
+        ImGui::BeginDisabled();
+    }
+
+    void igEndDisabled() {
+        ImGui::EndDisabled();
+    }
+
+    // Returns true if the last item is hovered (with optional flags)
+    bool igIsItemHovered(unsigned int flags) {
+        return ImGui::IsItemHovered(static_cast<ImGuiHoveredFlags>(flags));
+    }
+
+    // Sets a tooltip for the last item
+    void igSetTooltip(const char* text) {
+        ImGui::SetTooltip("%s", text);
+    }
+
     void igText(const char* fmt, ...)
     {
         va_list args;
@@ -85,6 +103,10 @@ extern "C" {
 
     void igSliderFloat(const char* label, float* v, float v_min, float v_max, const char* format) {
         ImGui::SliderFloat(label, v, v_min, v_max, format);
+    }
+
+    bool igCheckbox(const char* label, bool* v) {
+        return ImGui::Checkbox(label, v);
     }
 
     bool igWantCaptureKeyboard() {
@@ -98,7 +120,48 @@ extern "C" {
     void SHM_GetDrawableSize(int *display_w, int *display_h) {
         SDL_GL_GetDrawableSize(window, display_w, display_h);
     }
+
+    void igSHMNextItemOpenOnce() {
+        ImGui::SetNextItemOpen(true, ImGuiCond_Once);
+    }
+
+    bool igTreeNode(const char* label) {
+        return ImGui::TreeNode(label);
+    }
+
+    void igTreePop() {
+        return ImGui::TreePop();
+    }
+
+    void igSameLine() {
+        return ImGui::SameLine();
+    }
+
+    bool igBeginTable(const char* label, int columns) {
+        return ImGui::BeginTable(label, columns);
+    }
+
+    void igTableSetupColumn(const char* label) {
+        ImGui::TableSetupColumn(label);
+    }
+
+    void igTableHeadersRow() {
+        ImGui::TableHeadersRow();
+    }
+
+    void igTableNextRow() {
+        ImGui::TableNextRow();
+    }
+
+    void igTableSetColumnIndex(int index) {
+        ImGui::TableSetColumnIndex(index);
+    }
+    void igEndTable() {
+        return ImGui::EndTable();
+    }
 }
+
+
 
 // Function to log error messages
 void log_error(const char *error_message) {

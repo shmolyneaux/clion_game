@@ -7,5 +7,13 @@ edition = "2024"
 crate-type = ["staticlib"]
 
 [dependencies]
+facet = "0.27.14"
+facet-reflect = "0.27.14"
 gl = "0.14.0"
-glam = "0.30.0"
+glam = "0.30.4"
+
+[patch.crates-io]
+glam = { path = "glam-rs" }
+facet = { path = "facet/facet" }
+facet-reflect = { path = "facet/facet-reflect" }
+
