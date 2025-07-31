@@ -138,7 +138,7 @@ extern "C" {
     }
 
     bool igBeginTable(const char* label, int columns) {
-        return ImGui::BeginTable(label, columns);
+        return ImGui::BeginTable(label, columns, ImGuiTableFlags_SizingStretchProp);
     }
 
     void igTableSetupColumn(const char* label) {
@@ -483,7 +483,7 @@ int main(int, char**)
             | SDL_WINDOW_RESIZABLE
             | SDL_WINDOW_ALLOW_HIGHDPI
             );
-    window = SDL_CreateWindow("CLion Game", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 720, window_flags);
+    window = SDL_CreateWindow("CLion Game", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1920, 1080, window_flags);
     if (window == nullptr)
     {
         log_error("SDL_CreateWindow Error:");

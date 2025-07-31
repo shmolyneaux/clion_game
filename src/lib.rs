@@ -1,4 +1,4 @@
-#![allow(unused_variables, unused_mut, unused_imports, unused_attributes, unused_unsafe)]
+#![allow(unused_variables, unused_mut, unused_imports, unused_attributes, unused_unsafe, dead_code, unsafe_op_in_unsafe_fn)]
 
 #[macro_use]
 use gl;
@@ -30,7 +30,9 @@ use std::borrow::Cow;
 mod gpu;
 mod mesh_gen;
 mod debug_draw;
+mod sdf;
 
+use crate::sdf::*;
 use crate::gpu::*;
 use crate::debug_draw::*;
 use crate::mesh_gen::{box_mesh, quad_mesh};
@@ -71,7 +73,7 @@ const fn u32size_of<T>() -> u32 {
 }
 
 #[derive(Facet)]
-struct KeyState {
+pub struct KeyState {
     keys: Vec<u8>,
     last_keys: Vec<u8>,
 }
@@ -91,19 +93,19 @@ impl KeyState {
         }
     }
 
-    fn pressed(&self, sdl_key: usize) -> bool {
+    pub fn pressed(&self, sdl_key: usize) -> bool {
         self.keys[sdl_key] == 1
     }
 
-    fn released(&self, sdl_key: usize) -> bool {
+    pub fn released(&self, sdl_key: usize) -> bool {
         self.keys[sdl_key] == 0
     }
 
-    fn just_pressed(&self, sdl_key: usize) -> bool {
+    pub fn just_pressed(&self, sdl_key: usize) -> bool {
         self.keys[sdl_key] == 1 && self.keys[sdl_key] != self.last_keys[sdl_key]
     }
 
-    fn just_released(&self, sdl_key: usize) -> bool {
+    pub fn just_released(&self, sdl_key: usize) -> bool {
         self.keys[sdl_key] == 0 && self.keys[sdl_key] != self.last_keys[sdl_key]
     }
 }
@@ -115,6 +117,7 @@ pub struct DebugState {
     sdf_test_draw_normals: bool,
     sdf_test_draw_hoop: bool,
     sdf_test_draw_wireframe: bool,
+    sdf_box_size: Vec3,
 }
 
 
@@ -990,6 +993,7 @@ fn init_state() -> State {
 
     let mut debug_state = DebugState::default();
     debug_state.sphere_radius = 1.0;
+    debug_state.sdf_box_size = Vec3::new(0.5, 0.7, 1.0);
 
     let default_shader_program = create_default_shader();
     log_opengl_errors!();
@@ -1056,6 +1060,12 @@ fn sdf_sphere(pos: Vec3) -> f32 {
     (pos.x*pos.x + pos.y*pos.y + pos.z*pos.z).sqrt() - 1.0
 }
 
+fn sdf_box(pos: Vec3, b: Vec3) -> f32 {
+    let q = pos.abs() - b;
+
+    q.max(Vec3::ZERO).length() + q.max_element().min(0.0)
+}
+
 fn sdf_vert_set(grid: &Vec<Vec<Vec<f32>>>, pos: (usize, usize, usize)) -> bool {
     let x = pos.0;
     let y = pos.1;
@@ -1063,58 +1073,13 @@ fn sdf_vert_set(grid: &Vec<Vec<Vec<f32>>>, pos: (usize, usize, usize)) -> bool {
 
     let sign = grid[x][y][z].is_sign_positive();
 
-    (
-        sign != grid[x][y][z+1].is_sign_positive() ||
-        sign != grid[x][y+1][z].is_sign_positive() ||
-        sign != grid[x][y+1][z+1].is_sign_positive() ||
-        sign != grid[x+1][y][z].is_sign_positive() ||
-        sign != grid[x+1][y][z+1].is_sign_positive() ||
-        sign != grid[x+1][y+1][z].is_sign_positive() ||
-        sign != grid[x+1][y+1][z+1].is_sign_positive()
-    )
-}
-
-struct SdfCache<F>
-where
-    F: Fn(Vec3) -> f32
-{
-    sdf: F,
-    cache: RefCell<HashMap<(i32, i32, i32), f32>>,
-    scale: f32,
-    resolution: u32,
-    bounds: (Vec3, Vec3),
-}
-
-impl<F: Fn(Vec3) -> f32> SdfCache<F> {
-    fn new(sdf: F, scale: f32, resolution: u32) -> Self {
-        let cache = RefCell::new(HashMap::new());
-        let bounds = (Vec3::new(-1.0, -1.0, -1.0), Vec3::new(1.0, 1.0, 1.0));
-        Self {
-            sdf,
-            scale,
-            resolution,
-            bounds,
-            cache,
-        }
-    }
-
-    fn get(&self, coord: (i32, i32, i32)) -> f32 {
-        let mut cache = self.cache.borrow_mut();
-        match cache.get(&coord) {
-            Some(dist) => *dist,
-            None => {
-                let posf = Vec3::new(coord.0 as f32, coord.1 as f32, coord.2 as f32) * self.scale;
-                let dist = (self.sdf)(posf);
-                cache.insert(coord, dist);
-                dist
-            }
-        }
-    }
-
-    fn get_nocache(&self, coord: Vec3) -> f32 {
-        let posf = Vec3::new(coord.x as f32, coord.y as f32, coord.z as f32) * self.scale;
-        (self.sdf)(posf)
-    }
+    sign != grid[x][y][z+1].is_sign_positive() ||
+    sign != grid[x][y+1][z].is_sign_positive() ||
+    sign != grid[x][y+1][z+1].is_sign_positive() ||
+    sign != grid[x+1][y][z].is_sign_positive() ||
+    sign != grid[x+1][y][z+1].is_sign_positive() ||
+    sign != grid[x+1][y+1][z].is_sign_positive() ||
+    sign != grid[x+1][y+1][z+1].is_sign_positive()
 }
 
 fn frame(state: &mut State, delta: f32) {
@@ -1288,13 +1253,18 @@ fn frame(state: &mut State, delta: f32) {
         }
 
         let recip_radius = state.debug_state.sphere_radius.recip();
+        let box_size = state.debug_state.sdf_box_size;
+
+        let mybox = Sdf::SdfSmoothUnion(
+            0.1,
+            Box::new(Sdf::SdfBox(box_size)),
+            Box::new(Sdf::SdfTranslate(Vec3::new(0.0, 0.4, 0.0), Box::new(Sdf::SdfSphere(0.7)))),
+        );
         let mut sdf = SdfCache::new(
-            |pos| sdf_sphere((pos)*recip_radius)
-                    .min(sdf_sphere((pos - Vec3::new(0.15, 0.15, 0.15))*recip_radius))
-                    ,
+            mybox,
             0.1,
             20,
-       );
+        );
 
         let mut ctx = HashMap::new();
         ctx.insert("view".to_string(), ShaderValue::Mat4(state.view));
