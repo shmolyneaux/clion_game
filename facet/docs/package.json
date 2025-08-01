@@ -1,0 +1,27 @@
+{
+  "author": "",
+  "description": "",
+  "keywords": [],
+  "license": "ISC",
+  "main": "index.js",
+  "name": "facet.rs",
+  "packageManager": "pnpm@10.12.1",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "type": "module",
+  "version": "1.0.0",
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "@tsconfig/svelte": "^5.0.4",
+    "rollup-plugin-visualizer": "^6.0.0",
+    "sass-embedded": "^1.87.0",
+    "vite": "^6.3.4",
+    "vite-plugin-top-level-await": "^1.5.0",
+    "vite-plugin-wasm": "^3.4.1"
+  },
+  "dependencies": {
+    "@bearcove/home-base": "^12.0.2",
+    "svelte": "^5.28.2"
+  }
+}
