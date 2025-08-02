@@ -1056,16 +1056,6 @@ fn update_keys(state: &mut State) {
     }
 }
 
-fn sdf_sphere(pos: Vec3) -> f32 {
-    (pos.x*pos.x + pos.y*pos.y + pos.z*pos.z).sqrt() - 1.0
-}
-
-fn sdf_box(pos: Vec3, b: Vec3) -> f32 {
-    let q = pos.abs() - b;
-
-    q.max(Vec3::ZERO).length() + q.max_element().min(0.0)
-}
-
 fn sdf_vert_set(grid: &Vec<Vec<Vec<f32>>>, pos: (usize, usize, usize)) -> bool {
     let x = pos.0;
     let y = pos.1;
@@ -1210,58 +1200,15 @@ fn frame(state: &mut State, delta: f32) {
             f32::to_radians(45.0), display_w as f32 / display_h as f32, 0.1f32, 100.0f32
         );
 
-        if state.debug_state.sdf_test_draw_hoop {
-            for v in 0..20 {
-                let v = v as f32;
-                debug_line_color(
-                    state,
-                    &[
-                        Vec3::new(
-                            v.mul(0.3).cos() * state.debug_state.sphere_radius,
-                            0.0,
-                            v.mul(0.3).sin() * state.debug_state.sphere_radius,
-                        ),
-                        Vec3::new(
-                            v.add(1.0).mul(0.3).cos() * state.debug_state.sphere_radius,
-                            0.0,
-                            v.add(1.0).mul(0.3).sin() * state.debug_state.sphere_radius,
-                        ),
-                    ],
-                    Vec3::new(1.0, 0.0, 1.0),
-                );
-            }
-
-            for v in 0..20 {
-                let v = v as f32;
-                debug_line_color(
-                    state,
-                    &[
-                        Vec3::new(
-                            v.mul(0.3).cos() * (0.02 + state.debug_state.sphere_radius),
-                            0.0,
-                            v.mul(0.3).sin() * (0.02 + state.debug_state.sphere_radius),
-                        ),
-                        Vec3::new(
-                            v.add(1.0).mul(0.3).cos() * (0.02 + state.debug_state.sphere_radius),
-                            0.0,
-                            v.add(1.0).mul(0.3).sin() * (0.02 + state.debug_state.sphere_radius),
-                        ),
-                    ],
-                    Vec3::new(1.0, 0.0, 1.0),
-                );
-            }
-        }
-
-        let recip_radius = state.debug_state.sphere_radius.recip();
         let box_size = state.debug_state.sdf_box_size;
 
-        let mybox = Sdf::SdfSmoothUnion(
+        let mybox = sdf_smooth(
             0.1,
-            Box::new(Sdf::SdfBox(box_size)),
-            Box::new(Sdf::SdfTranslate(Vec3::new(0.0, 0.4, 0.0), Box::new(Sdf::SdfSphere(0.7)))),
+            sdf_box(box_size),
+            sdf_sphere(0.7),
         );
         let mut sdf = SdfCache::new(
-            mybox,
+            *mybox,
             0.1,
             20,
         );
@@ -1270,235 +1217,7 @@ fn frame(state: &mut State, delta: f32) {
         ctx.insert("view".to_string(), ShaderValue::Mat4(state.view));
         ctx.insert("projection".to_string(), ShaderValue::Mat4(state.projection));
 
-        let white = ShaderValue::Vec3(Vec3::new(1.0, 1.0, 1.0));
-        let black = ShaderValue::Vec3(Vec3::new(0.0, 0.0, 0.0));
-        let magenta = ShaderValue::Vec3(Vec3::new(1.0, 0.0, 1.0));
-
-        let mut index_count = 0;
-        let mut positions = Vec::new();
-        let mut uvs = Vec::new();
-        let mut normals = Vec::new();
-        let mut indices = Vec::new();
-
-        // Vert coord to index
-        let mut vert_lookup = HashMap::new();
-        //let mut edges = HashH
-
-        for x in -10..10 {
-            for y in -10..10 {
-                for z in -10..10 {
-                    let coord = (x, y, z);
-                    let dist = sdf.get(coord);
-                    let mut is_vert = false;
-
-                    // Logically, the vert is somewhere in the cube represented by 8 sample points. We know there's a
-                    // vert in the cube if there's a transition from negative to positive somewhere within the volume
-                    // of the cube
-                    for (offx, offy, offz) in [(0, 0, 1), (0, 1, 0), (0, 1, 1), (1, 0, 0), (1, 0, 1), (1, 1, 0), (1, 1, 1)] {
-                        if dist.is_sign_positive() != sdf.get((coord.0+offx, coord.1+offy, coord.2+offz)).is_sign_positive() {
-                            is_vert = true;
-                        }
-                    }
-
-                    if is_vert {
-                        let dx = sdf.get_nocache(
-                            Vec3::new(
-                                coord.0 as f32+0.1,
-                                coord.1 as f32,
-                                coord.2 as f32
-                            )
-                        ) - dist;
-
-                        let dy = sdf.get_nocache(
-                            Vec3::new(
-                                coord.0 as f32,
-                                coord.1 as f32+0.1,
-                                coord.2 as f32
-                            )
-                        ) - dist;
-
-                        let dz = sdf.get_nocache(
-                            Vec3::new(
-                                coord.0 as f32,
-                                coord.1 as f32,
-                                coord.2 as f32+0.1
-                            )
-                        ) - dist;
-
-                        let idx = positions.len() as u32;
-                        vert_lookup.insert(coord, idx);
-
-                        let norm = Vec3::new(dx, dy, dz).normalize_or_zero();
-                        let raw_posf = Vec3::new(coord.0 as f32, coord.1 as f32, coord.2 as f32);
-                        let pushed_posf = raw_posf - 10.0 * state.debug_state.sphere_radius * dist * norm;
-
-                        let posf = Vec3::lerp(raw_posf, pushed_posf, state.debug_state.normal_shift);
-
-                        if state.debug_state.sdf_test_draw_normals {
-                            debug_line(
-                                state,
-                                &[
-                                    raw_posf*0.1,
-                                    pushed_posf*0.1,
-                                ]
-                            );
-                        }
-
-                        positions.push(posf * 0.1);
-                        normals.push(norm);
-                        uvs.push(posf.xy() * 0.1 / state.debug_state.sphere_radius);
-                    }
-                }
-            }
-        }
-
-        let mut x_edges: HashSet<(i32, i32, i32)> = HashSet::new();
-        let mut y_edges: HashSet<(i32, i32, i32)> = HashSet::new();
-        let mut z_edges: HashSet<(i32, i32, i32)> = HashSet::new();
-
-        for (c0, _) in vert_lookup.iter() {
-            let cx = ((c0.0+1), (c0.1+0), (c0.2+0));
-            let cxz = ((c0.0+1), (c0.1+0), (c0.2+1));
-            let cxy = ((c0.0+1), (c0.1+1), (c0.2+0));
-            let cxyz = ((c0.0+1), (c0.1+1), (c0.2+1));
-            let cz = ((c0.0+0), (c0.1+0), (c0.2+1));
-            let cy = ((c0.0+0), (c0.1+1), (c0.2+0));
-            let cyz = ((c0.0+0), (c0.1+1), (c0.2+1));
-
-            // We only want an edge if the isosurface intersects with the
-            // face of the cube this edge is passing through.
-
-            if vert_lookup.get(&cx).is_some() {
-                let dist = sdf.get(cx);
-                if dist.is_sign_positive() != sdf.get(cxz).is_sign_positive() ||
-                   dist.is_sign_positive() != sdf.get(cxy).is_sign_positive() ||
-                   dist.is_sign_positive() != sdf.get(cxyz).is_sign_positive()
-                {
-                    x_edges.insert(*c0);
-                }
-            }
-
-            if vert_lookup.get(&cy).is_some() {
-                let dist = sdf.get(cy);
-                if dist.is_sign_positive() != sdf.get(cxy).is_sign_positive() ||
-                   dist.is_sign_positive() != sdf.get(cyz).is_sign_positive() ||
-                   dist.is_sign_positive() != sdf.get(cxyz).is_sign_positive()
-                {
-                    y_edges.insert(*c0);
-                }
-            }
-
-            if vert_lookup.get(&cz).is_some() {
-                let dist = sdf.get(cz);
-                if dist.is_sign_positive() != sdf.get(cxz).is_sign_positive() ||
-                   dist.is_sign_positive() != sdf.get(cyz).is_sign_positive() ||
-                   dist.is_sign_positive() != sdf.get(cxyz).is_sign_positive()
-                {
-                    z_edges.insert(*c0);
-                }
-            }
-        }
-
-        for coord in x_edges.iter() {
-            if x_edges.contains(&(coord.0, coord.1+1, coord.2)) &&
-                y_edges.contains(coord) &&
-                y_edges.contains(&(coord.0+1, coord.1, coord.2))
-            {
-                let coord0 = (coord.0+0, coord.1+0, coord.2+0);
-                let coord1 = (coord.0+0, coord.1+1, coord.2+0);
-                let coord2 = (coord.0+1, coord.1+0, coord.2+0);
-
-                let coord3 = (coord.0+1, coord.1+1, coord.2+0);
-                let coord4 = (coord.0+0, coord.1+1, coord.2+0);
-                let coord5 = (coord.0+1, coord.1+0, coord.2+0);
-
-                let idx0 = vert_lookup.get(&coord0).unwrap();
-                let idx1 = vert_lookup.get(&coord1).unwrap();
-                let idx2 = vert_lookup.get(&coord2).unwrap();
-                let idx3 = vert_lookup.get(&coord3).unwrap();
-                let idx4 = vert_lookup.get(&coord4).unwrap();
-                let idx5 = vert_lookup.get(&coord5).unwrap();
-
-                indices.push(*idx0);
-                indices.push(*idx1);
-                indices.push(*idx2);
-
-                indices.push(*idx3);
-                indices.push(*idx4);
-                indices.push(*idx5);
-            }
-
-            if x_edges.contains(&(coord.0, coord.1, coord.2+1)) &&
-                z_edges.contains(coord) &&
-                z_edges.contains(&(coord.0+1, coord.1, coord.2))
-            {
-                let coord0 = (coord.0+0, coord.1+0, coord.2+0);
-                let coord1 = (coord.0+0, coord.1+0, coord.2+1);
-                let coord2 = (coord.0+1, coord.1+0, coord.2+0);
-
-                let coord3 = (coord.0+1, coord.1+0, coord.2+1);
-                let coord4 = (coord.0+0, coord.1+0, coord.2+1);
-                let coord5 = (coord.0+1, coord.1+0, coord.2+0);
-
-                let idx0 = vert_lookup.get(&coord0).unwrap();
-                let idx1 = vert_lookup.get(&coord1).unwrap();
-                let idx2 = vert_lookup.get(&coord2).unwrap();
-                let idx3 = vert_lookup.get(&coord3).unwrap();
-                let idx4 = vert_lookup.get(&coord4).unwrap();
-                let idx5 = vert_lookup.get(&coord5).unwrap();
-
-                indices.push(*idx0);
-                indices.push(*idx1);
-                indices.push(*idx2);
-
-                indices.push(*idx3);
-                indices.push(*idx4);
-                indices.push(*idx5);
-            }
-        }
-
-        for coord in y_edges.iter() {
-            if y_edges.contains(&(coord.0, coord.1, coord.2+1)) &&
-                z_edges.contains(coord) &&
-                z_edges.contains(&(coord.0, coord.1+1, coord.2))
-            {
-                let coord0 = (coord.0+0, coord.1+0, coord.2+0);
-                let coord1 = (coord.0+0, coord.1+1, coord.2+0);
-                let coord2 = (coord.0+0, coord.1+0, coord.2+1);
-
-                let coord3 = (coord.0+0, coord.1+1, coord.2+1);
-                let coord4 = (coord.0+0, coord.1+1, coord.2+0);
-                let coord5 = (coord.0+0, coord.1+0, coord.2+1);
-
-                let idx0 = vert_lookup.get(&coord0).unwrap();
-                let idx1 = vert_lookup.get(&coord1).unwrap();
-                let idx2 = vert_lookup.get(&coord2).unwrap();
-                let idx3 = vert_lookup.get(&coord3).unwrap();
-                let idx4 = vert_lookup.get(&coord4).unwrap();
-                let idx5 = vert_lookup.get(&coord5).unwrap();
-
-                indices.push(*idx0);
-                indices.push(*idx1);
-                indices.push(*idx2);
-
-                indices.push(*idx3);
-                indices.push(*idx4);
-                indices.push(*idx5);
-            }
-        }
-
-
-        let mut verts = HashMap::new();
-        verts.insert("aPos".to_string(), VertVec::Vec3(positions));
-        verts.insert("aUV".to_string(), VertVec::Vec2(uvs));
-
-        let primitive_type = Primitive::Triangles;
-
-        let meshdata = MeshDataRaw {
-            verts,
-            indices,
-            primitive_type,
-        };
+        let meshdata = sdf.create_mesh();
 
         let mut generated = StaticMesh::create(
             state.default_shader_program.clone(),
@@ -1525,34 +1244,6 @@ fn frame(state: &mut State, delta: f32) {
         let mut open = true;
         igBegin(c"From Rust".as_ptr(), &mut open as *mut bool, IMGUI_WINDOW_FLAGS_NO_FOCUS_ON_APPEARING);
         igText(CString::new(format!("Display size: {}x{}", display_w, display_h)).unwrap().as_ptr());
-
-        {
-            igSliderFloat(
-                c"Sphere Radius".as_ptr(),
-                &mut state.debug_state.sphere_radius as *mut f32,
-                0.001,
-                1.0,
-                c"%.3f".as_ptr(),
-            );
-
-            igSliderFloat(
-                c"Normal Factor".as_ptr(),
-                &mut state.debug_state.normal_shift as *mut f32,
-                0.001,
-                1.0,
-                c"%.3f".as_ptr(),
-            );
-
-            igCheckbox(
-                c"Show SDF Normals".as_ptr(),
-                &mut state.debug_state.sdf_test_draw_normals as *mut bool,
-            );
-
-            igCheckbox(
-                c"Show SDF Hoop".as_ptr(),
-                &mut state.debug_state.sdf_test_draw_hoop as *mut bool,
-            );
-        }
 
         #[cfg(target_arch = "wasm32")]
         {
