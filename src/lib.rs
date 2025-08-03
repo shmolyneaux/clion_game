@@ -1100,45 +1100,6 @@ fn frame(state: &mut State, delta: f32) {
             ],
         );
 
-
-        // Some boxes
-        //debug_box(
-        //    state,
-        //    Vec3::new(-2.0f32, 1.0f32, 0.0f32),
-        //    Vec3::new(1.0f32, 1.0f32, 1.0f32),
-        //    Vec3::new(1.0f32, 1.0f32, 1.0f32),
-        //);
-        //debug_box(
-        //    state,
-        //    Vec3::new(0.0f32, 1.0f32, 0.0f32),
-        //    Vec3::new(1.0f32, 1.0f32, 1.0f32),
-        //    Vec3::new(1.0f32, 1.0f32, 1.0f32),
-        //);
-        //debug_box(
-        //    state,
-        //    Vec3::new(2.0f32, 1.0f32, 0.0f32),
-        //    Vec3::new(1.0f32, 1.0f32, 1.0f32),
-        //    Vec3::new(1.0f32, 1.0f32, 1.0f32),
-        //);
-
-        // Grid lines
-        //for x in -10..=10 {
-        //    debug_line(
-        //        state,
-        //        &[
-        //            Vec3::new(x as f32, 0.0f32, -10.0f32),
-        //            Vec3::new(x as f32, 0.0f32, 10.0f32),
-        //        ]
-        //    );
-        //    debug_line(
-        //        state,
-        //        &[
-        //            Vec3::new(10.0f32, 0.0f32, x as f32),
-        //            Vec3::new(-10.0f32, 0.0f32, x as f32),
-        //        ]
-        //    );
-        //}
-
         let base_camera_speed = 2.0f32;
         let camera_speed = if state.keys.pressed(SDL_SCANCODE_LCTRL) {
             base_camera_speed*0.2
