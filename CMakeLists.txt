@@ -107,4 +107,14 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
 else()
     target_link_libraries(game SDL2 SDL2main opengl32 glew32 ws2_32 userenv ntdll)
     # from rustc: native-static-libs: kernel32.lib advapi32.lib ntdll.lib userenv.lib ws2_32.lib dbghelp.lib /defaultlib:msvcrt
+
+    set(SDL2_DLL "${SDL2_PATH}/lib/x64/SDL2.dll")
+    set(GLEW_DLL "${GLEW_PATH}/bin/Release/x64/glew32.dll")
+
+    add_custom_command(TARGET game POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${SDL2_DLL}" "$<TARGET_FILE_DIR:game>/SDL2.dll"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${GLEW_DLL}" "$<TARGET_FILE_DIR:game>/glew32.dll"
+    )
 endif()
