@@ -293,6 +293,14 @@ impl VertexArray {
     }
 }
 
+impl Drop for VertexArray {
+    fn drop(&mut self) {
+        unsafe {
+            gl::DeleteVertexArrays(1, &mut self.id as *mut GLuint);
+        }
+    }
+}
+
 #[derive(Facet, Debug)]
 pub struct VertexBufferObject {
     id: GLuint
@@ -320,6 +328,15 @@ impl VertexBufferObject {
         }
     }
 }
+
+impl Drop for VertexBufferObject {
+    fn drop(&mut self) {
+        unsafe {
+            gl::DeleteBuffers(1, &mut self.id as *mut GLuint);
+        }
+    }
+}
+
 
 #[derive(Facet, Copy, Clone, Debug)]
 #[repr(u8)]
@@ -374,6 +391,14 @@ impl ElementBufferObject {
             self.primitive_type = primitive_type;
             gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, self.id);
             gl::BufferData(gl::ELEMENT_ARRAY_BUFFER, (data.len() * size_of::<T>()) as isize, data.as_ptr().cast(), mode);
+        }
+    }
+}
+
+impl Drop for ElementBufferObject {
+    fn drop(&mut self) {
+        unsafe {
+            gl::DeleteBuffers(1, &mut self.id as *mut GLuint);
         }
     }
 }
