@@ -93,11 +93,17 @@ extern "C" {
         ImGui::SetTooltip("%s", text);
     }
 
-    void igText(const char* fmt, ...)
-    {
+    void igText(const char* fmt, ...) {
         va_list args;
         va_start(args, fmt);
         ImGui::TextV(fmt,args);
+        va_end(args);
+    }
+
+    void igTextColored(float r, float g, float b, float a, const char* fmt, ...) {
+        va_list args;
+        va_start(args, fmt);
+        ImGui::TextColoredV(ImVec4(r, g, b, a), fmt, args);
         va_end(args);
     }
 

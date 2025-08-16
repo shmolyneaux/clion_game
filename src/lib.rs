@@ -31,6 +31,8 @@ mod gpu;
 mod mesh_gen;
 mod debug_draw;
 mod sdf;
+mod shimlang;
+mod shimlang_imgui;
 
 use crate::sdf::*;
 use crate::gpu::*;
@@ -51,6 +53,7 @@ unsafe extern "C" {
     fn igIsItemHovered(flags: i32) -> bool;
     fn igSetTooltip(text: *const core::ffi::c_char);
     fn igText(fmt: *const core::ffi::c_char, ...);
+    fn igTextColored(r: f32, g: f32, b: f32, a: f32, fmt: *const core::ffi::c_char, ...);
     fn igSliderFloat(label: *const core::ffi::c_char, v: *mut f32, v_min: f32, v_max: f32, format: *const core::ffi::c_char);
     fn igCheckbox(label: *const core::ffi::c_char, value: *mut bool) -> bool;
     fn igWantCaptureKeyboard() -> bool;
@@ -118,12 +121,15 @@ pub struct DebugState {
     sdf_test_draw_hoop: bool,
     sdf_test_draw_wireframe: bool,
     sdf_box_size: Vec3,
+    shimlang_debug_window: shimlang_imgui::Navigation,
 }
 
 
 #[derive(Facet)]
 /// -180.0 180.0
 pub struct State {
+    interpreter: shimlang::Interpreter,
+
     frame_num: u64,
     view: Mat4,
     projection: Mat4,
@@ -766,6 +772,10 @@ fn init_state() -> State {
     log_opengl_errors!();
     println!("Starting Rust state initialization");
 
+    println!("Creating interpreter");
+    let interpreter_config = shimlang::Config::default();
+    let interpreter = shimlang::Interpreter::create(&interpreter_config);
+
     println!("Generating arrays/buffers");
     let debug_vao = VertexArray::create();
     let debug_vbo = VertexBufferObject::create();
@@ -1000,6 +1010,7 @@ fn init_state() -> State {
 
     println!("State initialized!");
     let mut state = State {
+        interpreter,
         frame_num,
         debug_vao,
         debug_vbo,
@@ -1054,22 +1065,6 @@ fn update_keys(state: &mut State) {
         state.keys.keys.reserve(numkeys as usize);
         state.keys.keys.extend_from_slice(src_slice);
     }
-}
-
-fn sdf_vert_set(grid: &Vec<Vec<Vec<f32>>>, pos: (usize, usize, usize)) -> bool {
-    let x = pos.0;
-    let y = pos.1;
-    let z = pos.2;
-
-    let sign = grid[x][y][z].is_sign_positive();
-
-    sign != grid[x][y][z+1].is_sign_positive() ||
-    sign != grid[x][y+1][z].is_sign_positive() ||
-    sign != grid[x][y+1][z+1].is_sign_positive() ||
-    sign != grid[x+1][y][z].is_sign_positive() ||
-    sign != grid[x+1][y][z+1].is_sign_positive() ||
-    sign != grid[x+1][y+1][z].is_sign_positive() ||
-    sign != grid[x+1][y+1][z+1].is_sign_positive()
 }
 
 fn frame(state: &mut State, delta: f32) {
@@ -1225,6 +1220,8 @@ fn frame(state: &mut State, delta: f32) {
         }
 
         igEnd();
+
+        state.debug_state.shimlang_debug_window.debug_window(&mut state.interpreter);
 
         draw_log_window();
 
