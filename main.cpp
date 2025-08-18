@@ -173,6 +173,9 @@ extern "C" {
     void igEndTable() {
         return ImGui::EndTable();
     }
+    void igSetKeyboardFocusHere() {
+        ImGui::SetKeyboardFocusHere();
+    }
 }
 
 

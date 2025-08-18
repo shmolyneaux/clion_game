@@ -64,6 +64,7 @@ unsafe extern "C" {
     fn igTreePop();
     fn igSHMNextItemOpenOnce();
     fn igSameLine();
+    fn igSetKeyboardFocusHere();
 
     fn igBeginTable(label: *const core::ffi::c_char, columns: i32) -> bool;
     fn igTableSetupColumn(label: *const core::ffi::c_char);
@@ -272,6 +273,40 @@ pub static IMGUI_WINDOW_FLAGS_UNSAVED_DOCUMENT: c_int             = 1 << 18;  //
 pub static IMGUI_WINDOW_FLAGS_NO_DOCKING: c_int                   = 1 << 19;  // Disable docking of this window
 
 pub static IMGUI_HOVERED_FLAGS_ALLOW_WHEN_DISABLED: c_int         = 1 << 10;  // IsItemHovered() only: Return true even if the item is disabled
+
+pub static IMGUI_INPUT_TEXT_FLAGS_NONE: c_int                = 0;
+pub static IMGUI_INPUT_TEXT_FLAGS_CHARS_DECIMAL: c_int        = 1 << 0;   // Allow 0123456789.+-*/
+pub static IMGUI_INPUT_TEXT_FLAGS_CHARS_HEXADECIMAL: c_int    = 1 << 1;   // Allow 0123456789ABCDEFabcdef
+pub static IMGUI_INPUT_TEXT_FLAGS_CHARS_SCIENTIFIC: c_int     = 1 << 2;   // Allow 0123456789.+-*/eE (Scientific notation input)
+pub static IMGUI_INPUT_TEXT_FLAGS_CHARS_UPPERCASE: c_int      = 1 << 3;   // Turn a..z into A..Z
+pub static IMGUI_INPUT_TEXT_FLAGS_CHARS_NOBLANK: c_int        = 1 << 4;   // Filter out spaces, tabs
+
+// Inputs
+pub static IMGUI_INPUT_TEXT_FLAGS_ALLOW_TAB_INPUT: c_int       = 1 << 5;   // Pressing TAB input a '\t' character into the text field
+pub static IMGUI_INPUT_TEXT_FLAGS_ENTER_RETURNS_TRUE: c_int    = 1 << 6;   // Return 'true' when Enter is pressed (as opposed to every time the value was modified). Consider using IsItemDeactivatedAfterEdit() instead!
+pub static IMGUI_INPUT_TEXT_FLAGS_ESCAPE_CLEARS_ALL: c_int     = 1 << 7;   // Escape key clears content if not empty, and deactivate otherwise (contrast to default behavior of Escape to revert)
+pub static IMGUI_INPUT_TEXT_FLAGS_CTRL_ENTER_FOR_NEWLINE: c_int = 1 << 8;   // In multi-line mode, validate with Enter, add new line with Ctrl+Enter (default is opposite: validate with Ctrl+Enter, add line with Enter).
+
+// Other options
+pub static IMGUI_INPUT_TEXT_FLAGS_READONLY: c_int            = 1 << 9;   // Read-only mode
+pub static IMGUI_INPUT_TEXT_FLAGS_PASSWORD: c_int            = 1 << 10;  // Password mode, display all characters as '*', disable copy
+pub static IMGUI_INPUT_TEXT_FLAGS_ALWAYSOVERWRITE: c_int     = 1 << 11;  // Overwrite mode
+pub static IMGUI_INPUT_TEXT_FLAGS_AUTOSELECTALL: c_int       = 1 << 12;  // Select entire text when first taking mouse focus
+pub static IMGUI_INPUT_TEXT_FLAGS_PARSEEMPTYREFVAL: c_int    = 1 << 13;  // InputFloat(), InputInt(), InputScalar() etc. only: parse empty string as zero value.
+pub static IMGUI_INPUT_TEXT_FLAGS_DISPLAYEMPTYREFVAL: c_int  = 1 << 14;  // InputFloat(), InputInt(), InputScalar() etc. only: when value is zero, do not display it. Generally used with ImGuiInputTextFlags_ParseEmptyRefVal.
+pub static IMGUI_INPUT_TEXT_FLAGS_NOHORIZONTALSCROLL: c_int  = 1 << 15;  // Disable following the cursor horizontally
+pub static IMGUI_INPUT_TEXT_FLAGS_NOUNDOREDO: c_int          = 1 << 16;  // Disable undo/redo. Note that input text owns the text data while active, if you want to provide your own undo/redo stack you need e.g. to call ClearActiveID().
+
+// Elide display / Alignment
+pub static IMGUI_INPUT_TEXT_FLAGS_ELIDELEFT: c_int           = 1 << 17;  // When text doesn't fit, elide left side to ensure right side stays visible. Useful for path/filenames. Single-line only!
+
+// Callback features
+pub static IMGUI_INPUT_TEXT_FLAGS_CALLBACKCOMPLETION: c_int  = 1 << 18;  // Callback on pressing TAB (for completion handling)
+pub static IMGUI_INPUT_TEXT_FLAGS_CALLBACKHISTORY: c_int     = 1 << 19;  // Callback on pressing Up/Down arrows (for history handling)
+pub static IMGUI_INPUT_TEXT_FLAGS_CALLBACKALWAYS: c_int      = 1 << 20;  // Callback on each iteration. User code may query cursor position, modify text buffer.
+pub static IMGUI_INPUT_TEXT_FLAGS_CALLBACKCHARFILTER: c_int  = 1 << 21;  // Callback on character inputs to replace or discard them. Modify 'EventChar' to replace or discard, or return 1 in callback to discard.
+pub static IMGUI_INPUT_TEXT_FLAGS_CALLBACKRESIZE: c_int      = 1 << 22;  // Callback on buffer capacity changes request (beyond 'buf_size' parameter value), allowing the string to grow. Notify when the string wants to be resized (for string types which hold a cache of their Size). You will be provided a new BufSize in the callback and NEED to honor it. (see misc/cpp/imgui_stdlib.h for an example of using this)
+pub static IMGUI_INPUT_TEXT_FLAGS_CALLBACKEDIT: c_int        = 1 << 23;  // Callback on any edit (note that InputText() already returns true on edit, the callback is useful mainly to manipulate the underlying buffer while focus is active)
 
 thread_local! {
     static STATE_REFCELL: RefCell<Option<State>> = RefCell::default();
