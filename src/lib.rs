@@ -52,8 +52,10 @@ unsafe extern "C" {
     fn igEndDisabled();
     fn igIsItemHovered(flags: i32) -> bool;
     fn igSetTooltip(text: *const core::ffi::c_char);
+    fn igInputText(label: *const core::ffi::c_char, buffer: *mut core::ffi::c_char, buffer_size: i32, flags: i32) -> bool;
     fn igText(fmt: *const core::ffi::c_char, ...);
     fn igTextColored(r: f32, g: f32, b: f32, a: f32, fmt: *const core::ffi::c_char, ...);
+    fn igButton(label: *const core::ffi::c_char) -> bool;
     fn igSliderFloat(label: *const core::ffi::c_char, v: *mut f32, v_min: f32, v_max: f32, format: *const core::ffi::c_char);
     fn igCheckbox(label: *const core::ffi::c_char, value: *mut bool) -> bool;
     fn igWantCaptureKeyboard() -> bool;
@@ -69,6 +71,13 @@ unsafe extern "C" {
     fn igTableNextRow();
     fn igTableSetColumnIndex(index: i32);
     fn igEndTable();
+}
+
+#[macro_export]
+macro_rules! cformat {
+    ($($arg:tt)*) => {{
+        std::ffi::CString::new(format!($($arg)*)).unwrap()
+    }};
 }
 
 const fn u32size_of<T>() -> u32 {
@@ -122,6 +131,7 @@ pub struct DebugState {
     sdf_test_draw_wireframe: bool,
     sdf_box_size: Vec3,
     shimlang_debug_window: shimlang_imgui::Navigation,
+    shimlang_repl: shimlang_imgui::Repl,
 }
 
 
@@ -1222,6 +1232,7 @@ fn frame(state: &mut State, delta: f32) {
         igEnd();
 
         state.debug_state.shimlang_debug_window.debug_window(&mut state.interpreter);
+        state.debug_state.shimlang_repl.window(&mut state.interpreter);
 
         draw_log_window();
 

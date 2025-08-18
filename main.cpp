@@ -93,6 +93,10 @@ extern "C" {
         ImGui::SetTooltip("%s", text);
     }
 
+    bool igInputText(const char* label, char* buffer, int buffer_size, int flags) {
+        return ImGui::InputText(label, buffer, buffer_size, (ImGuiInputTextFlags)flags);
+    }
+
     void igText(const char* fmt, ...) {
         va_list args;
         va_start(args, fmt);
@@ -105,6 +109,10 @@ extern "C" {
         va_start(args, fmt);
         ImGui::TextColoredV(ImVec4(r, g, b, a), fmt, args);
         va_end(args);
+    }
+
+    bool igButton(const char* label) {
+        return ImGui::Button(label);
     }
 
     void igSliderFloat(const char* label, float* v, float v_min, float v_max, const char* format) {
