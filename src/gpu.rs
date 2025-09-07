@@ -4,6 +4,8 @@ use crate::*;
 
 pub static END_PRIMITIVE: u32 = 0xFFFF_FFFF;
 
+use std::cell::RefCell;
+
 #[derive(Facet, Copy, Clone, Debug)]
 #[repr(u8)]
 pub enum ShaderDataType {
@@ -219,11 +221,38 @@ pub fn compile_shader(src: &CStr, shader_type: gl::types::GLuint) -> Result<gl::
 }
 
 #[derive(Facet)]
+#[repr(transparent)]
+pub struct SHMUnsafeCell<T: Sized> {
+    value: T,
+}
+
+impl<T> SHMUnsafeCell<T> {
+    #[inline(always)]
+    pub const fn new(value: T) -> SHMUnsafeCell<T> {
+        Self { value }
+    }
+}
+
+impl<T: Sized> SHMUnsafeCell<T> {
+    pub const fn get(&self) -> *mut T {
+        self as *const SHMUnsafeCell<T> as *const T as *mut T
+    }
+
+    pub const unsafe fn as_mut_unchecked(&self) -> &mut T {
+        unsafe { &mut *self.get() }
+    }
+}
+
+#[derive(Facet)]
 pub struct ShaderProgram {
     pub id: gl::types::GLuint,
     // TODO: we shouldn't need to store the vertex/fragment shader OpenGL handles after the program is linked
     pub vert: VertexShader,
     pub frag: FragmentShader,
+
+    // TODO: This should really be a CString, but there's no derive for that for Facet
+    // TODO: This should really be a RefCell rather unsafecell, but Facet
+    uniform_location_cache: SHMUnsafeCell<HashMap<String, gl::types::GLint>>,
 }
 
 impl ShaderProgram {
@@ -248,18 +277,31 @@ impl ShaderProgram {
                 return Err(String::from_utf8_lossy(&error_text).into_owned());
             }
 
+            let uniform_location_cache = SHMUnsafeCell::new(HashMap::new());
+
             println!("Returning shader");
-            Ok(Self {id, vert, frag})
+            Ok(Self {id, vert, frag, uniform_location_cache})
         }
     }
 
     pub fn uniforms(&self) -> impl Iterator<Item = &ShaderSymbol> {
+        let zone = zone_start(c"ShaderProgram::uniforms");
         self.vert.uniform_inputs.iter().chain(self.frag.uniform_inputs.iter())
     }
 
     pub fn uniform_location(&self, uniform_name: &CStr) -> gl::types::GLint {
         unsafe {
-            gl::GetUniformLocation(self.id, uniform_name.as_ptr())
+            let mut cache = self.uniform_location_cache.as_mut_unchecked();
+            let zone = zone_start(c"ShaderProgram::uniform_location");
+            let s: &str = uniform_name.to_str().unwrap();
+            if let Some(loc) = cache.get(s) {
+                *loc
+            } else {
+                let zone = zone_start(c"uncached ShaderProgram::uniform_location");
+                let loc = gl::GetUniformLocation(self.id, uniform_name.as_ptr());
+                cache.insert(s.to_string(), loc);
+                loc
+            }
         }
     }
 }
@@ -602,78 +644,101 @@ impl StaticMesh {
     // it to do it to reduce the number of OpenGL calls from switching meshes/shaders.
     pub fn draw(&self, ctx: &mut HashMap<String, ShaderValue>) {
         unsafe {
-            gl::BindVertexArray(self.vao.id);
-            gl::UseProgram(self.shader.id);
+            {
+                let zone = zone_start(c"gl::BindVertexArray");
+                gl::BindVertexArray(self.vao.id);
+            }
+            {
+                let zone = zone_start(c"gl::UseProgram");
+                gl::UseProgram(self.shader.id);
+            }
 
             // TODO: This should be a chained hash map sort of thing, rather than requiring a mutable hashmap
             ctx.insert("model".to_string(), ShaderValue::Mat4(self.transform));
 
             let mut texture_unit = 0;
-            for uniform_info in self.shader.uniforms() {
-                let loc = self.shader.uniform_location(&CString::new(uniform_info.name.clone()).unwrap());
-                match (uniform_info.data_type, self.uniform_override.get(&uniform_info.name).or_else(|| ctx.get(&uniform_info.name)).unwrap()) {
-                    (ShaderDataType::Float, ShaderValue::Float(v)) => {
-                        gl::Uniform1f(
-                            loc,
-                            *v,
-                        );
-                    }
-                    (ShaderDataType::Vec2, ShaderValue::Vec2(v)) => {
-                        gl::Uniform2f(
-                            loc,
-                            v.x,
-                            v.y,
-                        );
-                    }
-                    (ShaderDataType::Vec3, ShaderValue::Vec3(v)) => {
-                        gl::Uniform3f(
-                            loc,
-                            v.x,
-                            v.y,
-                            v.z,
-                        );
-                    }
-                    (ShaderDataType::Vec4, ShaderValue::Vec4(v)) => {
-                        gl::Uniform4f(
-                            loc,
-                            v.x,
-                            v.y,
-                            v.z,
-                            v.w,
-                        );
-                    }
-                    (ShaderDataType::Mat4, ShaderValue::Mat4(v)) => {
-                        gl::UniformMatrix4fv(
-                            loc,
-                            1,
-                            gl::FALSE,
-                            &v.to_cols_array() as *const gl::types::GLfloat
-                        );
-                    }
-                    (ShaderDataType::Sampler2D, ShaderValue::Sampler2D(v)) => {
-                        gl::ActiveTexture(
-                            match texture_unit {
-                                0 => gl::TEXTURE0,
-                                1 => gl::TEXTURE1,
-                                2 => gl::TEXTURE2,
-                                3 => gl::TEXTURE3,
-                                4 => gl::TEXTURE4,
-                                5 => gl::TEXTURE5,
-                                _ => todo!("Add the other texture unit constants"),
+            {
+                let zone = zone_start(c"iterate self.shader.uniforms");
+                for uniform_info in self.shader.uniforms() {
+                    {
+                        let loc = {
+                            let zone = zone_start(c"self.shader.uniform_location");
+                            self.shader.uniform_location(&CString::new(uniform_info.name.clone()).unwrap())
+                        };
+                        match (uniform_info.data_type, self.uniform_override.get(&uniform_info.name).or_else(|| ctx.get(&uniform_info.name)).unwrap()) {
+                            (ShaderDataType::Float, ShaderValue::Float(v)) => {
+                                let zone = zone_start(c"gl::Uniform1f");
+                                gl::Uniform1f(
+                                    loc,
+                                    *v,
+                                );
                             }
-                        );
-                        gl::BindTexture(gl::TEXTURE_2D, *v);
-                        gl::Uniform1i(
-                            loc,
-                            texture_unit,
-                        );
-                        texture_unit += 1;
+                            (ShaderDataType::Vec2, ShaderValue::Vec2(v)) => {
+                                let zone = zone_start(c"gl::Uniform2f");
+                                gl::Uniform2f(
+                                    loc,
+                                    v.x,
+                                    v.y,
+                                );
+                            }
+                            (ShaderDataType::Vec3, ShaderValue::Vec3(v)) => {
+                                let zone = zone_start(c"gl::Uniform3f");
+                                gl::Uniform3f(
+                                    loc,
+                                    v.x,
+                                    v.y,
+                                    v.z,
+                                );
+                            }
+                            (ShaderDataType::Vec4, ShaderValue::Vec4(v)) => {
+                                let zone = zone_start(c"gl::Uniform4f");
+                                gl::Uniform4f(
+                                    loc,
+                                    v.x,
+                                    v.y,
+                                    v.z,
+                                    v.w,
+                                );
+                            }
+                            (ShaderDataType::Mat4, ShaderValue::Mat4(v)) => {
+                                let zone = zone_start(c"gl::UniformMatrix4fv");
+                                gl::UniformMatrix4fv(
+                                    loc,
+                                    1,
+                                    gl::FALSE,
+                                    &v.to_cols_array() as *const gl::types::GLfloat
+                                );
+                            }
+                            (ShaderDataType::Sampler2D, ShaderValue::Sampler2D(v)) => {
+                                let zone = zone_start(c"gl::Sampler2D");
+                                gl::ActiveTexture(
+                                    match texture_unit {
+                                        0 => gl::TEXTURE0,
+                                        1 => gl::TEXTURE1,
+                                        2 => gl::TEXTURE2,
+                                        3 => gl::TEXTURE3,
+                                        4 => gl::TEXTURE4,
+                                        5 => gl::TEXTURE5,
+                                        _ => todo!("Add the other texture unit constants"),
+                                    }
+                                );
+                                gl::BindTexture(gl::TEXTURE_2D, *v);
+                                gl::Uniform1i(
+                                    loc,
+                                    texture_unit,
+                                );
+                                texture_unit += 1;
+                            }
+                            _ => todo!(),
+                        }
                     }
-                    _ => todo!(),
                 }
             }
 
-            gl::DrawElements(self.mesh.ebo.primitive_type.to_gl(), self.mesh.index_count as i32, gl::UNSIGNED_INT, std::ptr::null());
+            {
+                let zone = zone_start(c"gl::DrawElements");
+                gl::DrawElements(self.mesh.ebo.primitive_type.to_gl(), self.mesh.index_count as i32, gl::UNSIGNED_INT, std::ptr::null());
+            }
         }
     }
 }

@@ -10,6 +10,8 @@ use glam::{Vec2, Vec3, Vec4, Mat4};
 use std::ffi::CString;
 use std::ffi::CStr;
 
+use std::os::raw::{c_char, c_int, c_uint};
+
 use std::ops::{Add, Mul};
 
 use std::slice;
@@ -17,7 +19,6 @@ use std::slice;
 use std::mem::size_of;
 
 use std::cell::RefCell;
-use core::ffi::c_int;
 
 use glam::Vec3Swizzles;
 
@@ -38,6 +39,13 @@ use crate::sdf::*;
 use crate::gpu::*;
 use crate::debug_draw::*;
 use crate::mesh_gen::{box_mesh, quad_mesh};
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct TracyCZoneCtx {
+    pub id: u32,
+    pub active: c_int,
+}
 
 type ImGuiWindowFlags = c_int;
 unsafe extern "C" {
@@ -72,6 +80,13 @@ unsafe extern "C" {
     fn igTableNextRow();
     fn igTableSetColumnIndex(index: i32);
     fn igEndTable();
+
+    fn tracy_zone_begin_n(name: *const c_char, active: c_int) -> TracyCZoneCtx;
+    fn tracy_zone_begin_ns(name: *const c_char, depth: c_int, active: c_int) -> TracyCZoneCtx;
+    fn tracy_zone_end(ctx: TracyCZoneCtx);
+    fn tracy_zone_text(ctx: TracyCZoneCtx, txt: *const c_char, len: c_uint);
+    fn tracy_zone_name(ctx: TracyCZoneCtx, txt: *const c_char, len: c_uint);
+    fn tracy_zone_color(ctx: TracyCZoneCtx, color: c_uint);
 }
 
 #[macro_export]
@@ -321,7 +336,10 @@ macro_rules! log_opengl_errors {
     () => {
         unsafe {
             loop {
-                let err = gl::GetError();
+                let err = {
+                    let zone = zone_start(c"gl::GetError()");
+                    gl::GetError()
+                };
                 match err {
                     gl::NO_ERROR => break,
                     gl::INVALID_ENUM => log(format!("[{}:{}] OpenGL Error INVALID_ENUM: An unacceptable value is specified for an enumerated argument.", file!(), line!())),
@@ -1112,14 +1130,40 @@ fn update_keys(state: &mut State) {
     }
 }
 
+struct TracyZone {
+    ctx: TracyCZoneCtx
+}
+
+impl Drop for TracyZone {
+    fn drop(&mut self) {
+        unsafe {
+            tracy_zone_end(self.ctx);
+        }
+    }
+}
+
+fn zone_start(name: &'static CStr) -> TracyZone {
+    unsafe {
+        let ctx = tracy_zone_begin_n(name.as_ptr() as *const c_char, 1);
+        tracy_zone_name(ctx, name.as_ptr() as *const c_char, name.to_bytes().len() as u32);
+        TracyZone {
+            ctx
+        }
+    }
+}
+
 fn frame(state: &mut State, delta: f32) {
-    if state.frame_num == 0 {
+    if state.frame_num == 00 {
         println!("Starting first frame");
     }
 
-    imgui_debug(state);
+    {
+        let zone = zone_start(c"imgui_debug");
+        imgui_debug(state);
+    }
 
     unsafe {
+        let zone = zone_start(c"rust frame unsafe block");
         update_keys(state);
 
         let test = vec![0.1, 0.1, 0.12, 1.0];
@@ -1201,46 +1245,9 @@ fn frame(state: &mut State, delta: f32) {
             f32::to_radians(45.0), display_w as f32 / display_h as f32, 0.1f32, 100.0f32
         );
 
-        let box_size = state.debug_state.sdf_box_size;
-
-        let mybox = sdf_smooth(
-            0.1,
-            sdf_box(box_size),
-            sdf_sphere(0.7),
-        );
-        let mut sdf = SdfCache::new(
-            *mybox,
-            0.1,
-            20,
-        );
-
         let mut ctx = HashMap::new();
         ctx.insert("view".to_string(), ShaderValue::Mat4(state.view));
         ctx.insert("projection".to_string(), ShaderValue::Mat4(state.projection));
-
-        let meshdata = sdf.create_mesh();
-
-        let mut generated = StaticMesh::create(
-            state.default_shader_program.clone(),
-            Rc::new(Mesh::create(&meshdata).unwrap()),
-        ).expect("Can't create the test mesh");
-
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            if state.debug_state.sdf_test_draw_wireframe {
-                gl::PolygonMode(gl::FRONT_AND_BACK, gl::LINE);
-                generated.draw(&mut ctx);
-                gl::PolygonMode(gl::FRONT_AND_BACK, gl::FILL);
-            } else {
-                generated.draw(&mut ctx);
-            }
-        }
-
-        #[cfg(target_arch = "wasm32")]
-        {
-            // Always use filled mode in WebGL (no glPolygonMode in WebGL)
-            generated.draw(&mut ctx);
-        }
 
         let mut open = true;
         igBegin(c"From Rust".as_ptr(), &mut open as *mut bool, IMGUI_WINDOW_FLAGS_NO_FOCUS_ON_APPEARING);
@@ -1266,44 +1273,65 @@ fn frame(state: &mut State, delta: f32) {
 
         igEnd();
 
-        state.debug_state.shimlang_debug_window.debug_window(&mut state.interpreter);
-        state.debug_state.shimlang_repl.window(&mut state.interpreter);
+        {
+            let zone = zone_start(c"IMGUI Debug Windows");
+            state.debug_state.shimlang_debug_window.debug_window(&mut state.interpreter);
+            state.debug_state.shimlang_repl.window(&mut state.interpreter);
 
-        draw_log_window();
-
-        state.test_mesh.transform = Mat4::from_translation(Vec3::new(1.2, 0.2, -0.2));
-
-        state.test_mesh.draw(&mut ctx);
-
-        let my_box = box_mesh(Vec3::new(1.0, 1.0, 1.0));
-        let positions = match my_box.verts.get("aPos").unwrap() {
-            VertVec::Vec3(v) => v,
-            _ => panic!("Expected aPos to be a Vec3"),
-        };
-        let normals = match my_box.verts.get("aNormal").unwrap() {
-            VertVec::Vec3(v) => v,
-            _ => panic!("Expected aNormal to be a Vec3"),
-        };
-        for (pos, norm) in positions.iter().zip(normals.iter()) {
-            let start = state.test_mesh.transform.transform_point3(*pos);
-            let end = state.test_mesh.transform.transform_point3(pos + norm*0.2);
-            debug_line(state, &[start, end]);
+            draw_log_window();
         }
 
-        draw_debug_shapes(state);
+        {
+            let zone = zone_start(c"Draw Test Mesh");
+            state.test_mesh.transform = Mat4::from_translation(Vec3::new(1.2, 0.2, -0.2));
+            {
+                let zone = zone_start(c"state.test_mesh.draw");
+                state.test_mesh.draw(&mut ctx);
+            }
 
-        // Log errors each frame. This call can be copied to wherever necessary to trace back to the bad call.
-        log_opengl_errors!();
-
-        if state.frame_num == 0 {
-            println!("Finished first frame");
+            let my_box = {
+                let zone = zone_start(c"Create box mesh");
+                box_mesh(Vec3::new(1.0, 1.0, 1.0))
+            };
+            let positions = match my_box.verts.get("aPos").unwrap() {
+                VertVec::Vec3(v) => v,
+                _ => panic!("Expected aPos to be a Vec3"),
+            };
+            let normals = match my_box.verts.get("aNormal").unwrap() {
+                VertVec::Vec3(v) => v,
+                _ => panic!("Expected aNormal to be a Vec3"),
+            };
+            for (pos, norm) in positions.iter().zip(normals.iter()) {
+                let start = state.test_mesh.transform.transform_point3(*pos);
+                let end = state.test_mesh.transform.transform_point3(pos + norm*0.2);
+                debug_line(state, &[start, end]);
+            }
         }
-        state.frame_num += 1;
+
+        {
+            let zone = zone_start(c"draw_debug_shapes");
+            draw_debug_shapes(state);
+        }
+
+        {
+            // let zone = zone_start(c"Log OpenGL Error Macro");
+            // // Log errors each frame. This call can be copied to wherever necessary to trace back to the bad call.
+            // log_opengl_errors!();
+        }
+
+        {
+            let zone = zone_start(c"Increment frame counter");
+            if state.frame_num == 0 {
+                println!("Finished first frame");
+            }
+            state.frame_num += 1;
+        }
     }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_frame(delta: f32) -> i32 {
+    let zone = zone_start(c"rust_frame_inner");
     STATE_REFCELL.with_borrow_mut(|value| {
         frame(value.as_mut().unwrap(), delta)
     });

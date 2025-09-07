@@ -14,6 +14,9 @@
 #include <SDL.h>
 #include <GL/glew.h>
 
+#include "Tracy.hpp"
+#include "TracyC.h"
+
 #include <iostream>
 #include <filesystem>
 #include <vector>
@@ -175,6 +178,32 @@ extern "C" {
     }
     void igSetKeyboardFocusHere() {
         ImGui::SetKeyboardFocusHere();
+    }
+
+    TracyCZoneCtx tracy_zone_begin_n(const char* name, int active) {
+        TracyCZoneN(ctx, name, active);
+        return ctx;
+    }
+
+    TracyCZoneCtx tracy_zone_begin_ns(const char* name, int depth, int active) {
+        TracyCZoneNS(ctx, name, depth, active);
+        return ctx;
+    }
+
+    void tracy_zone_end(TracyCZoneCtx ctx) {
+        TracyCZoneEnd(ctx);
+    }
+
+    void tracy_zone_text(TracyCZoneCtx ctx, const char* txt, unsigned len) {
+        TracyCZoneText(ctx, txt, len);
+    }
+
+    void tracy_zone_name(TracyCZoneCtx ctx, const char* txt, unsigned len) {
+        TracyCZoneName(ctx, txt, len);
+    }
+
+    void tracy_zone_color(TracyCZoneCtx ctx, unsigned color) {
+        TracyCZoneColor(ctx, color);
     }
 }
 
@@ -652,7 +681,11 @@ int main(int, char**)
                 example_window(&show_another_window);
             }
 
-            rust_frame(delta);
+            {
+                TracyCZoneN(ctx, "rust_frame", 1);
+                rust_frame(delta);
+                TracyCZoneEnd(ctx);
+            }
         } else {
             ImGui::Begin("STARTUP ERROR");
             ImGui::Text("Startup Error");
@@ -678,6 +711,7 @@ int main(int, char**)
         }
 
         SDL_GL_SwapWindow(window);
+        FrameMark;
     }
 #ifdef __EMSCRIPTEN__
     EMSCRIPTEN_MAINLOOP_END;
