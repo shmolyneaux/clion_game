@@ -682,6 +682,7 @@ int main(int, char**)
             }
 
             {
+                ZoneScoped;
                 TracyCZoneN(ctx, "rust_frame", 1);
                 rust_frame(delta);
                 TracyCZoneEnd(ctx);

@@ -47,6 +47,17 @@ pub struct TracyCZoneCtx {
     pub active: c_int,
 }
 
+#[repr(C)]
+pub struct ___tracy_source_location_data {
+    pub name: *const c_char,
+    pub function: *const c_char,
+    pub file: *const c_char,
+    pub line: u32,
+    pub color: u32,
+}
+
+unsafe impl Sync for ___tracy_source_location_data {}
+
 type ImGuiWindowFlags = c_int;
 unsafe extern "C" {
     fn SDL_GL_GetProcAddress(proc: *const i8) -> *mut std::ffi::c_void;
@@ -87,6 +98,9 @@ unsafe extern "C" {
     fn tracy_zone_text(ctx: TracyCZoneCtx, txt: *const c_char, len: c_uint);
     fn tracy_zone_name(ctx: TracyCZoneCtx, txt: *const c_char, len: c_uint);
     fn tracy_zone_color(ctx: TracyCZoneCtx, color: c_uint);
+
+    unsafe fn ___tracy_emit_zone_begin(loc: *const ___tracy_source_location_data, active: i32) -> TracyCZoneCtx;
+    unsafe fn ___tracy_emit_zone_end(ctx: TracyCZoneCtx);
 }
 
 #[macro_export]
@@ -1275,10 +1289,23 @@ fn frame(state: &mut State, delta: f32) {
 
         {
             let zone = zone_start(c"IMGUI Debug Windows");
-            state.debug_state.shimlang_debug_window.debug_window(&mut state.interpreter);
-            state.debug_state.shimlang_repl.window(&mut state.interpreter);
+            {
+                static loc: ___tracy_source_location_data = ___tracy_source_location_data {
+                    name: c"test source loc data".as_ptr(),
+                    function: c"test function name".as_ptr(),
+                    file: concat!(env!("CARGO_MANIFEST_DIR"), "\\", file!(), "\0").as_ptr() as *const i8,
+                    line: line!(),
+                    color: 0,
+                };
+                let zone = ___tracy_emit_zone_begin(&loc as *const ___tracy_source_location_data, 1);
 
-            draw_log_window();
+                state.debug_state.shimlang_debug_window.debug_window(&mut state.interpreter);
+                state.debug_state.shimlang_repl.window(&mut state.interpreter);
+
+                draw_log_window();
+
+                tracy_zone_end(zone);
+            }
         }
 
         {
