@@ -1,4 +1,5 @@
 use glam::Vec3;
+use crate::*;
 use crate::u32size_of;
 use crate::State;
 use crate::Primitive;
@@ -6,24 +7,39 @@ use crate::END_PRIMITIVE;
 
 pub fn draw_debug_shapes(state: &mut State) {
     unsafe {
-        gl::BindVertexArray(state.debug_vao.id);
-        state.debug_vbo.bind_data(&state.debug_verts, gl::DYNAMIC_DRAW);
-        state.debug_ebo.bind_data(&state.debug_vert_indices, Primitive::LineStrip, gl::DYNAMIC_DRAW);
+        {
+            let _zone = zone_scoped!("Bind Debug Vertex Data");
+            gl::BindVertexArray(state.debug_vao.id);
+            state.debug_vbo.bind_data(&state.debug_verts, gl::DYNAMIC_DRAW);
+            state.debug_ebo.bind_data(&state.debug_vert_indices, Primitive::LineStrip, gl::DYNAMIC_DRAW);
+        }
 
-        // Vertex Position Attribute
-        gl::VertexAttribPointer(0, 3, gl::FLOAT, gl::FALSE, (6 * u32size_of::<f32>()) as i32, std::ptr::null());
-        gl::EnableVertexAttribArray(0);
+        {
+            let _zone = zone_scoped!("Vertex Position Attribute");
+            // Vertex Position Attribute
+            gl::VertexAttribPointer(0, 3, gl::FLOAT, gl::FALSE, (6 * u32size_of::<f32>()) as i32, std::ptr::null());
+            gl::EnableVertexAttribArray(0);
+        }
 
-        // Vertex Color Attribute
-        gl::VertexAttribPointer(1, 3, gl::FLOAT, gl::FALSE, (6 * u32size_of::<f32>()) as i32, (3 * u32size_of::<f32>()) as *const std::ffi::c_void);
-        gl::EnableVertexAttribArray(1);
+        {
+            let _zone = zone_scoped!("Vertex Color Attribute");
+            // Vertex Color Attribute
+            gl::VertexAttribPointer(1, 3, gl::FLOAT, gl::FALSE, (6 * u32size_of::<f32>()) as i32, (3 * u32size_of::<f32>()) as *const std::ffi::c_void);
+            gl::EnableVertexAttribArray(1);
+        }
 
-        gl::UseProgram(state.debug_shader_program.id);
+        {
+            let _zone = zone_scoped!("gl::UseProgram");
+            gl::UseProgram(state.debug_shader_program.id);
+        }
 
         gl::UniformMatrix4fv(state.debug_view_loc, 1, gl::FALSE, &state.view.to_cols_array() as *const gl::types::GLfloat);
         gl::UniformMatrix4fv(state.debug_projection_loc, 1, gl::FALSE, &state.projection.to_cols_array() as *const gl::types::GLfloat);
 
-        gl::DrawElements(gl::LINE_STRIP, state.debug_vert_indices.len().try_into().unwrap(), gl::UNSIGNED_INT, std::ptr::null());
+        {
+            let _zone = zone_scoped!("gl::DrawElements");
+            gl::DrawElements(gl::LINE_STRIP, state.debug_vert_indices.len().try_into().unwrap(), gl::UNSIGNED_INT, std::ptr::null());
+        }
 
         state.debug_verts.clear();
         state.debug_vert_indices.clear();

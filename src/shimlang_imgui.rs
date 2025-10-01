@@ -11,6 +11,7 @@ pub struct Repl {
 
 impl Repl {
     pub fn window(&mut self, vm: &mut Interpreter) {
+        let _zone = zone_scoped!("Repl::window");
         // Set the capacity of the vec here since we want to derive Default for convenience
 
         unsafe {
@@ -70,6 +71,7 @@ fn idx_in_free_block(idx: Word, free_list: &[FreeBlock]) -> bool {
 
 impl Navigation {
     pub fn debug_window(&mut self, interpreter: &mut shimlang::Interpreter) {
+        let _zone = zone_scoped!("Navigation::debug_window");
         let mut open = true;
         unsafe {
             igBegin(c"Shimlang Debug".as_ptr(), &mut open as *mut bool, IMGUI_WINDOW_FLAGS_NO_FOCUS_ON_APPEARING);
@@ -105,6 +107,8 @@ impl Navigation {
             let item_offset: usize = page_size * self.memory_page as usize;
             for (idx, x) in interpreter.mem.mem.iter().skip(item_offset).take(page_size).enumerate() {
                 if !(idx % 4 == 0) {
+                    // We show 4 memory locations per line, so if we're not at the start of the line
+                    // we know the text should continue on the same line
                     igSameLine();
                 } else {
                     igTextColored(0.6, 0.6, 0.6, 1.0, CString::new(format!("{:08X}", idx + item_offset as usize)).unwrap().as_ptr());

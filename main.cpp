@@ -70,37 +70,45 @@ extern "C" int rust_frame(float delta);
 extern "C" {
     bool igBegin(const char* name, bool* p_open, ImGuiWindowFlags flags)
     {
+        ZoneScoped;
         return ImGui::Begin(name, p_open, flags);
     }
 
     void igEnd()
     {
+        ZoneScoped;
         return ImGui::End();
     }
 
     void igBeginDisabled() {
+        ZoneScoped;
         ImGui::BeginDisabled();
     }
 
     void igEndDisabled() {
+        ZoneScoped;
         ImGui::EndDisabled();
     }
 
     // Returns true if the last item is hovered (with optional flags)
     bool igIsItemHovered(unsigned int flags) {
+        ZoneScoped;
         return ImGui::IsItemHovered(static_cast<ImGuiHoveredFlags>(flags));
     }
 
     // Sets a tooltip for the last item
     void igSetTooltip(const char* text) {
+        ZoneScoped;
         ImGui::SetTooltip("%s", text);
     }
 
     bool igInputText(const char* label, char* buffer, int buffer_size, int flags) {
+        ZoneScoped;
         return ImGui::InputText(label, buffer, buffer_size, (ImGuiInputTextFlags)flags);
     }
 
     void igText(const char* fmt, ...) {
+        ZoneScoped;
         va_list args;
         va_start(args, fmt);
         ImGui::TextV(fmt,args);
@@ -108,6 +116,7 @@ extern "C" {
     }
 
     void igTextColored(float r, float g, float b, float a, const char* fmt, ...) {
+        ZoneScoped;
         va_list args;
         va_start(args, fmt);
         ImGui::TextColoredV(ImVec4(r, g, b, a), fmt, args);
@@ -115,68 +124,85 @@ extern "C" {
     }
 
     bool igButton(const char* label) {
+        ZoneScoped;
         return ImGui::Button(label);
     }
 
     void igSliderFloat(const char* label, float* v, float v_min, float v_max, const char* format) {
+        ZoneScoped;
         ImGui::SliderFloat(label, v, v_min, v_max, format);
     }
 
     bool igCheckbox(const char* label, bool* v) {
+        ZoneScoped;
         return ImGui::Checkbox(label, v);
     }
 
     bool igWantCaptureKeyboard() {
+        ZoneScoped;
         return ImGui::GetIO().WantCaptureKeyboard;
     }
 
     bool igWantCaptureMouse() {
+        ZoneScoped;
         return ImGui::GetIO().WantCaptureMouse;
     }
 
     void SHM_GetDrawableSize(int *display_w, int *display_h) {
+        ZoneScoped;
         SDL_GL_GetDrawableSize(window, display_w, display_h);
     }
 
     void igSHMNextItemOpenOnce() {
+        ZoneScoped;
         ImGui::SetNextItemOpen(true, ImGuiCond_Once);
     }
 
     bool igTreeNode(const char* label) {
+        ZoneScoped;
         return ImGui::TreeNode(label);
     }
 
     void igTreePop() {
+        ZoneScoped;
         return ImGui::TreePop();
     }
 
     void igSameLine() {
+        ZoneScoped;
         return ImGui::SameLine();
     }
 
     bool igBeginTable(const char* label, int columns) {
+        ZoneScoped;
         return ImGui::BeginTable(label, columns, ImGuiTableFlags_SizingStretchProp);
     }
 
     void igTableSetupColumn(const char* label) {
+        ZoneScoped;
         ImGui::TableSetupColumn(label);
     }
 
     void igTableHeadersRow() {
+        ZoneScoped;
         ImGui::TableHeadersRow();
     }
 
     void igTableNextRow() {
+        ZoneScoped;
         ImGui::TableNextRow();
     }
 
     void igTableSetColumnIndex(int index) {
+        ZoneScoped;
         ImGui::TableSetColumnIndex(index);
     }
     void igEndTable() {
+        ZoneScoped;
         return ImGui::EndTable();
     }
     void igSetKeyboardFocusHere() {
+        ZoneScoped;
         ImGui::SetKeyboardFocusHere();
     }
 

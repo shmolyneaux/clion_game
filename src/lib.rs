@@ -58,6 +58,22 @@ pub struct ___tracy_source_location_data {
 
 unsafe impl Sync for ___tracy_source_location_data {}
 
+#[macro_export]
+macro_rules! zone_scoped {
+    ($name:expr) => {{
+        static LOC: ___tracy_source_location_data = ___tracy_source_location_data {
+            name: concat!($name, "\0").as_ptr() as *const i8,
+            function: c"Rust Function".as_ptr() as *const i8,
+            file: concat!(env!("CARGO_MANIFEST_DIR"), "\\", file!(), "\0").as_ptr() as *const i8,
+            line: line!(),
+            color: 0,
+        };
+        unsafe {
+            TracyZone { ctx: ___tracy_emit_zone_begin(&LOC as *const ___tracy_source_location_data, 1) }
+        }
+    }};
+}
+
 type ImGuiWindowFlags = c_int;
 unsafe extern "C" {
     fn SDL_GL_GetProcAddress(proc: *const i8) -> *mut std::ffi::c_void;
@@ -351,7 +367,7 @@ macro_rules! log_opengl_errors {
         unsafe {
             loop {
                 let err = {
-                    let zone = zone_start(c"gl::GetError()");
+                    let _zone = zone_scoped!("gl::GetError()");
                     gl::GetError()
                 };
                 match err {
@@ -1172,12 +1188,12 @@ fn frame(state: &mut State, delta: f32) {
     }
 
     {
-        let zone = zone_start(c"imgui_debug");
+        let _zone = zone_scoped!("imgui_debug");
         imgui_debug(state);
     }
 
     unsafe {
-        let zone = zone_start(c"rust frame unsafe block");
+        let _zone = zone_scoped!("rust frame unsafe block");
         update_keys(state);
 
         let test = vec![0.1, 0.1, 0.12, 1.0];
@@ -1207,19 +1223,6 @@ fn frame(state: &mut State, delta: f32) {
             base_camera_speed
         };
 
-        if state.keys.pressed(SDL_SCANCODE_S) {
-            state.camera_pos -= delta*camera_speed*state.camera_front;
-        }
-        if state.keys.pressed(SDL_SCANCODE_W)  {
-            state.camera_pos += delta*camera_speed*state.camera_front;
-        }
-        if state.keys.pressed(SDL_SCANCODE_D) {
-            state.camera_pos += state.camera_front.cross(state.camera_up).normalize() * delta*camera_speed;
-        }
-        if state.keys.pressed(SDL_SCANCODE_A) {
-            state.camera_pos -= state.camera_front.cross(state.camera_up).normalize() * delta*camera_speed;
-        }
-
         let mut xrel: i32 = 0;
         let mut yrel: i32 = 0;
 
@@ -1239,6 +1242,19 @@ fn frame(state: &mut State, delta: f32) {
             state.yaw += (xrel as f32)*camera_sensitivity;
             state.pitch -= (yrel as f32)*camera_sensitivity;
             state.pitch = state.pitch.clamp(-89.0, 89.0);
+
+            if state.keys.pressed(SDL_SCANCODE_S) {
+                state.camera_pos -= delta*camera_speed*state.camera_front;
+            }
+            if state.keys.pressed(SDL_SCANCODE_W)  {
+                state.camera_pos += delta*camera_speed*state.camera_front;
+            }
+            if state.keys.pressed(SDL_SCANCODE_D) {
+                state.camera_pos += state.camera_front.cross(state.camera_up).normalize() * delta*camera_speed;
+            }
+            if state.keys.pressed(SDL_SCANCODE_A) {
+                state.camera_pos -= state.camera_front.cross(state.camera_up).normalize() * delta*camera_speed;
+            }
         }
 
         let pitch = state.pitch;
@@ -1288,36 +1304,27 @@ fn frame(state: &mut State, delta: f32) {
         igEnd();
 
         {
-            let zone = zone_start(c"IMGUI Debug Windows");
+            let zone = zone_scoped!("IMGUI Debug Windows");
             {
-                static loc: ___tracy_source_location_data = ___tracy_source_location_data {
-                    name: c"test source loc data".as_ptr(),
-                    function: c"test function name".as_ptr(),
-                    file: concat!(env!("CARGO_MANIFEST_DIR"), "\\", file!(), "\0").as_ptr() as *const i8,
-                    line: line!(),
-                    color: 0,
-                };
-                let zone = ___tracy_emit_zone_begin(&loc as *const ___tracy_source_location_data, 1);
+                let _zone = zone_scoped!("ShimLang Debug");
 
                 state.debug_state.shimlang_debug_window.debug_window(&mut state.interpreter);
                 state.debug_state.shimlang_repl.window(&mut state.interpreter);
 
                 draw_log_window();
-
-                tracy_zone_end(zone);
             }
         }
 
         {
-            let zone = zone_start(c"Draw Test Mesh");
+            let _zone = zone_scoped!("Draw Test Mesh");
             state.test_mesh.transform = Mat4::from_translation(Vec3::new(1.2, 0.2, -0.2));
             {
-                let zone = zone_start(c"state.test_mesh.draw");
+                let _zone = zone_scoped!("state.test_mesh.draw");
                 state.test_mesh.draw(&mut ctx);
             }
 
             let my_box = {
-                let zone = zone_start(c"Create box mesh");
+                let _zone = zone_scoped!("Create box mesh");
                 box_mesh(Vec3::new(1.0, 1.0, 1.0))
             };
             let positions = match my_box.verts.get("aPos").unwrap() {
@@ -1336,18 +1343,18 @@ fn frame(state: &mut State, delta: f32) {
         }
 
         {
-            let zone = zone_start(c"draw_debug_shapes");
+            let _zone = zone_scoped!("draw_debug_shapes");
             draw_debug_shapes(state);
         }
 
         {
-            // let zone = zone_start(c"Log OpenGL Error Macro");
+            // let _zone = zone_scoped!("Log OpenGL Error Macro");
             // // Log errors each frame. This call can be copied to wherever necessary to trace back to the bad call.
             // log_opengl_errors!();
         }
 
         {
-            let zone = zone_start(c"Increment frame counter");
+            let _zone = zone_scoped!("Increment frame counter");
             if state.frame_num == 0 {
                 println!("Finished first frame");
             }
@@ -1358,7 +1365,7 @@ fn frame(state: &mut State, delta: f32) {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_frame(delta: f32) -> i32 {
-    let zone = zone_start(c"rust_frame_inner");
+    let _zone = zone_scoped!("rust_frame_inner");
     STATE_REFCELL.with_borrow_mut(|value| {
         frame(value.as_mut().unwrap(), delta)
     });
