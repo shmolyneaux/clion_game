@@ -1,4 +1,5 @@
-#![allow(unused_variables, unused_mut, unused_imports, unused_attributes, unused_unsafe, dead_code, unsafe_op_in_unsafe_fn)]
+#![allow(unused_variables, unused_mut, unused_imports, unused_attributes, unused_unsafe, dead_code, unsafe_op_in_unsafe_fn, non_snake_case)]
+#![feature(c_variadic)]
 
 #[macro_use]
 use gl;
@@ -75,6 +76,8 @@ macro_rules! zone_scoped {
 }
 
 type ImGuiWindowFlags = c_int;
+
+#[cfg(not(test))]
 unsafe extern "C" {
     fn SDL_GL_GetProcAddress(proc: *const i8) -> *mut std::ffi::c_void;
     fn SDL_GetKeyboardState(numkeys: *mut i32) -> *const u8;
@@ -88,8 +91,8 @@ unsafe extern "C" {
     fn igIsItemHovered(flags: i32) -> bool;
     fn igSetTooltip(text: *const core::ffi::c_char);
     fn igInputText(label: *const core::ffi::c_char, buffer: *mut core::ffi::c_char, buffer_size: i32, flags: i32) -> bool;
-    fn igText(fmt: *const core::ffi::c_char, ...);
-    fn igTextColored(r: f32, g: f32, b: f32, a: f32, fmt: *const core::ffi::c_char, ...);
+    fn igTextC(fmt: *const core::ffi::c_char, ...);
+    fn igTextColoredC(r: f32, g: f32, b: f32, a: f32, fmt: *const core::ffi::c_char, ...);
     fn igButton(label: *const core::ffi::c_char) -> bool;
     fn igSliderFloat(label: *const core::ffi::c_char, v: *mut f32, v_min: f32, v_max: f32, format: *const core::ffi::c_char);
     fn igCheckbox(label: *const core::ffi::c_char, value: *mut bool) -> bool;
@@ -118,6 +121,95 @@ unsafe extern "C" {
     unsafe fn ___tracy_emit_zone_begin(loc: *const ___tracy_source_location_data, active: i32) -> TracyCZoneCtx;
     unsafe fn ___tracy_emit_zone_end(ctx: TracyCZoneCtx);
 }
+
+fn igText(fmt: *const core::ffi::c_char) {
+    #[cfg(not(test))]
+    igTextC(fmt);
+}
+
+fn igTextColored(r: f32, g: f32, b: f32, a: f32, fmt: *const core::ffi::c_char) {
+    #[cfg(not(test))]
+    igTextColoredC(r, g, b, a, fmt);
+}
+
+#[cfg(test)]
+mod test_mocks {
+    use crate::ImGuiWindowFlags;
+    pub fn SDL_GL_GetProcAddress(proc: *const i8) -> *mut std::ffi::c_void {panic!("Can't call SDL_GL_GetProcAddress in test context")}
+    pub fn SDL_GetKeyboardState(numkeys: *mut i32) -> *const u8 {panic!("Can't call SDL_GetKeyboardState in test context")}
+    pub fn SDL_GetRelativeMouseState(x: *mut i32, y: *mut i32) -> u32 {panic!("Can't call SDL_GetRelativeMouseState in test context")}
+    pub fn SDL_SetRelativeMouseMode(enabled: bool) -> i32 {panic!("Can't call SDL_SetRelativeMouseMode in test context")}
+    pub fn SHM_GetDrawableSize(display_w: *mut i32, display_h: *mut i32) {panic!("Can't call SHM_GetDrawableSize in test context")}
+    pub fn igBegin(name: *const core::ffi::c_char, p_open: *mut bool, flags: ImGuiWindowFlags) -> bool {panic!("Can't call igBegin in test context")}
+    pub fn igEnd() {panic!("Can't call igEnd in test context")}
+    pub fn igBeginDisabled() {panic!("Can't call igBeginDisabled in test context")}
+    pub fn igEndDisabled() {panic!("Can't call igEndDisabled in test context")}
+    pub fn igIsItemHovered(flags: i32) -> bool {panic!("Can't call igIsItemHovered in test context")}
+    pub fn igSetTooltip(text: *const core::ffi::c_char) {panic!("Can't call igSetTooltip in test context")}
+    pub fn igInputText(label: *const core::ffi::c_char, buffer: *mut core::ffi::c_char, buffer_size: i32, flags: i32) -> bool {panic!("Can't call igInputText in test context")}
+    pub fn igButton(label: *const core::ffi::c_char) -> bool {panic!("Can't call igButton in test context")}
+    pub fn igSliderFloat(label: *const core::ffi::c_char, v: *mut f32, v_min: f32, v_max: f32, format: *const core::ffi::c_char) {panic!("Can't call igSliderFloat in test context")}
+    pub fn igCheckbox(label: *const core::ffi::c_char, value: *mut bool) -> bool {panic!("Can't call igCheckbox in test context")}
+    pub fn igWantCaptureKeyboard() -> bool {panic!("Can't call igWantCaptureKeyboard in test context")}
+    pub fn igWantCaptureMouse() -> bool {panic!("Can't call igWantCaptureMouse in test context")}
+    pub fn igTreeNode(label: *const core::ffi::c_char) -> bool {panic!("Can't call fn  in test context")}
+    pub fn igTreePop() {panic!("Can't call igTreePop in test context")}
+    pub fn igSHMNextItemOpenOnce() {panic!("Can't call igSHMNextItemOpenOnce in test context")}
+    pub fn igSameLine() {panic!("Can't call igSameLine in test context")}
+    pub fn igSetKeyboardFocusHere() {panic!("Can't call igSetKeyboardFocusHere in test context")}
+
+    pub fn igBeginTable(label: *const core::ffi::c_char, columns: i32) -> bool {panic!("Can't call fn  in test context")}
+    pub fn igTableSetupColumn(label: *const core::ffi::c_char) {panic!("Can't call igTableSetupColumn in test context")}
+    pub fn igTableHeadersRow() {panic!("Can't call igTableHeadersRow in test context")}
+    pub fn igTableNextRow() {panic!("Can't call igTableNextRow in test context")}
+    pub fn igTableSetColumnIndex(index: i32) {panic!("Can't call igTableSetColumnIndex in test context")}
+    pub fn igEndTable() {panic!("Can't call igEndTable in test context")}
+}
+
+#[cfg(test)]
+fn tracy_zone_begin_n(name: *const c_char, active: c_int) -> TracyCZoneCtx {
+    let id = 0;
+    let active = 0;
+    TracyCZoneCtx {
+        id,
+        active,
+    }
+}
+
+#[cfg(test)]
+fn tracy_zone_begin_ns(name: *const c_char, depth: c_int, active: c_int) -> TracyCZoneCtx {
+    let id = 0;
+    let active = 0;
+    TracyCZoneCtx {
+        id,
+        active,
+    }
+}
+
+#[cfg(test)]
+fn tracy_zone_end(ctx: TracyCZoneCtx) {}
+#[cfg(test)]
+fn tracy_zone_text(ctx: TracyCZoneCtx, txt: *const c_char, len: c_uint) {}
+#[cfg(test)]
+fn tracy_zone_name(ctx: TracyCZoneCtx, txt: *const c_char, len: c_uint) {}
+#[cfg(test)]
+fn tracy_zone_color(ctx: TracyCZoneCtx, color: c_uint) {}
+
+#[cfg(test)]
+unsafe fn ___tracy_emit_zone_begin(loc: *const ___tracy_source_location_data, active: i32) -> TracyCZoneCtx {
+    let id = 0;
+    let active = 0;
+    TracyCZoneCtx {
+        id,
+        active,
+    }
+}
+
+#[cfg(test)]
+unsafe fn ___tracy_emit_zone_end(ctx: TracyCZoneCtx) {}
+
+#[cfg(test)]
+use test_mocks::*;
 
 #[macro_export]
 macro_rules! cformat {

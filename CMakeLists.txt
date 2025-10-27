@@ -156,3 +156,10 @@ add_custom_target(preprocess_main
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Generating preprocessed main.cpp -> main.i"
 )
+
+add_custom_target(test
+    COMMAND ${CMAKE_COMMAND} -E echo "Running Python tests..."
+    COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/test_shimlang.py
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMENT "Executing Python test script"
+)

@@ -107,7 +107,7 @@ extern "C" {
         return ImGui::InputText(label, buffer, buffer_size, (ImGuiInputTextFlags)flags);
     }
 
-    void igText(const char* fmt, ...) {
+    void igTextC(const char* fmt, ...) {
         ZoneScoped;
         va_list args;
         va_start(args, fmt);
@@ -115,7 +115,7 @@ extern "C" {
         va_end(args);
     }
 
-    void igTextColored(float r, float g, float b, float a, const char* fmt, ...) {
+    void igTextColoredC(float r, float g, float b, float a, const char* fmt, ...) {
         ZoneScoped;
         va_list args;
         va_start(args, fmt);

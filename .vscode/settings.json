@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "*.fs": "plaintext",
+        "system_error": "cpp",
+        "xlocale": "cpp"
+    }
+}
