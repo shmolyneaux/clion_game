@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 #[cfg(feature = "facet")]
-use crate::Facet;
+use facet::Facet;
 
 use std::ops::{Add, Sub};
 use std::ops::{AddAssign, SubAssign};
@@ -186,5 +186,15 @@ impl Interpreter {
             mem: mmu,
             source: HashMap::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn it_works() {
+        assert_eq!(2+2, 4);
     }
 }

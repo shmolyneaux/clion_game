@@ -33,7 +33,7 @@ mod gpu;
 mod mesh_gen;
 mod debug_draw;
 mod sdf;
-mod shimlang;
+
 mod shimlang_imgui;
 
 use crate::sdf::*;
@@ -163,7 +163,7 @@ mod test_mocks {
     pub fn igSameLine() {panic!("Can't call igSameLine in test context")}
     pub fn igSetKeyboardFocusHere() {panic!("Can't call igSetKeyboardFocusHere in test context")}
     pub fn igSeparator() {panic!("Can't call igSeparator in test context")}
-    pub fn shmConsoleFooterHeight() {panic!("Can't call shmConsoleFooterHeight in test context")}
+    pub fn shmConsoleFooterHeight() -> f32 {panic!("Can't call shmConsoleFooterHeight in test context")}
 
     pub fn igBeginTable(label: *const core::ffi::c_char, columns: i32) -> bool {panic!("Can't call fn  in test context")}
     pub fn igTableSetupColumn(label: *const core::ffi::c_char) {panic!("Can't call igTableSetupColumn in test context")}
@@ -172,7 +172,7 @@ mod test_mocks {
     pub fn igTableSetColumnIndex(index: i32) {panic!("Can't call igTableSetColumnIndex in test context")}
     pub fn igEndTable() {panic!("Can't call igEndTable in test context")}
 
-    pub fn igFrameRate() {panic!("Can't call igFrameRate in test context")}
+    pub fn igFrameRate() -> f32 {panic!("Can't call igFrameRate in test context")}
 }
 
 #[cfg(test)]

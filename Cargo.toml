@@ -4,13 +4,15 @@ version = "0.1.0"
 edition = "2024"
 
 [lib]
-crate-type = ["staticlib"]
+crate-type = ["lib", "staticlib"]
+path = "src/lib.rs"
 
 [dependencies]
 facet = { version = "0.27.14", optional = true}
 facet-reflect = { version = "0.27.14", optional = true }
 gl = "0.14.0"
 glam = "0.30.4"
+shimlang = { path = "shimlang" }
 
 [patch.crates-io]
 glam = { path = "glam-rs" }

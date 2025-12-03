@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
-use crate::{shimlang::*, *};
+use crate::*;
+use ::shimlang::{Word, FreeBlock, Interpreter};
 
 #[derive(Facet, Default)]
 pub struct Repl {

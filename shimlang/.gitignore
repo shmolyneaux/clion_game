@@ -1,0 +1,6 @@
+/target
+/.idea
+/cmake-build-*
+/ignore
+build/
+imgui.ini
