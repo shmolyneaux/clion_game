@@ -173,9 +173,22 @@ extern "C" {
         return ImGui::SameLine();
     }
 
+    void igSeparator() {
+        ImGui::Separator();
+    }
+
     bool igBeginTable(const char* label, int columns) {
         ZoneScoped;
         return ImGui::BeginTable(label, columns, ImGuiTableFlags_SizingStretchProp);
+    }
+
+
+    bool igBeginChild(const char* str_id, const ImVec2& size_arg, ImGuiChildFlags child_flags, ImGuiWindowFlags window_flags) {
+        return ImGui::BeginChild(str_id, size_arg, child_flags, window_flags);
+    }
+
+    float shmConsoleFooterHeight() {
+        return ImGui::GetStyle().ItemSpacing.y + ImGui::GetFrameHeightWithSpacing();
     }
 
     void igTableSetupColumn(const char* label) {
@@ -230,6 +243,11 @@ extern "C" {
 
     void tracy_zone_color(TracyCZoneCtx ctx, unsigned color) {
         TracyCZoneColor(ctx, color);
+    }
+
+    float igFrameRate() {
+        ImGuiIO& io = ImGui::GetIO(); (void)io;
+        return io.Framerate;
     }
 }
 

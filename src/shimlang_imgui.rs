@@ -34,6 +34,9 @@ impl Repl {
                 igSetKeyboardFocusHere();
                 self.sent_last_frame = false;
             }
+            igSeparator();
+            let height = shmConsoleFooterHeight();
+            igText(CString::new(format!("Footer height {}", height)).unwrap().as_ptr());
             let sent = igInputText(
                 c"REPL Input Line".as_ptr(), 
                 self.input.as_mut_ptr() as *mut i8, 
