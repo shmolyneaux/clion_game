@@ -37,7 +37,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>>{
         let mut contents = Vec::new();
         file.read_to_end(&mut contents)?;
 
-        println!("{}:\n{}", script_path, String::from_utf8_lossy(&contents));
+        println!("2");
+
+        //println!("{}:\n{}", script_path, String::from_utf8_lossy(&contents));
     } else {
         return Err("Expected script path".into());
     }
