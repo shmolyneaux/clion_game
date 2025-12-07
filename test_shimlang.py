@@ -90,6 +90,15 @@ for script in scripts:
         print("")
         failures.append(f"{script} ... {msg}")
 
+    elif proc_stderr != expected_stderr:
+        msg = "FAILED (stderr mismatch)"
+        print(f"{RED}{msg}{RESET}")
+        print("")
+        print("STDERR:")
+        print_diff(expected=expected_stderr, actual=proc_stderr)
+        print("")
+        failures.append(f"{script} ... {msg}")
+
     elif proc_stdout != expected_stdout:
         msg = "FAILED (stdout mismatch)"
         print(f"{RED}{msg}{RESET}")
@@ -99,15 +108,6 @@ for script in scripts:
             expected=expected_stdout,
             actual=proc_stdout,
         )
-        print("")
-        failures.append(f"{script} ... {msg}")
-
-    elif proc_stderr != expected_stderr:
-        msg = "FAILED (stderr mismatch)"
-        print(f"{RED}{msg}{RESET}")
-        print("")
-        print("STDERR:")
-        print_diff(expected=expected_stderr, actual=proc_stderr)
         print("")
         failures.append(f"{script} ... {msg}")
 

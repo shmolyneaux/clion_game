@@ -41,7 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>>{
 
         let program = shimlang::ast_from_text(&contents)?;
         let interpreter = shimlang::Interpreter::default();
-        interpreter.execute(&program);
+        interpreter.execute(&program)?;
     } else {
         return Err("Expected script path".into());
     }

@@ -97,7 +97,7 @@ pub fn parse_arguments(tokens: &mut &[Token]) -> Result<Vec<Expression>, String>
 }
 
 pub fn parse_call(tokens: &mut &[Token]) -> Result<Expression, String> {
-    let mut expr = parse_primary(tokens)?;
+    let mut expr = parse_term(tokens)?;
     while !tokens.is_empty() {
         match &tokens[0] {
             Token::LBracket => {
@@ -221,6 +221,8 @@ pub fn lex(text: &[u8]) -> Result<Vec<Token>, String> {
             b'0' ..= b'9' => tokens.push(lex_number(&mut text)?),
             b'(' => tokens.push(Token::LBracket),
             b')' => tokens.push(Token::RBracket),
+            b'+' => tokens.push(Token::Plus),
+            b'-' => tokens.push(Token::Minus),
             _ => return Err(format!("Unknown character '{}'", printable_byte(c)))
         }
         text = &text[1..];
@@ -437,6 +439,15 @@ impl ShimValue {
             value => format!("{:?}", value),
         }
     }
+
+    fn add(&self, other: &Self) -> Result<ShimValue, String> {
+        match (self, other) {
+            (ShimValue::Integer(a), ShimValue::Integer(b)) => {
+                Ok(ShimValue::Integer(a + b))
+            },
+            (a, b) => Err(format!("Can't add {:?} and {:?}", a, b))
+        }
+    }
 }
 
 impl Interpreter {
@@ -451,10 +462,7 @@ impl Interpreter {
 
     pub fn execute(&self, program: &Program) -> Result<(), String> {
         for expr in program.expressions.iter() {
-            self.evaluate(expr);
-            match expr {
-                expr => return Err(format!("Can't evaluate {:?}", expr)),
-            }
+            self.evaluate(expr)?;
         }
         Ok(())
     }
@@ -475,6 +483,12 @@ impl Interpreter {
                 let args = args.iter().map(|a| self.evaluate(a)).collect::<Result<Vec<ShimValue>, String>>()?;
                 obj.call(args)
             },
+            Expression::BinaryOp(BinaryOp::Add(a, b)) => {
+                let a = self.evaluate(a)?;
+                let b = self.evaluate(b)?;
+                a.add(&b)
+            },
+
             expr => Err(format!("Can't evaluate {:?}", expr)),
         }
     }
