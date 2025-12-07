@@ -6,6 +6,234 @@ use facet::Facet;
 use std::ops::{Add, Sub};
 use std::ops::{AddAssign, SubAssign};
 
+#[derive(Debug)]
+pub enum Primary {
+    True,
+    False,
+    None,
+    Integer(i32),
+    Float(f32),
+    Identifier(String),
+    Expression(Box<Expression>),
+}
+
+#[derive(Debug)]
+pub enum BinaryOp {
+    Add(Box<Expression>, Box<Expression>),
+    Subtract(Box<Expression>, Box<Expression>),
+}
+
+#[derive(Debug)]
+pub enum Expression {
+    Primary(Primary),
+    BinaryOp(BinaryOp),
+    Call(Box<Expression>, Vec<Expression>),
+}
+
+#[derive(Debug)]
+pub struct Program {
+    expressions: Vec<Expression>
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Token {
+    Comma,
+    LBracket,
+    RBracket,
+    Plus,
+    Minus,
+    Integer(i32),
+    Identifier(String),
+}
+
+pub fn parse_primary(tokens: &mut &[Token]) -> Result<Expression, String> {
+    match &tokens[0] {
+        Token::Integer(i) => {
+            *tokens = &tokens[1..];
+            Ok(Expression::Primary(Primary::Integer(*i)))
+        },
+        Token::Identifier(s) => {
+            *tokens = &tokens[1..];
+            Ok(Expression::Primary(Primary::Identifier(s.clone())))
+        },
+        Token::LBracket => {
+            *tokens = &tokens[1..];
+            let expr = parse_expression(tokens)?;
+            if tokens[0] != Token::RBracket {
+                Err(format!("Expected closing ')' but found {:?}", tokens[0]))
+            } else {
+                Ok(expr)
+            }
+        },
+        token => Err(format!("Could not parse_primary {:?}", token)),
+    }
+}
+
+pub fn parse_arguments(tokens: &mut &[Token]) -> Result<Vec<Expression>, String> {
+    let mut args = Vec::new();
+    while !tokens.is_empty() {
+        let expr = parse_expression(tokens)?;
+        args.push(expr);
+
+        match &tokens[0] {
+            Token::RBracket => {
+                // Don't consume the closing bracket since we parse
+                // function arguments and list literals the same way
+                // and the parent needs to match the bracket
+                break;
+            }
+            Token::Comma => {
+                *tokens = &tokens[1..];
+                if !tokens.is_empty() && tokens[0] == Token::RBracket {
+                    // Exit when there's a trailing comma
+                    break;
+                }
+                continue;
+            }
+            token => return Err(format!("Expected command or closing bracket, found {:?}", token)),
+        }
+    }
+    Ok(args)
+}
+
+pub fn parse_call(tokens: &mut &[Token]) -> Result<Expression, String> {
+    let mut expr = parse_primary(tokens)?;
+    while !tokens.is_empty() {
+        match &tokens[0] {
+            Token::LBracket => {
+                *tokens = &tokens[1..];
+                expr = Expression::Call(Box::new(expr), parse_arguments(tokens)?);
+                if tokens.is_empty() {
+                    return Err(format!("No more tokens, expected closing ')' for parse_call"));
+                }
+                if tokens[0] != Token::RBracket {
+                    return Err(format!("Expected closing ')' for parse_call, got {:?}", tokens[0]));
+                }
+                *tokens = &tokens[1..];
+            },
+            _ => return Ok(expr),
+        }
+    }
+
+    Ok(expr)
+}
+
+pub fn parse_term(tokens: &mut &[Token]) -> Result<Expression, String> {
+    let mut expr = parse_primary(tokens)?;
+    while !tokens.is_empty() {
+        match &tokens[0] {
+            Token::Plus => {
+                *tokens = &tokens[1..];
+                expr = Expression::BinaryOp(BinaryOp::Add(Box::new(expr), Box::new(parse_expression(tokens)?)));
+            },
+            Token::Minus => {
+                *tokens = &tokens[1..];
+                expr = Expression::BinaryOp(BinaryOp::Subtract(Box::new(expr), Box::new(parse_expression(tokens)?)));
+            },
+            _ => return Ok(expr),
+        }
+    }
+    Ok(expr)
+}
+
+pub fn parse_expression(tokens: &mut &[Token]) -> Result<Expression, String> {
+    parse_call(tokens)
+}
+
+pub fn parse_program(tokens: &mut &[Token]) -> Result<Program, String> {
+    let mut exprs = Vec::new();
+    let mut count = 0;
+    while !tokens.is_empty() {
+        let expr = parse_expression(tokens)?;
+        exprs.push(expr);
+        count += 1;
+    }
+    Ok(Program { expressions: exprs })
+}
+
+pub fn printable_byte(b: u8) -> String {
+    match char::from_u32(b as u32) {
+        Some(c) if !c.is_control() => c.to_string(),
+        _ => format!("\\x{:02X}", b),
+    }
+}
+
+pub fn lex_identifier(text: &mut &[u8]) -> Result<Token, String> {
+    for (idx, c) in text.iter().enumerate() {
+        match c {
+            b'a' ..= b'z' | b'A' ..= b'Z' | b'0' ..= b'9' => continue,
+            _ => {
+                let token = Token::Identifier(unsafe { String::from_utf8_unchecked(text[0..idx].to_vec())});
+                *text = &text[(idx-1)..];
+                return Ok(token);
+            }
+        }
+    }
+    let token = Token::Identifier(
+        unsafe {
+            String::from_utf8_unchecked(text.to_vec())
+        }
+    );
+    Ok(token)
+}
+
+pub fn lex_number(text: &mut &[u8]) -> Result<Token, String> {
+    let mut found_decimal = false;
+    for (idx, c) in text.iter().enumerate() {
+        match c {
+            b'0' ..= b'9' => continue,
+            b'.' => {
+                if found_decimal {
+                    return Err(format!("Found multiple decimals in number"));
+                }
+            }
+            _ => {
+                let token = if found_decimal {
+                    todo!("Implement float parsing");
+                } else {
+                    Token::Integer(
+                        unsafe {
+                            std::str::from_utf8_unchecked(&text[..idx]).parse().map_err(|e| format!("{:?}", e))?
+                        }
+                    )
+                };
+                *text = &text[(idx-1)..];
+                return Ok(token);
+            }
+        }
+    }
+    let token = Token::Integer(
+        unsafe {
+            std::str::from_utf8_unchecked(text).parse().map_err(|e| format!("{:?}", e))?
+        }
+    );
+    Ok(token)
+}
+
+pub fn lex(text: &[u8]) -> Result<Vec<Token>, String> {
+    let mut text = text;
+    let mut tokens = Vec::new();
+
+    while !text.is_empty() {
+        let c = text[0];
+        match c {
+            b'a' ..= b'z' => tokens.push(lex_identifier(&mut text)?),
+            b'0' ..= b'9' => tokens.push(lex_number(&mut text)?),
+            b'(' => tokens.push(Token::LBracket),
+            b')' => tokens.push(Token::RBracket),
+            _ => return Err(format!("Unknown character '{}'", printable_byte(c)))
+        }
+        text = &text[1..];
+    }
+    Ok(tokens)
+}
+
+pub fn ast_from_text(text: &[u8]) -> Result<Program, String> {
+    let mut tokens = lex(text)?;
+    let mut foo = tokens.as_slice();
+    parse_program(&mut foo)
+}
+
 pub struct Config {
     // There are max 2^24 addressable values, each 8 bytes large
     // This value can be up to 2^32.
@@ -134,7 +362,7 @@ impl MMU {
     }
 
     fn compact_free_list() {
-        todo!();
+        todo!("compact_free_list not implemented");
     }
 
     /**
@@ -178,6 +406,39 @@ pub struct Interpreter {
     pub source: HashMap<String, String>,
 }
 
+#[derive(Debug)]
+enum ShimValue {
+    None,
+    Print,
+    Integer(i32),
+}
+
+impl ShimValue {
+    fn call(&self, args: Vec<ShimValue>) -> Result<ShimValue, String> {
+        match self {
+            ShimValue::None => Err(format!("Can't call None as function with args {:?}", args)),
+            ShimValue::Print => {
+                for (idx, arg) in args.iter().enumerate() {
+                    if idx != 0 {
+                        print!(" ");
+                    }
+                    print!("{}", arg.to_string());
+                }
+                println!();
+                Ok(ShimValue::None)
+            },
+            ShimValue::Integer(i) => Err(format!("Can't call int {:?} as function with args {:?}", i, args)),
+        }
+    }
+
+    fn to_string(&self) -> String {
+        match self {
+            ShimValue::Integer(i) => i.to_string(),
+            value => format!("{:?}", value),
+        }
+    }
+}
+
 impl Interpreter {
     pub fn create(config: &Config) -> Self {
         let mmu = MMU::with_capacity(Word(config.memory_space_bytes / 8));
@@ -186,6 +447,43 @@ impl Interpreter {
             mem: mmu,
             source: HashMap::new(),
         }
+    }
+
+    pub fn execute(&self, program: &Program) -> Result<(), String> {
+        for expr in program.expressions.iter() {
+            self.evaluate(expr);
+            match expr {
+                expr => return Err(format!("Can't evaluate {:?}", expr)),
+            }
+        }
+        Ok(())
+    }
+
+    pub fn evaluate(&self, expr: &Expression) -> Result<ShimValue, String>  {
+        match expr {
+            Expression::Primary(p) => match p {
+                Primary::Identifier(s) => if s == "print" {
+                    Ok(ShimValue::Print)
+                } else {
+                    Err(format!("Unknown identifier {:?}", s))
+                },
+                Primary::Integer(i) => Ok(ShimValue::Integer(*i)),
+                prim => Err(format!("Can't evaluate primary {:?}", prim)),
+            },
+            Expression::Call(expr, args) => {
+                let obj = self.evaluate(expr)?;
+                let args = args.iter().map(|a| self.evaluate(a)).collect::<Result<Vec<ShimValue>, String>>()?;
+                obj.call(args)
+            },
+            expr => Err(format!("Can't evaluate {:?}", expr)),
+        }
+    }
+}
+
+impl Default for Interpreter {
+    fn default() -> Self {
+        let config = Config::default();
+        Self::create(&config)
     }
 }
 

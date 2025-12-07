@@ -2,6 +2,8 @@ use std::env;
 use std::fs::File;
 use std::io::Read;
 
+use shimlang;
+
 #[derive(Debug, Default)]
 struct Args {
     path: Option<String>,
@@ -37,9 +39,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>>{
         let mut contents = Vec::new();
         file.read_to_end(&mut contents)?;
 
-        println!("2");
-
-        //println!("{}:\n{}", script_path, String::from_utf8_lossy(&contents));
+        let program = shimlang::ast_from_text(&contents)?;
+        let interpreter = shimlang::Interpreter::default();
+        interpreter.execute(&program);
     } else {
         return Err("Expected script path".into());
     }

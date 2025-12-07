@@ -1,6 +1,7 @@
-import subprocess
 import itertools
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 from time import time
@@ -19,9 +20,13 @@ os.chdir(test_path)
 
 
 start_time = time()
-subprocess.run("cargo build --bin shm", shell=True)
+result = subprocess.run("cargo build --bin shm", shell=True)
 end_time = time()
 duration = end_time - start_time
+
+if result.returncode:
+    print("Failed to build")
+    sys.exit()
 
 print(f"Built executable in  {duration} seconds")
 
@@ -33,7 +38,7 @@ def print_diff(expected, actual):
     expected_lines = expected.splitlines()
     actual_lines = actual.splitlines()
 
-    expected_max_length = max(45, max(len(line) for line in expected_lines))
+    expected_max_length = max(45, max((len(line) for line in expected_lines), default=0))
     diff_length = max(len(expected_lines), len(actual_lines))
 
     gutter_width = len(str(diff_length))
@@ -79,6 +84,10 @@ for script in scripts:
     if proc.returncode:
         msg = "FAILED (non-zero exit code)"
         print(f"{RED}{msg}{RESET}")
+        print("")
+        print("STDERR:")
+        print(proc_stderr)
+        print("")
         failures.append(f"{script} ... {msg}")
 
     elif proc_stdout != expected_stdout:
@@ -97,7 +106,7 @@ for script in scripts:
         msg = "FAILED (stderr mismatch)"
         print(f"{RED}{msg}{RESET}")
         print("")
-        print("STDOUT:")
+        print("STDERR:")
         print_diff(expected=expected_stderr, actual=proc_stderr)
         print("")
         failures.append(f"{script} ... {msg}")
