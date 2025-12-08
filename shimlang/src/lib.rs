@@ -31,8 +31,14 @@ pub enum Expression {
 }
 
 #[derive(Debug)]
+pub enum Statement {
+    Let(String, Expression),
+    Expression(Expression),
+}
+
+#[derive(Debug)]
 pub struct Program {
-    expressions: Vec<Expression>
+    stmts: Vec<Statement>
 }
 
 #[derive(Debug, PartialEq)]
@@ -42,6 +48,9 @@ pub enum Token {
     RBracket,
     Plus,
     Minus,
+    Let,
+    Equal,
+    Semicolon,
     Integer(i32),
     Identifier(String),
 }
@@ -141,14 +150,49 @@ pub fn parse_expression(tokens: &mut &[Token]) -> Result<Expression, String> {
 }
 
 pub fn parse_program(tokens: &mut &[Token]) -> Result<Program, String> {
-    let mut exprs = Vec::new();
-    let mut count = 0;
+    let mut stmts = Vec::new();
     while !tokens.is_empty() {
-        let expr = parse_expression(tokens)?;
-        exprs.push(expr);
-        count += 1;
+        if tokens[0] == Token::Let {
+            *tokens = &tokens[1..];
+            if tokens.is_empty() {
+                return Err("No token found after let".to_string());
+            }
+            let ident = match &tokens[0] {
+                Token::Identifier(ident) => {
+                    ident.clone()
+                },
+                token => return Err(format!("Expected ident after let, found {:?}", token))
+            };
+            *tokens = &tokens[1..];
+
+            match &tokens[0] {
+                Token::Equal => (),
+                token => return Err(format!("Expected = after `let ident`, found {:?}", token))
+            }
+            *tokens = &tokens[1..];
+
+            let expr = parse_expression(tokens)?;
+            match &tokens[0] {
+                Token::Semicolon => (),
+                token => return Err(format!("Expected semicolon after `let <ident> = <expr>`, found {:?}", token))
+            }
+            *tokens = &tokens[1..];
+
+            stmts.push(Statement::Let(ident, expr));
+        }
+        else {
+            let expr = parse_expression(tokens)?;
+
+            match &tokens[0] {
+                Token::Semicolon => (),
+                token => return Err(format!("Expected semicolon after expression statement, found {:?}", token))
+            }
+            *tokens = &tokens[1..];
+
+            stmts.push(Statement::Expression(expr));
+        }
     }
-    Ok(Program { expressions: exprs })
+    Ok(Program { stmts: stmts })
 }
 
 pub fn printable_byte(b: u8) -> String {
@@ -158,27 +202,24 @@ pub fn printable_byte(b: u8) -> String {
     }
 }
 
-pub fn lex_identifier(text: &mut &[u8]) -> Result<Token, String> {
+pub fn lex_identifier(text: &mut &[u8]) -> Result<String, String> {
     for (idx, c) in text.iter().enumerate() {
         match c {
             b'a' ..= b'z' | b'A' ..= b'Z' | b'0' ..= b'9' => continue,
             _ => {
-                let token = Token::Identifier(unsafe { String::from_utf8_unchecked(text[0..idx].to_vec())});
+                let ident = unsafe { String::from_utf8_unchecked(text[0..idx].to_vec())};
                 *text = &text[(idx-1)..];
-                return Ok(token);
+                return Ok(ident);
             }
         }
     }
-    let token = Token::Identifier(
-        unsafe {
-            String::from_utf8_unchecked(text.to_vec())
-        }
-    );
-    Ok(token)
+    unsafe {
+        Ok(String::from_utf8_unchecked(text.to_vec()))
+    }
 }
 
 pub fn lex_number(text: &mut &[u8]) -> Result<Token, String> {
-    let mut found_decimal = false;
+    let found_decimal = false;
     for (idx, c) in text.iter().enumerate() {
         match c {
             b'0' ..= b'9' => continue,
@@ -217,12 +258,23 @@ pub fn lex(text: &[u8]) -> Result<Vec<Token>, String> {
     while !text.is_empty() {
         let c = text[0];
         match c {
-            b'a' ..= b'z' => tokens.push(lex_identifier(&mut text)?),
+            b'a' ..= b'z' => {
+                let ident = lex_identifier(&mut text)?;
+                if ident == "let" {
+                    tokens.push(Token::Let);
+                } else {
+                    tokens.push(Token::Identifier(ident))
+                }
+            },
             b'0' ..= b'9' => tokens.push(lex_number(&mut text)?),
             b'(' => tokens.push(Token::LBracket),
             b')' => tokens.push(Token::RBracket),
             b'+' => tokens.push(Token::Plus),
             b'-' => tokens.push(Token::Minus),
+            b'=' => tokens.push(Token::Equal),
+            b';' => tokens.push(Token::Semicolon),
+            b'\n' => (),
+            b' ' => (),
             _ => return Err(format!("Unknown character '{}'", printable_byte(c)))
         }
         text = &text[1..];
@@ -231,7 +283,7 @@ pub fn lex(text: &[u8]) -> Result<Vec<Token>, String> {
 }
 
 pub fn ast_from_text(text: &[u8]) -> Result<Program, String> {
-    let mut tokens = lex(text)?;
+    let tokens = lex(text)?;
     let mut foo = tokens.as_slice();
     parse_program(&mut foo)
 }
@@ -398,7 +450,7 @@ impl MMU {
         panic!("Could not allocate {:?} words from free list {:#?}", words, self.free_list);
     }
 
-    fn free(&mut self, words: u32, ptr: *const u64) {
+    fn free(&mut self, _words: u32, _ptr: *const u64) {
     }
 }
 
@@ -406,14 +458,20 @@ impl MMU {
 pub struct Interpreter {
     pub mem: MMU,
     pub source: HashMap<String, String>,
+    pub env: HashMap<String, u64>,
 }
 
 #[derive(Debug)]
-enum ShimValue {
+pub enum ShimValue {
     None,
     Print,
     Integer(i32),
 }
+
+use std::mem::{size_of, transmute};
+const _: () = {
+    assert!(std::mem::size_of::<ShimValue>() <= 8);
+};
 
 impl ShimValue {
     fn call(&self, args: Vec<ShimValue>) -> Result<ShimValue, String> {
@@ -448,6 +506,31 @@ impl ShimValue {
             (a, b) => Err(format!("Can't add {:?} and {:?}", a, b))
         }
     }
+
+    fn to_u64(&self) -> u64 {
+        unsafe {
+            let mut tmp: u64 = 0;
+            // Copy raw bytes of e into tmp
+            std::ptr::copy_nonoverlapping(
+                self as *const Self as *const u8,
+                &mut tmp as *mut u64 as *mut u8,
+                size_of::<Self>(),
+            );
+            tmp
+        }
+    }
+
+    unsafe fn from_u64(data: u64) -> Self {
+        unsafe {
+            let mut tmp: Self = std::mem::zeroed(); // Will be overwritten
+            std::ptr::copy_nonoverlapping(
+                &data as *const u64 as *const u8,
+                &mut tmp as *mut Self as *mut u8,
+                size_of::<Self>(),
+            );
+            tmp
+        }
+    }
 }
 
 impl Interpreter {
@@ -457,23 +540,30 @@ impl Interpreter {
         Self {
             mem: mmu,
             source: HashMap::new(),
+            env: HashMap::new(),
         }
     }
 
-    pub fn execute(&self, program: &Program) -> Result<(), String> {
-        for expr in program.expressions.iter() {
-            self.evaluate(expr)?;
+    pub fn execute(&mut self, program: &Program) -> Result<(), String> {
+        for stmt in program.stmts.iter() {
+            self.execute_statement(stmt)?;
         }
         Ok(())
     }
 
-    pub fn evaluate(&self, expr: &Expression) -> Result<ShimValue, String>  {
+    pub fn evaluate(&mut self, expr: &Expression) -> Result<ShimValue, String>  {
         match expr {
             Expression::Primary(p) => match p {
                 Primary::Identifier(s) => if s == "print" {
                     Ok(ShimValue::Print)
                 } else {
-                    Err(format!("Unknown identifier {:?}", s))
+                    if let Some(value) = self.env.get(s) {
+                        Ok(
+                            unsafe { ShimValue::from_u64(*value) }
+                        )
+                    } else {
+                        Err(format!("Unknown identifier {:?}", s))
+                    }
                 },
                 Primary::Integer(i) => Ok(ShimValue::Integer(*i)),
                 prim => Err(format!("Can't evaluate primary {:?}", prim)),
@@ -490,6 +580,19 @@ impl Interpreter {
             },
 
             expr => Err(format!("Can't evaluate {:?}", expr)),
+        }
+    }
+
+    pub fn execute_statement(&mut self, stmts: &Statement) -> Result<ShimValue, String>  {
+        match stmts {
+            Statement::Let(ident, expr) => {
+                let value = self.evaluate(expr)?;
+                self.env.insert(ident.clone(), value.to_u64());
+                Ok(ShimValue::None)
+            },
+            Statement::Expression(expr) => {
+                self.evaluate(expr)
+            }
         }
     }
 }
