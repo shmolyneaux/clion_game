@@ -41,7 +41,7 @@ pub struct Program {
     stmts: Vec<Statement>
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Token {
     Comma,
     LBracket,
@@ -55,36 +55,84 @@ pub enum Token {
     Identifier(String),
 }
 
-pub fn parse_primary(tokens: &mut &[Token]) -> Result<Expression, String> {
-    match &tokens[0] {
+pub struct TokenStream {
+    idx: usize,
+    tokens: Vec<Token>,
+}
+
+impl TokenStream {
+    /**
+     * Return the next token (if there are tokens remaining) without advancing the stream
+     */
+    fn peek(&self) -> Result<&Token, String> {
+        if self.is_empty() {
+            Err("End of token stream".to_string())
+        } else {
+            Ok(&self.tokens[self.idx])
+        }
+    }
+
+    /**
+     * Return the next token (if there are tokens remaining) and advance the stream
+     */
+    fn pop(&mut self) -> Result<Token, String> {
+        if !self.is_empty() {
+            let result = self.tokens[self.idx].clone();
+            self.idx += 1;
+            Ok(result)
+        } else {
+            Err("End of token stream".to_string())
+        }
+    }
+
+    fn consume(&mut self, expected: Token) -> Result<(), String> {
+        let value = self.pop()?;
+        if value == expected {
+            Ok(())
+        } else {
+            Err(format!("Expected token {:?} but found {:?}", expected, value))
+        }
+    }
+
+    fn advance(&mut self) -> Result<(), String> {
+        self.pop()?;
+        Ok(())
+    }
+
+    fn is_empty(&self) -> bool {
+        self.idx >= self.tokens.len()
+    }
+}
+
+pub fn parse_primary(tokens: &mut TokenStream) -> Result<Expression, String> {
+    match tokens.peek()? {
         Token::Integer(i) => {
-            *tokens = &tokens[1..];
-            Ok(Expression::Primary(Primary::Integer(*i)))
+            let result = Ok(Expression::Primary(Primary::Integer(*i)));
+            tokens.advance()?;
+            result
         },
         Token::Identifier(s) => {
-            *tokens = &tokens[1..];
-            Ok(Expression::Primary(Primary::Identifier(s.clone())))
+            let result = Ok(Expression::Primary(Primary::Identifier(s.clone())));
+            tokens.advance()?;
+            result
         },
         Token::LBracket => {
-            *tokens = &tokens[1..];
+            tokens.advance()?;
             let expr = parse_expression(tokens)?;
-            if tokens[0] != Token::RBracket {
-                Err(format!("Expected closing ')' but found {:?}", tokens[0]))
-            } else {
-                Ok(expr)
-            }
+            tokens.consume(Token::RBracket)?;
+            Ok(expr)
         },
         token => Err(format!("Could not parse_primary {:?}", token)),
     }
 }
 
-pub fn parse_arguments(tokens: &mut &[Token]) -> Result<Vec<Expression>, String> {
+pub fn parse_arguments(tokens: &mut TokenStream) -> Result<Vec<Expression>, String> {
     let mut args = Vec::new();
     while !tokens.is_empty() {
         let expr = parse_expression(tokens)?;
         args.push(expr);
 
-        match &tokens[0] {
+        match tokens.peek()? {
             Token::RBracket => {
                 // Don't consume the closing bracket since we parse
                 // function arguments and list literals the same way
@@ -92,8 +140,8 @@ pub fn parse_arguments(tokens: &mut &[Token]) -> Result<Vec<Expression>, String>
                 break;
             }
             Token::Comma => {
-                *tokens = &tokens[1..];
-                if !tokens.is_empty() && tokens[0] == Token::RBracket {
+                tokens.advance()?;
+                if !tokens.is_empty() && *tokens.peek()? == Token::RBracket {
                     // Exit when there's a trailing comma
                     break;
                 }
@@ -105,20 +153,14 @@ pub fn parse_arguments(tokens: &mut &[Token]) -> Result<Vec<Expression>, String>
     Ok(args)
 }
 
-pub fn parse_call(tokens: &mut &[Token]) -> Result<Expression, String> {
+pub fn parse_call(tokens: &mut TokenStream) -> Result<Expression, String> {
     let mut expr = parse_term(tokens)?;
     while !tokens.is_empty() {
-        match &tokens[0] {
+        match *tokens.peek()? {
             Token::LBracket => {
-                *tokens = &tokens[1..];
+                tokens.advance()?;
                 expr = Expression::Call(Box::new(expr), parse_arguments(tokens)?);
-                if tokens.is_empty() {
-                    return Err(format!("No more tokens, expected closing ')' for parse_call"));
-                }
-                if tokens[0] != Token::RBracket {
-                    return Err(format!("Expected closing ')' for parse_call, got {:?}", tokens[0]));
-                }
-                *tokens = &tokens[1..];
+                tokens.consume(Token::RBracket)?;
             },
             _ => return Ok(expr),
         }
@@ -127,16 +169,16 @@ pub fn parse_call(tokens: &mut &[Token]) -> Result<Expression, String> {
     Ok(expr)
 }
 
-pub fn parse_term(tokens: &mut &[Token]) -> Result<Expression, String> {
+pub fn parse_term(tokens: &mut TokenStream) -> Result<Expression, String> {
     let mut expr = parse_primary(tokens)?;
     while !tokens.is_empty() {
-        match &tokens[0] {
+        match tokens.peek()? {
             Token::Plus => {
-                *tokens = &tokens[1..];
+                tokens.advance()?;
                 expr = Expression::BinaryOp(BinaryOp::Add(Box::new(expr), Box::new(parse_expression(tokens)?)));
             },
             Token::Minus => {
-                *tokens = &tokens[1..];
+                tokens.advance()?;
                 expr = Expression::BinaryOp(BinaryOp::Subtract(Box::new(expr), Box::new(parse_expression(tokens)?)));
             },
             _ => return Ok(expr),
@@ -145,49 +187,45 @@ pub fn parse_term(tokens: &mut &[Token]) -> Result<Expression, String> {
     Ok(expr)
 }
 
-pub fn parse_expression(tokens: &mut &[Token]) -> Result<Expression, String> {
+pub fn parse_expression(tokens: &mut TokenStream) -> Result<Expression, String> {
     parse_call(tokens)
 }
 
-pub fn parse_program(tokens: &mut &[Token]) -> Result<Program, String> {
+pub fn parse_program(tokens: &mut TokenStream) -> Result<Program, String> {
     let mut stmts = Vec::new();
     while !tokens.is_empty() {
-        if tokens[0] == Token::Let {
-            *tokens = &tokens[1..];
+        if *tokens.peek()? == Token::Let {
+            tokens.advance()?;
             if tokens.is_empty() {
                 return Err("No token found after let".to_string());
             }
-            let ident = match &tokens[0] {
+            let ident = match tokens.pop()? {
                 Token::Identifier(ident) => {
                     ident.clone()
                 },
                 token => return Err(format!("Expected ident after let, found {:?}", token))
             };
-            *tokens = &tokens[1..];
 
-            match &tokens[0] {
+            match tokens.pop()? {
                 Token::Equal => (),
                 token => return Err(format!("Expected = after `let ident`, found {:?}", token))
             }
-            *tokens = &tokens[1..];
 
             let expr = parse_expression(tokens)?;
-            match &tokens[0] {
+            match tokens.pop()? {
                 Token::Semicolon => (),
                 token => return Err(format!("Expected semicolon after `let <ident> = <expr>`, found {:?}", token))
             }
-            *tokens = &tokens[1..];
 
             stmts.push(Statement::Let(ident, expr));
         }
         else {
             let expr = parse_expression(tokens)?;
 
-            match &tokens[0] {
+            match tokens.pop()? {
                 Token::Semicolon => (),
                 token => return Err(format!("Expected semicolon after expression statement, found {:?}", token))
             }
-            *tokens = &tokens[1..];
 
             stmts.push(Statement::Expression(expr));
         }
@@ -284,8 +322,11 @@ pub fn lex(text: &[u8]) -> Result<Vec<Token>, String> {
 
 pub fn ast_from_text(text: &[u8]) -> Result<Program, String> {
     let tokens = lex(text)?;
-    let mut foo = tokens.as_slice();
-    parse_program(&mut foo)
+    let mut tokens = TokenStream {
+        idx: 0,
+        tokens: tokens,
+    };
+    parse_program(&mut tokens)
 }
 
 pub struct Config {
