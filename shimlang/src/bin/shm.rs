@@ -39,7 +39,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>>{
         let mut contents = Vec::new();
         file.read_to_end(&mut contents)?;
 
-        let program = shimlang::ast_from_text(&contents)?;
+        match std::str::from_utf8(&contents) {
+            Ok(_) => (),
+            Err(e) => return Err((format!("Script is not utf8 {:?}", e)).into())
+        }
+
+        let program = match shimlang::ast_from_text(&contents) {
+            Ok(program) => program,
+            Err(msg) => {
+                eprintln!(
+                    "Parse Error:\n{msg}"
+                );
+                return Err(msg.into());
+            }
+        };
         let mut interpreter = shimlang::Interpreter::default();
         interpreter.execute(&program)?;
     } else {

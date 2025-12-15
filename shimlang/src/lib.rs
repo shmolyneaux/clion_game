@@ -14,6 +14,8 @@ pub enum Primary {
     Integer(i32),
     Float(f32),
     Identifier(String),
+    Bool(bool),
+    String(String),
     Expression(Box<Expression>),
 }
 
@@ -43,7 +45,10 @@ pub struct Program {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Token {
+    Dot,
+    Bang,
     Comma,
+    Colon,
     LBracket,
     RBracket,
     Plus,
@@ -51,13 +56,22 @@ pub enum Token {
     Let,
     Equal,
     Semicolon,
+    LSquare,
+    RSquare,
+    LAngle,
+    RAngle,
+    LCurly,
+    RCurly,
     Integer(i32),
+    Bool(bool),
     Identifier(String),
+    String(String),
 }
 
 pub struct TokenStream {
     idx: usize,
     tokens: Vec<Token>,
+    script: Vec<u8>,
 }
 
 impl TokenStream {
@@ -102,12 +116,30 @@ impl TokenStream {
     fn is_empty(&self) -> bool {
         self.idx >= self.tokens.len()
     }
+
+    fn format_err(&self, msg: &str) -> String {
+        format!(
+            "Script:\n{}\n\nMessage:\n{}",
+            unsafe { std::str::from_utf8_unchecked(&self.script) },
+            msg
+        )
+    }
 }
 
 pub fn parse_primary(tokens: &mut TokenStream) -> Result<Expression, String> {
     match tokens.peek()? {
         Token::Integer(i) => {
             let result = Ok(Expression::Primary(Primary::Integer(*i)));
+            tokens.advance()?;
+            result
+        },
+        Token::String(s) => {
+            let result = Ok(Expression::Primary(Primary::String(s.clone())));
+            tokens.advance()?;
+            result
+        },
+        Token::Bool(b) => {
+            let result = Ok(Expression::Primary(Primary::Bool(*b)));
             tokens.advance()?;
             result
         },
@@ -224,7 +256,11 @@ pub fn parse_program(tokens: &mut TokenStream) -> Result<Program, String> {
 
             match tokens.pop()? {
                 Token::Semicolon => (),
-                token => return Err(format!("Expected semicolon after expression statement, found {:?}", token))
+                token => return Err(
+                    tokens.format_err(
+                        &format!("Expected semicolon after expression statement, found {:?}", token)
+                    )
+                )
             }
 
             stmts.push(Statement::Expression(expr));
@@ -256,8 +292,44 @@ pub fn lex_identifier(text: &mut &[u8]) -> Result<String, String> {
     }
 }
 
+pub fn lex_string(enclosing_char: u8, text: &mut &[u8]) -> Result<String, String> {
+    let mut out = String::new();
+    let mut escape_next = false;
+    for (idx, c) in text.iter().enumerate() {
+        if escape_next {
+            match c {
+                b'n' => out.push('\n'),
+                b't' => out.push('\t'),
+                b'\'' => out.push('\''),
+                b'\\' => out.push('\\'),
+                b'"' => out.push('"'),
+                b => return Err(format!("Could not escape {:?}", printable_byte(*b)))
+            }
+            escape_next = false;
+            continue
+        }
+        if *c == enclosing_char {
+            *text = &text[idx..];
+            return Ok(out);
+        }
+        match c {
+            b'\\' => {
+                escape_next = true;
+                continue;
+            },
+            b'a' ..= b'z' | b'A' ..= b'Z' | b'0' ..= b'9' => continue,
+            _ => {
+                let ident = unsafe { String::from_utf8_unchecked(text[0..idx].to_vec())};
+                *text = &text[(idx-1)..];
+                return Ok(ident);
+            }
+        }
+    }
+    Err(format!("No closing quote {:?} found", printable_byte(enclosing_char)))
+}
+
 pub fn lex_number(text: &mut &[u8]) -> Result<Token, String> {
-    let found_decimal = false;
+    let mut found_decimal = false;
     for (idx, c) in text.iter().enumerate() {
         match c {
             b'0' ..= b'9' => continue,
@@ -265,14 +337,24 @@ pub fn lex_number(text: &mut &[u8]) -> Result<Token, String> {
                 if found_decimal {
                     return Err(format!("Found multiple decimals in number"));
                 }
+                found_decimal = true;
             }
             _ => {
                 let token = if found_decimal {
-                    todo!("Implement float parsing");
+                    return Err("Float parsing not yet implemented".to_string());
                 } else {
                     Token::Integer(
                         unsafe {
-                            std::str::from_utf8_unchecked(&text[..idx]).parse().map_err(|e| format!("{:?}", e))?
+                            let slice = &text[..idx];
+                            std::str::from_utf8_unchecked(slice).parse().map_err(|e| 
+                                {
+                                    let string_slice = match std::str::from_utf8(slice) {
+                                        Ok(s) => s,
+                                        Err(e) => return format!("Not utf-8 {:?}", e)
+                                    };
+                                    format!("Could not tokenize number '{}' {:?}", string_slice, e)
+                                }
+                            )?
                         }
                     )
                 };
@@ -296,7 +378,7 @@ pub fn lex(text: &[u8]) -> Result<Vec<Token>, String> {
     while !text.is_empty() {
         let c = text[0];
         match c {
-            b'a' ..= b'z' => {
+            b'a' ..= b'z' | b'A' ..= b'Z' => {
                 let ident = lex_identifier(&mut text)?;
                 if ident == "let" {
                     tokens.push(Token::Let);
@@ -305,6 +387,12 @@ pub fn lex(text: &[u8]) -> Result<Vec<Token>, String> {
                 }
             },
             b'0' ..= b'9' => tokens.push(lex_number(&mut text)?),
+            b'"' => tokens.push(
+                Token::String(lex_string(b'"', &mut text)?)
+            ),
+            b'{' => tokens.push(Token::LCurly),
+            b'}' => tokens.push(Token::RCurly),
+            b',' => tokens.push(Token::Comma),
             b'(' => tokens.push(Token::LBracket),
             b')' => tokens.push(Token::RBracket),
             b'+' => tokens.push(Token::Plus),
@@ -312,6 +400,11 @@ pub fn lex(text: &[u8]) -> Result<Vec<Token>, String> {
             b'=' => tokens.push(Token::Equal),
             b';' => tokens.push(Token::Semicolon),
             b'\n' => (),
+            b'[' => tokens.push(Token::LSquare),
+            b']' => tokens.push(Token::RSquare),
+            b':' => tokens.push(Token::Colon),
+            b'!' => tokens.push(Token::Bang),
+            b'.' => tokens.push(Token::Dot),
             b' ' => (),
             _ => return Err(format!("Unknown character '{}'", printable_byte(c)))
         }
@@ -325,6 +418,7 @@ pub fn ast_from_text(text: &[u8]) -> Result<Program, String> {
     let mut tokens = TokenStream {
         idx: 0,
         tokens: tokens,
+        script: text.to_vec(),
     };
     parse_program(&mut tokens)
 }
@@ -507,6 +601,7 @@ pub enum ShimValue {
     None,
     Print,
     Integer(i32),
+    Bool(bool),
 }
 
 use std::mem::{size_of, transmute};
@@ -528,13 +623,15 @@ impl ShimValue {
                 println!();
                 Ok(ShimValue::None)
             },
-            ShimValue::Integer(i) => Err(format!("Can't call int {:?} as function with args {:?}", i, args)),
+            other => Err(format!("Can't call value {:?} as function with args {:?}", other, args)),
         }
     }
 
     fn to_string(&self) -> String {
         match self {
             ShimValue::Integer(i) => i.to_string(),
+            ShimValue::Bool(false) => "false".to_string(),
+            ShimValue::Bool(true) => "true".to_string(),
             value => format!("{:?}", value),
         }
     }
@@ -597,6 +694,12 @@ impl Interpreter {
             Expression::Primary(p) => match p {
                 Primary::Identifier(s) => if s == "print" {
                     Ok(ShimValue::Print)
+                } 
+                else if s == "true" {
+                    Ok(ShimValue::Bool(true))
+                } 
+                else if s == "false" {
+                    Ok(ShimValue::Bool(false))
                 } else {
                     if let Some(value) = self.env.get(s) {
                         Ok(
