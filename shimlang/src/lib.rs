@@ -13,9 +13,9 @@ pub enum Primary {
     None,
     Integer(i32),
     Float(f32),
-    Identifier(String),
+    Identifier(Vec<u8>),
     Bool(bool),
-    String(String),
+    String(Vec<u8>),
     Expression(Box<Expression>),
 }
 
@@ -34,7 +34,7 @@ pub enum Expression {
 
 #[derive(Debug)]
 pub enum Statement {
-    Let(String, Expression),
+    Let(Vec<u8>, Expression),
     Expression(Expression),
 }
 
@@ -64,8 +64,8 @@ pub enum Token {
     RCurly,
     Integer(i32),
     Bool(bool),
-    Identifier(String),
-    String(String),
+    Identifier(Vec<u8>),
+    String(Vec<u8>),
 }
 
 pub struct TokenStream {
@@ -276,33 +276,33 @@ pub fn printable_byte(b: u8) -> String {
     }
 }
 
-pub fn lex_identifier(text: &mut &[u8]) -> Result<String, String> {
+pub fn lex_identifier(text: &mut &[u8]) -> Result<Vec<u8>, String> {
     for (idx, c) in text.iter().enumerate() {
         match c {
             b'a' ..= b'z' | b'A' ..= b'Z' | b'0' ..= b'9' => continue,
             _ => {
-                let ident = unsafe { String::from_utf8_unchecked(text[0..idx].to_vec())};
+                let ident = text[0..idx].to_vec();
                 *text = &text[(idx-1)..];
                 return Ok(ident);
             }
         }
     }
-    unsafe {
-        Ok(String::from_utf8_unchecked(text.to_vec()))
-    }
+    Ok(text.to_vec())
 }
 
-pub fn lex_string(enclosing_char: u8, text: &mut &[u8]) -> Result<String, String> {
-    let mut out = String::new();
+pub fn lex_string(text: &mut &[u8]) -> Result<Vec<u8>, String> {
+    let enclosing_char = text[0];
+    *text = &text[1..];
+    let mut out: Vec<u8> = Vec::new();
     let mut escape_next = false;
     for (idx, c) in text.iter().enumerate() {
         if escape_next {
             match c {
-                b'n' => out.push('\n'),
-                b't' => out.push('\t'),
-                b'\'' => out.push('\''),
-                b'\\' => out.push('\\'),
-                b'"' => out.push('"'),
+                b'n' => out.push(b'\n'),
+                b't' => out.push(b'\t'),
+                b'\'' => out.push(b'\''),
+                b'\\' => out.push(b'\\'),
+                b'"' => out.push(b'"'),
                 b => return Err(format!("Could not escape {:?}", printable_byte(*b)))
             }
             escape_next = false;
@@ -317,11 +317,8 @@ pub fn lex_string(enclosing_char: u8, text: &mut &[u8]) -> Result<String, String
                 escape_next = true;
                 continue;
             },
-            b'a' ..= b'z' | b'A' ..= b'Z' | b'0' ..= b'9' => continue,
             _ => {
-                let ident = unsafe { String::from_utf8_unchecked(text[0..idx].to_vec())};
-                *text = &text[(idx-1)..];
-                return Ok(ident);
+                out.push(*c);
             }
         }
     }
@@ -380,7 +377,7 @@ pub fn lex(text: &[u8]) -> Result<Vec<Token>, String> {
         match c {
             b'a' ..= b'z' | b'A' ..= b'Z' => {
                 let ident = lex_identifier(&mut text)?;
-                if ident == "let" {
+                if ident == b"let" {
                     tokens.push(Token::Let);
                 } else {
                     tokens.push(Token::Identifier(ident))
@@ -388,7 +385,7 @@ pub fn lex(text: &[u8]) -> Result<Vec<Token>, String> {
             },
             b'0' ..= b'9' => tokens.push(lex_number(&mut text)?),
             b'"' => tokens.push(
-                Token::String(lex_string(b'"', &mut text)?)
+                Token::String(lex_string(&mut text)?)
             ),
             b'{' => tokens.push(Token::LCurly),
             b'}' => tokens.push(Token::RCurly),
@@ -437,6 +434,10 @@ impl Default for Config {
     }
 }
 
+/**
+ * The interpreter stores memory in 8-byte words. Each `Word` is
+ * an index into the interpreter memory.
+ */
 #[cfg_attr(feature = "facet", derive(Facet))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Word(pub u32);
@@ -593,7 +594,7 @@ impl MMU {
 pub struct Interpreter {
     pub mem: MMU,
     pub source: HashMap<String, String>,
-    pub env: HashMap<String, u64>,
+    pub env: HashMap<Vec<u8>, u64>,
 }
 
 #[derive(Debug)]
@@ -602,6 +603,7 @@ pub enum ShimValue {
     Print,
     Integer(i32),
     Bool(bool),
+    String(Word),
 }
 
 use std::mem::{size_of, transmute};
@@ -610,7 +612,7 @@ const _: () = {
 };
 
 impl ShimValue {
-    fn call(&self, args: Vec<ShimValue>) -> Result<ShimValue, String> {
+    fn call(&self, interpreter: &mut Interpreter, args: Vec<ShimValue>) -> Result<ShimValue, String> {
         match self {
             ShimValue::None => Err(format!("Can't call None as function with args {:?}", args)),
             ShimValue::Print => {
@@ -618,7 +620,7 @@ impl ShimValue {
                     if idx != 0 {
                         print!(" ");
                     }
-                    print!("{}", arg.to_string());
+                    print!("{}", arg.to_string(interpreter));
                 }
                 println!();
                 Ok(ShimValue::None)
@@ -627,11 +629,17 @@ impl ShimValue {
         }
     }
 
-    fn to_string(&self) -> String {
+    fn to_string(&self, interpreter: &mut Interpreter) -> String {
         match self {
             ShimValue::Integer(i) => i.to_string(),
             ShimValue::Bool(false) => "false".to_string(),
             ShimValue::Bool(true) => "true".to_string(),
+            ShimValue::String(position) => {
+                unsafe {
+                    let ptr: *mut Vec<u8> = std::mem::transmute(&mut interpreter.mem.mem[position.0 as usize]);
+                    String::from_utf8((*ptr).clone()).expect("valid utf-8 string stored")
+                }
+            },
             value => format!("{:?}", value),
         }
     }
@@ -692,13 +700,13 @@ impl Interpreter {
     pub fn evaluate(&mut self, expr: &Expression) -> Result<ShimValue, String>  {
         match expr {
             Expression::Primary(p) => match p {
-                Primary::Identifier(s) => if s == "print" {
+                Primary::Identifier(s) => if s == b"print" {
                     Ok(ShimValue::Print)
                 } 
-                else if s == "true" {
+                else if s == b"true" {
                     Ok(ShimValue::Bool(true))
                 } 
-                else if s == "false" {
+                else if s == b"false" {
                     Ok(ShimValue::Bool(false))
                 } else {
                     if let Some(value) = self.env.get(s) {
@@ -710,12 +718,26 @@ impl Interpreter {
                     }
                 },
                 Primary::Integer(i) => Ok(ShimValue::Integer(*i)),
+                Primary::String(s) => {
+                    const _: () = {
+                        assert!(std::mem::size_of::<Vec<u8>>() == 24);
+                    };
+                    let word_count = Word(3);
+                    let position = self.mem.alloc(word_count);
+
+                    unsafe {
+                        let ptr: *mut Vec<u8> = std::mem::transmute(&mut self.mem.mem[position.0 as usize]);
+                        *ptr = s.clone();
+                    }
+
+                    Ok(ShimValue::String(position))
+                },
                 prim => Err(format!("Can't evaluate primary {:?}", prim)),
             },
             Expression::Call(expr, args) => {
                 let obj = self.evaluate(expr)?;
                 let args = args.iter().map(|a| self.evaluate(a)).collect::<Result<Vec<ShimValue>, String>>()?;
-                obj.call(args)
+                obj.call(self, args)
             },
             Expression::BinaryOp(BinaryOp::Add(a, b)) => {
                 let a = self.evaluate(a)?;
