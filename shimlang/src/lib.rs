@@ -71,6 +71,10 @@ pub enum Token {
 pub struct TokenStream {
     idx: usize,
     tokens: Vec<Token>,
+    // Technically we don't need to store this since we could recompute this
+    // from the script when we need to show an error. This just keeps things
+    // simple for now. The upper index is not inclusive, so (10,11) is 1 character.
+    token_spans: Vec<(u32, u32)>,
     script: Vec<u8>,
 }
 
@@ -123,6 +127,10 @@ impl TokenStream {
             unsafe { std::str::from_utf8_unchecked(&self.script) },
             msg
         )
+    }
+
+    pub fn spans(&self) -> Vec<(u32, u32)> {
+        self.token_spans.clone()
     }
 }
 
@@ -368,12 +376,15 @@ pub fn lex_number(text: &mut &[u8]) -> Result<Token, String> {
     Ok(token)
 }
 
-pub fn lex(text: &[u8]) -> Result<Vec<Token>, String> {
+pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
+    let starting_len = text.len();
     let mut text = text;
+    let mut spans = Vec::new();
     let mut tokens = Vec::new();
 
     while !text.is_empty() {
         let c = text[0];
+        let token_start_len = text.len();
         match c {
             b'a' ..= b'z' | b'A' ..= b'Z' => {
                 let ident = lex_identifier(&mut text)?;
@@ -406,17 +417,28 @@ pub fn lex(text: &[u8]) -> Result<Vec<Token>, String> {
             _ => return Err(format!("Unknown character '{}'", printable_byte(c)))
         }
         text = &text[1..];
+        let token_end_len = text.len();
+        if tokens.len() > spans.len() {
+            spans.push(
+                (
+                    (starting_len - token_start_len) as u32,
+                    (starting_len - token_end_len) as u32
+                )
+            );
+        }
     }
-    Ok(tokens)
+    Ok(
+        TokenStream {
+            idx: 0,
+            tokens: tokens,
+            token_spans: spans,
+            script: text.to_vec(),
+        }
+    )
 }
 
 pub fn ast_from_text(text: &[u8]) -> Result<Program, String> {
-    let tokens = lex(text)?;
-    let mut tokens = TokenStream {
-        idx: 0,
-        tokens: tokens,
-        script: text.to_vec(),
-    };
+    let mut tokens = lex(text)?;
     parse_program(&mut tokens)
 }
 

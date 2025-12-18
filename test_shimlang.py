@@ -30,10 +30,6 @@ if result.returncode:
 
 print(f"Built executable in  {duration} seconds")
 
-scripts = []
-
-scripts.extend(Path("test_scripts").glob("*.shm"))
-
 def print_diff(expected, actual):
     expected_lines = expected.splitlines()
     actual_lines = actual.splitlines()
@@ -64,68 +60,93 @@ def print_diff(expected, actual):
 
 failures = []
 
-for script in scripts:
-    pad = "-" * (40 - len(str(script)))
-    print(f"{script} {pad} ", end="")
-
-    if script.read_text().strip() == "":
-        print(f"{YELLOW}SKIPPED{RESET} (empty script)")
-        continue
-
-    stdout_file = script.with_suffix(".stdout")
-    stderr_file = script.with_suffix(".stderr")
-
-    expected_stdout = ""
-    if stdout_file.exists(): 
-        expected_stdout = stdout_file.read_text().strip()
-
-    expected_stderr = ""
-    if stderr_file.exists(): 
-        expected_stderr = stderr_file.read_text().strip()
-
-    proc = subprocess.run(f"target\\debug\\shm.exe {script}", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    proc_stdout = proc.stdout.strip()
-    proc_stderr = proc.stderr.strip()
-
-    if proc.returncode:
-        msg = "FAILED (non-zero exit code)"
-        print(f"{RED}{msg}{RESET}")
-        print("")
-        print("STDERR:")
-        print(proc_stderr)
-        print("")
-        failures.append(f"{script} ... {msg}")
-
-    elif proc_stderr != expected_stderr:
-        msg = "FAILED (stderr mismatch)"
-        print(f"{RED}{msg}{RESET}")
-        print("")
-        print("STDERR:")
-        print_diff(expected=expected_stderr, actual=proc_stderr)
-        print("")
-        failures.append(f"{script} ... {msg}")
-
-    elif proc_stdout != expected_stdout:
-        msg = "FAILED (stdout mismatch)"
-        print(f"{RED}{msg}{RESET}")
-        print("")
-        print("STDOUT:")
-        print_diff(
-            expected=expected_stdout,
-            actual=proc_stdout,
-        )
-        print("")
-        failures.append(f"{script} ... {msg}")
-
+for command in (
+    "spans",
+    #"parse",
+    #"execute",
+):
+    if command == "execute":
+        scripts = []
+        scripts.extend(Path("test_scripts").glob("*.shm"))
+    elif command == "spans":
+        scripts = []
+        scripts.extend(Path("test_scripts/spans").glob("*.shm"))
+    elif command == "parse":
+        scripts = []
+        scripts.extend(Path("test_scripts/parse").glob("*.shm"))
     else:
-        print(f"{GREEN}PASSED{RESET}")
+        raise Exception("Unknown command")
 
-if failures:
-    print("Failures:")
-else:
-    print(f"{GREEN}All testing passed!{RESET}")
+    for script in scripts:
+        pad = "-" * (40 - len(str(script)))
+        print(f"{script} {pad} ", end="")
 
-for failure in failures:
-    print(f"    {failure}")
+        if script.read_text().strip() == "":
+            print(f"{YELLOW}SKIPPED{RESET} (empty script)")
+            continue
 
-print()
+        stdout_file = script.with_suffix(".stdout")
+        stderr_file = script.with_suffix(".stderr")
+
+        expected_stdout = ""
+        if stdout_file.exists(): 
+            expected_stdout = stdout_file.read_text().strip()
+
+        expected_stderr = ""
+        if stderr_file.exists(): 
+            expected_stderr = stderr_file.read_text().strip()
+
+        if command == "execute":
+            proc = subprocess.run(f"target\\debug\\shm.exe {script}", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        elif command == "spans":
+            proc = subprocess.run(f"target\\debug\\shm.exe --spans {script}", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        elif command == "parse":
+            proc = subprocess.run(f"target\\debug\\shm.exe --parse {script}", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        else:
+            raise Exception("Unknown command")
+
+        proc_stdout = proc.stdout.strip()
+        proc_stderr = proc.stderr.strip()
+
+        if proc.returncode:
+            msg = "FAILED (non-zero exit code)"
+            print(f"{RED}{msg}{RESET}")
+            print("")
+            print("STDERR:")
+            print(proc_stderr)
+            print("")
+            failures.append(f"{script} ... {msg}")
+
+        elif proc_stderr != expected_stderr:
+            msg = "FAILED (stderr mismatch)"
+            print(f"{RED}{msg}{RESET}")
+            print("")
+            print("STDERR:")
+            print_diff(expected=expected_stderr, actual=proc_stderr)
+            print("")
+            failures.append(f"{script} ... {msg}")
+
+        elif proc_stdout != expected_stdout:
+            msg = "FAILED (stdout mismatch)"
+            print(f"{RED}{msg}{RESET}")
+            print("")
+            print("STDOUT:")
+            print_diff(
+                expected=expected_stdout,
+                actual=proc_stdout,
+            )
+            print("")
+            failures.append(f"{script} ... {msg}")
+
+        else:
+            print(f"{GREEN}PASSED{RESET}")
+
+    if failures:
+        print("Failures:")
+    else:
+        print(f"{GREEN}All testing passed!{RESET}")
+
+    for failure in failures:
+        print(f"    {failure}")
+
+    print()

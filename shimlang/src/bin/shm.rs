@@ -4,27 +4,50 @@ use std::io::Read;
 
 use shimlang;
 
+#[derive(Debug, PartialEq)]
+enum Command {
+    Parse,
+    Execute,
+    Spans
+}
+
+impl Default for Command {
+    fn default() -> Self {
+        Command::Execute
+    }
+}
+
 #[derive(Debug, Default)]
 struct Args {
     path: Option<String>,
+    command: Command,
 }
 
 fn parse_args() -> Result<Args, String> {
     let mut args = Args::default();
 
-    let mut first_arg = true;
-    for arg in env::args() {
+    for (idx, arg) in env::args().enumerate() {
         // Skip the name of the executable, which is the first arg
-        if first_arg {
-            first_arg = false;
+        if idx == 0 {
             continue;
-        }
-        if !arg.starts_with('-') {
+        } else if !arg.starts_with('-') {
             if let Some(existing_positional_arg) = args.path {
                 return Err(format!("Found multiple positional arguments {} and {}", existing_positional_arg, arg));
             } else {
                 args.path = Some(arg.clone());
             }
+        } else if arg == "--parse" {
+            if args.command != Command::default() {
+                return Err(format!("Attempted to set command multiple times! {}", arg));
+            }
+            args.command = Command::Parse;
+        } else if arg == "--spans" {
+            if args.command != Command::default() {
+                return Err(format!("Attempted to set command multiple times! {}", arg));
+            }
+            args.command = Command::Spans;
+        } else {
+            return Err(format!("Unknown args {}", arg));
         }
     }
 
@@ -44,17 +67,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>>{
             Err(e) => return Err((format!("Script is not utf8 {:?}", e)).into())
         }
 
-        let program = match shimlang::ast_from_text(&contents) {
-            Ok(program) => program,
-            Err(msg) => {
-                eprintln!(
-                    "Parse Error:\n{msg}"
-                );
-                return Err(msg.into());
-            }
-        };
-        let mut interpreter = shimlang::Interpreter::default();
-        interpreter.execute(&program)?;
+        match args.command {
+            Command::Execute => {
+                let program = match shimlang::ast_from_text(&contents) {
+                    Ok(program) => program,
+                    Err(msg) => {
+                        eprintln!(
+                            "Parse Error:\n{msg}"
+                        );
+                        return Err(msg.into());
+                    }
+                };
+                let mut interpreter = shimlang::Interpreter::default();
+                interpreter.execute(&program)?;
+            },
+            Command::Parse => {
+                match shimlang::ast_from_text(&contents) {
+                    Ok(program) => program,
+                    Err(msg) => {
+                        eprintln!(
+                            "Parse Error:\n{msg}"
+                        );
+                        return Err(msg.into());
+                    }
+                };
+            },
+            Command::Spans => {
+                let tokens = shimlang::lex(&contents)?;
+                for span in tokens.spans() {
+                    println!(
+                        "{}",
+                        std::str::from_utf8(&contents[(span.0 as usize)..(span.1 as usize)])?
+                    );
+                }
+            },
+        }
     } else {
         return Err("Expected script path".into());
     }
