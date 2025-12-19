@@ -62,8 +62,8 @@ failures = []
 
 for command in (
     "spans",
-    #"parse",
-    #"execute",
+    "parse",
+    "execute",
 ):
     if command == "execute":
         scripts = []

@@ -75,7 +75,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>>{
                         eprintln!(
                             "Parse Error:\n{msg}"
                         );
-                        return Err(msg.into());
+                        return Err((format!("Failed to parse script")).into());
                     }
                 };
                 let mut interpreter = shimlang::Interpreter::default();
@@ -88,7 +88,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>>{
                         eprintln!(
                             "Parse Error:\n{msg}"
                         );
-                        return Err(msg.into());
+                        return Err((format!("Failed to parse script")).into());
                     }
                 };
             },

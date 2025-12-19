@@ -63,6 +63,7 @@ pub enum Token {
     LCurly,
     RCurly,
     Integer(i32),
+    Float(f32),
     Bool(bool),
     Identifier(Vec<u8>),
     String(Vec<u8>),
@@ -76,6 +77,12 @@ pub struct TokenStream {
     // simple for now. The upper index is not inclusive, so (10,11) is 1 character.
     token_spans: Vec<(u32, u32)>,
     script: Vec<u8>,
+}
+
+#[derive(Debug)]
+struct LineInfo {
+    start_idx: u32,
+    end_idx: u32,
 }
 
 impl TokenStream {
@@ -121,7 +128,79 @@ impl TokenStream {
         self.idx >= self.tokens.len()
     }
 
+    fn script_lines(&self) -> Vec<LineInfo> {
+        let mut line_info = Vec::new();
+        let mut line_start_idx: u32 = 0;
+        for (idx, c) in self.script.iter().enumerate() {
+            if *c == b'\n' {
+                line_info.push(
+                    LineInfo { start_idx: line_start_idx, end_idx: idx as u32 }
+                );
+                line_start_idx = idx as u32 + 1;
+            }
+        }
+
+        // If the last character was not a newline
+        if line_start_idx != self.script.len() as u32 {
+            line_info.push(
+                LineInfo { start_idx: line_start_idx, end_idx: self.script.len() as u32 -1 }
+            );
+        }
+
+        line_info
+    }
+
+    fn idx_to_line_col(&self, idx: u32) -> (u32, u32) {
+        todo!();
+    }
+
+    fn format_peek_err(&self, msg: &str) -> String {
+        let span = self.token_spans[self.idx];
+        let script_lines = self.script_lines();
+        let header = format!(
+            "error: {}\n",
+            msg,
+        );
+        let mut out = header.clone();
+
+        // The `gutter_size` includes everything up to the first character of the line
+        let gutter_size = script_lines.len().to_string().len() + 4;
+        for (lineno, line_info) in script_lines.iter().enumerate() {
+            let lineno = lineno + 1;
+
+            let line: String = unsafe { std::str::from_utf8_unchecked(&self.script[line_info.start_idx as usize ..= line_info.end_idx as usize]).to_string() };
+            out.push_str(
+                &format!(" {:lineno_size$} | {}", lineno, line, lineno_size = gutter_size - 4)
+            );
+            if !line.ends_with("\n") {
+                // Last line?
+                out.push_str("\n");
+            }
+
+            let span_start_idx = span.0;
+            let span_end_idx = span.1;
+
+            // TODO: handle token going across line breaks
+            if line_info.start_idx <= span_start_idx && span_start_idx <= line_info.end_idx {
+                let line_span_start = span_start_idx - line_info.start_idx;
+                let line_span_end = if span_end_idx < line_info.end_idx {
+                    span_end_idx - line_info.start_idx
+                } else {
+                    line_info.end_idx
+                };
+                out.push_str(&" ".repeat(gutter_size));
+                out.push_str(&" ".repeat(line_span_start as usize));
+                out.push_str(&"^".repeat((line_span_end - line_span_start) as usize));
+                out.push('\n');
+            }
+        }
+
+        out
+    }
+
     fn format_err(&self, msg: &str) -> String {
+        let script = unsafe { std::str::from_utf8_unchecked(&self.script) };
+
         format!(
             "Script:\n{}\n\nMessage:\n{}",
             unsafe { std::str::from_utf8_unchecked(&self.script) },
@@ -138,6 +217,11 @@ pub fn parse_primary(tokens: &mut TokenStream) -> Result<Expression, String> {
     match tokens.peek()? {
         Token::Integer(i) => {
             let result = Ok(Expression::Primary(Primary::Integer(*i)));
+            tokens.advance()?;
+            result
+        },
+        Token::Float(f) => {
+            let result = Ok(Expression::Primary(Primary::Float(*f)));
             tokens.advance()?;
             result
         },
@@ -162,7 +246,15 @@ pub fn parse_primary(tokens: &mut TokenStream) -> Result<Expression, String> {
             tokens.consume(Token::RBracket)?;
             Ok(expr)
         },
-        token => Err(format!("Could not parse_primary {:?}", token)),
+        token => {
+            Err(tokens.format_peek_err(
+                &format!(
+                    "Unexpected `{:?}` in parse_primary",
+                    // TODO: should display the exact character like `[` rather than name line `SemiColon`
+                    token
+                )
+            ))
+        },
     }
 }
 
@@ -262,11 +354,14 @@ pub fn parse_program(tokens: &mut TokenStream) -> Result<Program, String> {
         else {
             let expr = parse_expression(tokens)?;
 
-            match tokens.pop()? {
-                Token::Semicolon => (),
+            match tokens.peek()? {
+                Token::Semicolon => {tokens.pop()?;},
                 token => return Err(
-                    tokens.format_err(
-                        &format!("Expected semicolon after expression statement, found {:?}", token)
+                    tokens.format_peek_err(
+                        &format!(
+                            "Expected semicolon after expression statement, found {:?}",
+                            token
+                        )
                     )
                 )
             }
@@ -346,7 +441,20 @@ pub fn lex_number(text: &mut &[u8]) -> Result<Token, String> {
             }
             _ => {
                 let token = if found_decimal {
-                    return Err("Float parsing not yet implemented".to_string());
+                    Token::Float(
+                        unsafe {
+                            let slice = &text[..idx];
+                            std::str::from_utf8_unchecked(slice).parse().map_err(|e| 
+                                {
+                                    let string_slice = match std::str::from_utf8(slice) {
+                                        Ok(s) => s,
+                                        Err(e) => return format!("Not utf-8 {:?}", e)
+                                    };
+                                    format!("Could not tokenize number '{}' {:?}", string_slice, e)
+                                }
+                            )?
+                        }
+                    )
                 } else {
                     Token::Integer(
                         unsafe {
@@ -378,6 +486,7 @@ pub fn lex_number(text: &mut &[u8]) -> Result<Token, String> {
 
 pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
     let starting_len = text.len();
+    let starting_text = text;
     let mut text = text;
     let mut spans = Vec::new();
     let mut tokens = Vec::new();
@@ -432,7 +541,7 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
             idx: 0,
             tokens: tokens,
             token_spans: spans,
-            script: text.to_vec(),
+            script: starting_text.to_vec(),
         }
     )
 }
@@ -624,6 +733,7 @@ pub enum ShimValue {
     None,
     Print,
     Integer(i32),
+    Float(f32),
     Bool(bool),
     String(Word),
 }
@@ -740,6 +850,7 @@ impl Interpreter {
                     }
                 },
                 Primary::Integer(i) => Ok(ShimValue::Integer(*i)),
+                Primary::Float(f) => Ok(ShimValue::Float(*f)),
                 Primary::String(s) => {
                     const _: () = {
                         assert!(std::mem::size_of::<Vec<u8>>() == 24);
