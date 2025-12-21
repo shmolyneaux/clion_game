@@ -8,8 +8,6 @@ use std::ops::{AddAssign, SubAssign};
 
 #[derive(Debug)]
 pub enum Primary {
-    True,
-    False,
     None,
     Integer(i32),
     Float(f32),
@@ -728,7 +726,7 @@ pub struct Interpreter {
     pub env: HashMap<Vec<u8>, u64>,
 }
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub enum ShimValue {
     None,
     Print,
@@ -797,6 +795,15 @@ impl ShimValue {
         }
     }
 
+    fn sub(&self, other: &Self) -> Result<ShimValue, String> {
+        match (self, other) {
+            (ShimValue::Integer(a), ShimValue::Integer(b)) => {
+                Ok(ShimValue::Integer(a - b))
+            },
+            (a, b) => Err(format!("Can't sub {:?} and {:?}", a, b))
+        }
+    }
+
     fn to_u64(&self) -> u64 {
         unsafe {
             let mut tmp: u64 = 0;
@@ -808,6 +815,14 @@ impl ShimValue {
             );
             tmp
         }
+    }
+
+    fn to_bytes(&self) -> [u8; 8] {
+        unsafe { std::mem::transmute(*self) }
+    }
+
+    fn from_bytes(bytes: [u8; 8]) -> Self {
+        unsafe { std::mem::transmute(bytes) }
     }
 
     unsafe fn from_u64(data: u64) -> Self {
@@ -825,48 +840,124 @@ impl ShimValue {
 
 #[repr(u8)]
 enum ByteCode {
-    NoOp,
+    // NoOp,
     Pop,
     Add,
-    Or,
-    Not,
-    And,
-    ToString,
-    ToBool,
-    JumpZ,
-    JumpNZ,
-    LiteralInt,
-    LiteralFloat,
-    LiteralBool,
-    LiteralString,
+    Sub,
+    // Or,
+    // Not,
+    // And,
+    // ToString,
+    // ToBool,
+    // JumpZ,
+    // JumpNZ,
+    LiteralShimValue,
     VariableDeclaration,
+    VariableLoad,
+    Call,
 }
 
 pub fn compile_ast(ast: &Ast) -> Result<Vec<u8>, String> {
     let mut bytecode = Vec::new();
     for stmt in ast.stmts.iter() {
-        bytecode.extend(compile_statement(stmt));
+        bytecode.extend(compile_statement(stmt)?);
     }
-    todo!();
+    Ok(bytecode)
 }
 
-pub fn compile_statement(expr: &Statement) -> Result<Vec<u8>, String> {
-    match Statement {
+pub fn compile_statement(stmt: &Statement) -> Result<Vec<u8>, String> {
+    match stmt {
         Statement::Let(ident, expr) => {
             // Expression evaluates to a value that's on the top of the stack
-            let mut expr_asm = compile_expression(expr);
+            let mut expr_asm = compile_expression(expr)?;
             // When getting VariableDeclaration the next byte is the length of
             // the identifier, followed by the 
-            expr_asm.push(ByteCode::VariableDeclaration);
+            expr_asm.push(ByteCode::VariableDeclaration as u8);
             expr_asm.push(ident.len().try_into().expect("Ident should into u8"));
             expr_asm.extend(ident);
+
+            Ok(expr_asm)
         },
         Statement::Expression(expr) => {
             // Expression evaluates to a value that's on the top of the stack
-            let mut expr_asm = compile_expression(expr);
+            let mut expr_asm = compile_expression(expr)?;
             // Pop the value since it's not used
-            expr_asm.push(ByteCode::Pop);
+            expr_asm.push(ByteCode::Pop as u8);
+
+            Ok(expr_asm)
         }
+    }
+}
+
+pub fn compile_expression(expr: &Expression) -> Result<Vec<u8>, String> {
+    match expr {
+        Expression::Primary(Primary::None) => {
+            let val = ShimValue::None;
+            let mut res = vec![ByteCode::LiteralShimValue as u8];
+            res.extend(val.to_bytes());
+            Ok(res)
+        },
+        Expression::Primary(Primary::Bool(b)) => {
+            let val = ShimValue::Bool(*b);
+            let mut res = vec![ByteCode::LiteralShimValue as u8];
+            res.extend(val.to_bytes());
+            Ok(res)
+        },
+        Expression::Primary(Primary::Integer(i)) => {
+            let val = ShimValue::Integer(*i);
+            let mut res = vec![ByteCode::LiteralShimValue as u8];
+            res.extend(val.to_bytes());
+            Ok(res)
+        },
+        Expression::Primary(Primary::Float(f)) => {
+            let val = ShimValue::Float(*f);
+            let mut res = vec![ByteCode::LiteralShimValue as u8];
+            res.extend(val.to_bytes());
+            Ok(res)
+        },
+        Expression::Primary(Primary::Identifier(ident)) => {
+            let mut res = Vec::new();
+            res.push(ByteCode::VariableLoad as u8);
+            res.push(ident.len().try_into().expect("Ident should into u8"));
+            res.extend(ident);
+            Ok(res)
+        },
+        Expression::Primary(Primary::String(s)) => {
+            todo!();
+        },
+        Expression::Primary(Primary::Expression(expr)) => {
+            compile_expression(expr)
+        },
+        Expression::BinaryOp(op) => {
+            match op {
+                BinaryOp::Add(a, b) => {
+                    let mut res = compile_expression(a)?;
+                    res.extend(compile_expression(b)?);
+                    res.push(ByteCode::Add as u8);
+                    Ok(res)
+                },
+                BinaryOp::Subtract(a, b) => {
+                    let mut res = compile_expression(a)?;
+                    res.extend(compile_expression(b)?);
+                    res.push(ByteCode::Sub as u8);
+                    Ok(res)
+                },
+            }
+        },
+        Expression::Call(expr, args) => {
+            // First we evaluate the thing that needs to be called
+            let mut res = compile_expression(expr)?;
+
+            // Then we evaluate each argument
+            for arg_expr in args.iter() {
+                res.extend(compile_expression(arg_expr)?);
+            }
+
+            // Then we push the call bytecode which takes one operand
+            res.push(ByteCode::Call as u8);
+            res.push(args.len() as u8);
+            Ok(res)
+        },
     }
 }
 
@@ -879,6 +970,81 @@ impl Interpreter {
             source: HashMap::new(),
             env: HashMap::new(),
         }
+    }
+
+    pub fn execute_bytecode(&mut self, bytes: &[u8]) -> Result<(), String> {
+        let mut pc = 0;
+        let mut stack: Vec<ShimValue> = Vec::new();
+        while pc < bytes.len() {
+            match bytes[pc] {
+                val if val == ByteCode::Pop as u8 => {
+                    stack.pop();
+                },
+                val if val == ByteCode::Add as u8 => {
+                    let b = stack.pop().expect("Operand for add");
+                    let a = stack.pop().expect("Operand for add");
+                    stack.push(a.add(&b)?);
+                },
+                val if val == ByteCode::Sub as u8 => {
+                    let b = stack.pop().expect("Operand for add");
+                    let a = stack.pop().expect("Operand for add");
+                    stack.push(a.sub(&b)?);
+                },
+                val if val == ByteCode::LiteralShimValue as u8 => {
+                    let bytes = [
+                        bytes[pc+1],
+                        bytes[pc+2],
+                        bytes[pc+3],
+                        bytes[pc+4],
+                        bytes[pc+5],
+                        bytes[pc+6],
+                        bytes[pc+7],
+                        bytes[pc+8],
+                    ];
+                    stack.push(ShimValue::from_bytes(bytes));
+                    pc += 8;
+                },
+                val if val == ByteCode::VariableDeclaration as u8 => {
+                    let val = stack.pop().expect("Value for declaration");
+                    let ident_len = bytes[pc+1] as usize;
+                    let ident = &bytes[pc+2..pc+2+ident_len as usize];
+                    self.env.insert(ident.to_vec(), val.to_u64());
+                    pc += 1 + ident_len;
+                },
+                val if val == ByteCode::VariableLoad as u8 => {
+                    let ident_len = bytes[pc+1] as usize;
+                    let ident = &bytes[pc+2..pc+2+ident_len as usize];
+                    if ident == b"print" {
+                        stack.push(
+                            ShimValue::Print
+                        );
+                    } else if let Some(value) = self.env.get(ident) {
+                        stack.push(
+                            unsafe { ShimValue::from_u64(*value) }
+                        );
+                    } else {
+                        return Err(format!("Unknown identifier {:?}", ident));
+                    }
+                    pc += 1 + ident_len;
+                },
+                val if val == ByteCode::Call as u8 => {
+                    let arg_count = bytes[pc+1];
+                    let mut args = Vec::new();
+                    for _ in 0..arg_count {
+                        args.push(stack.pop().expect("Arg for call"));
+                    }
+                    args.reverse();
+                    let callable = stack.pop().expect("Callable for call");
+                    callable.call(self, args)?;
+                    pc += 1;
+                },
+                b => {
+                    return Err(format!("Unknown bytecode {b}"));
+                }
+            }
+            pc += 1;
+        }
+        Ok(())
     }
 
     pub fn execute(&mut self, ast: &Ast) -> Result<(), String> {

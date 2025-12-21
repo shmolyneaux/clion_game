@@ -69,8 +69,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>>{
 
         match args.command {
             Command::Execute => {
-                let program = match shimlang::ast_from_text(&contents) {
-                    Ok(program) => program,
+                let ast = match shimlang::ast_from_text(&contents) {
+                    Ok(ast) => ast,
                     Err(msg) => {
                         eprintln!(
                             "Parse Error:\n{msg}"
@@ -78,8 +78,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>>{
                         return Err((format!("Failed to parse script")).into());
                     }
                 };
+                let bytecode = shimlang::compile_ast(&ast)?;
                 let mut interpreter = shimlang::Interpreter::default();
-                interpreter.execute(&program)?;
+                interpreter.execute_bytecode(&bytecode)?;
             },
             Command::Parse => {
                 match shimlang::ast_from_text(&contents) {
