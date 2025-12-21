@@ -39,7 +39,7 @@ pub enum Statement {
 }
 
 #[derive(Debug)]
-pub struct Program {
+pub struct Ast {
     stmts: Vec<Statement>
 }
 
@@ -150,7 +150,7 @@ impl TokenStream {
         line_info
     }
 
-    fn idx_to_line_col(&self, idx: u32) -> (u32, u32) {
+    fn idx_to_line_col(&self, _idx: u32) -> (u32, u32) {
         todo!();
     }
 
@@ -203,7 +203,7 @@ impl TokenStream {
 
         format!(
             "Script:\n{}\n\nMessage:\n{}",
-            unsafe { std::str::from_utf8_unchecked(&self.script) },
+            script,
             msg
         )
     }
@@ -323,7 +323,7 @@ pub fn parse_expression(tokens: &mut TokenStream) -> Result<Expression, String> 
     parse_call(tokens)
 }
 
-pub fn parse_program(tokens: &mut TokenStream) -> Result<Program, String> {
+pub fn parse_ast(tokens: &mut TokenStream) -> Result<Ast, String> {
     let mut stmts = Vec::new();
     while !tokens.is_empty() {
         if *tokens.peek()? == Token::Let {
@@ -369,7 +369,7 @@ pub fn parse_program(tokens: &mut TokenStream) -> Result<Program, String> {
             stmts.push(Statement::Expression(expr));
         }
     }
-    Ok(Program { stmts: stmts })
+    Ok(Ast { stmts: stmts })
 }
 
 pub fn printable_byte(b: u8) -> String {
@@ -546,9 +546,9 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
     )
 }
 
-pub fn ast_from_text(text: &[u8]) -> Result<Program, String> {
+pub fn ast_from_text(text: &[u8]) -> Result<Ast, String> {
     let mut tokens = lex(text)?;
-    parse_program(&mut tokens)
+    parse_ast(&mut tokens)
 }
 
 pub struct Config {
@@ -735,13 +735,24 @@ pub enum ShimValue {
     Integer(i32),
     Float(f32),
     Bool(bool),
+    // TODO: it seems like this should point to a more generic reference-counted
+    // object type that all non-value types share
     String(Word),
 }
 
-use std::mem::{size_of, transmute};
+use std::mem::{size_of};
 const _: () = {
     assert!(std::mem::size_of::<ShimValue>() <= 8);
 };
+
+fn format_float(val: f32) -> String {
+    let s = format!("{val}");
+    if !s.contains('.') && !s.contains('e') {
+        format!("{s}.0")
+    } else {
+        s
+    }
+}
 
 impl ShimValue {
     fn call(&self, interpreter: &mut Interpreter, args: Vec<ShimValue>) -> Result<ShimValue, String> {
@@ -764,6 +775,7 @@ impl ShimValue {
     fn to_string(&self, interpreter: &mut Interpreter) -> String {
         match self {
             ShimValue::Integer(i) => i.to_string(),
+            ShimValue::Float(f) => format_float(*f),
             ShimValue::Bool(false) => "false".to_string(),
             ShimValue::Bool(true) => "true".to_string(),
             ShimValue::String(position) => {
@@ -811,6 +823,53 @@ impl ShimValue {
     }
 }
 
+#[repr(u8)]
+enum ByteCode {
+    NoOp,
+    Pop,
+    Add,
+    Or,
+    Not,
+    And,
+    ToString,
+    ToBool,
+    JumpZ,
+    JumpNZ,
+    LiteralInt,
+    LiteralFloat,
+    LiteralBool,
+    LiteralString,
+    VariableDeclaration,
+}
+
+pub fn compile_ast(ast: &Ast) -> Result<Vec<u8>, String> {
+    let mut bytecode = Vec::new();
+    for stmt in ast.stmts.iter() {
+        bytecode.extend(compile_statement(stmt));
+    }
+    todo!();
+}
+
+pub fn compile_statement(expr: &Statement) -> Result<Vec<u8>, String> {
+    match Statement {
+        Statement::Let(ident, expr) => {
+            // Expression evaluates to a value that's on the top of the stack
+            let mut expr_asm = compile_expression(expr);
+            // When getting VariableDeclaration the next byte is the length of
+            // the identifier, followed by the 
+            expr_asm.push(ByteCode::VariableDeclaration);
+            expr_asm.push(ident.len().try_into().expect("Ident should into u8"));
+            expr_asm.extend(ident);
+        },
+        Statement::Expression(expr) => {
+            // Expression evaluates to a value that's on the top of the stack
+            let mut expr_asm = compile_expression(expr);
+            // Pop the value since it's not used
+            expr_asm.push(ByteCode::Pop);
+        }
+    }
+}
+
 impl Interpreter {
     pub fn create(config: &Config) -> Self {
         let mmu = MMU::with_capacity(Word(config.memory_space_bytes / 8));
@@ -822,8 +881,8 @@ impl Interpreter {
         }
     }
 
-    pub fn execute(&mut self, program: &Program) -> Result<(), String> {
-        for stmt in program.stmts.iter() {
+    pub fn execute(&mut self, ast: &Ast) -> Result<(), String> {
+        for stmt in ast.stmts.iter() {
             self.execute_statement(stmt)?;
         }
         Ok(())

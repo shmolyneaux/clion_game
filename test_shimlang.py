@@ -96,12 +96,21 @@ for command in (
         if stderr_file.exists(): 
             expected_stderr = stderr_file.read_text().strip()
 
+        if sys.platform == "win32":
+            exe_path = "target\\debug\\shm.exe"
+        elif sys.platform == "linux" or sys.platform == "linux2":
+            exe_path = "target/debug/shm"
+        elif sys.platform == "darwin":
+            exe_path = "target/debug/shm"
+        else:
+            raise Exception(f"Unknown platform {sys.platform}")
+
         if command == "execute":
-            proc = subprocess.run(f"target\\debug\\shm.exe {script}", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            proc = subprocess.run(f"{exe_path} {script}", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         elif command == "spans":
-            proc = subprocess.run(f"target\\debug\\shm.exe --spans {script}", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            proc = subprocess.run(f"{exe_path} --spans {script}", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         elif command == "parse":
-            proc = subprocess.run(f"target\\debug\\shm.exe --parse {script}", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            proc = subprocess.run(f"{exe_path} --parse {script}", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         else:
             raise Exception("Unknown command")
 
