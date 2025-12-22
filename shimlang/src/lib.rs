@@ -852,6 +852,7 @@ enum ByteCode {
     // JumpZ,
     // JumpNZ,
     LiteralShimValue,
+    LiteralString,
     VariableDeclaration,
     VariableLoad,
     Call,
@@ -923,7 +924,11 @@ pub fn compile_expression(expr: &Expression) -> Result<Vec<u8>, String> {
             Ok(res)
         },
         Expression::Primary(Primary::String(s)) => {
-            todo!();
+            let mut res = Vec::new();
+            res.push(ByteCode::LiteralString as u8);
+            res.push(s.len().try_into().expect("Ident should into u8"));
+            res.extend(s);
+            Ok(res)
         },
         Expression::Primary(Primary::Expression(expr)) => {
             compile_expression(expr)
@@ -1004,6 +1009,24 @@ impl Interpreter {
                     stack.push(ShimValue::from_bytes(bytes));
                     pc += 8;
                 },
+                val if val == ByteCode::LiteralString as u8 => {
+                    let str_len = bytes[pc+1] as usize;
+                    let contents = &bytes[pc+2..pc+2+str_len as usize];
+
+
+                    const _: () = {
+                        assert!(std::mem::size_of::<Vec<u8>>() == 24);
+                    };
+                    let word_count = Word(3);
+                    let position = self.mem.alloc(word_count);
+                    unsafe {
+                        let ptr: *mut Vec<u8> = std::mem::transmute(&mut self.mem.mem[position.0 as usize]);
+                        *ptr = contents.to_vec();
+                    }
+
+                    stack.push(ShimValue::String(position));
+                    pc += 1 + str_len;
+                },
                 val if val == ByteCode::VariableDeclaration as u8 => {
                     let val = stack.pop().expect("Value for declaration");
                     let ident_len = bytes[pc+1] as usize;
@@ -1017,6 +1040,14 @@ impl Interpreter {
                     if ident == b"print" {
                         stack.push(
                             ShimValue::Print
+                        );
+                    } else if ident == b"true" {
+                        stack.push(
+                            ShimValue::Bool(true)
+                        );
+                    } else if ident == b"false" {
+                        stack.push(
+                            ShimValue::Bool(false)
                         );
                     } else if let Some(value) = self.env.get(ident) {
                         stack.push(
