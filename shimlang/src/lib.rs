@@ -34,6 +34,7 @@ pub enum Expression {
 #[derive(Debug)]
 pub enum Statement {
     Let(Vec<u8>, Expression),
+    If(Expression, Vec<Statement>, Vec<Statement>),
     Fn(Vec<u8>, Vec<Vec<u8>>, Vec<Statement>),
     Expression(Expression),
     Return(Option<Expression>),
@@ -56,6 +57,8 @@ pub enum Token {
     Minus,
     Let,
     Fn,
+    If,
+    Else,
     Struct,
     Return,
     Equal,
@@ -428,6 +431,32 @@ pub fn parse_statement(tokens: &mut TokenStream) -> Result<Statement, String> {
         tokens.consume(Token::RCurly)?;
 
         Ok(Statement::Fn(ident, params, body))
+    } else if *tokens.peek()? == Token::If {
+        tokens.advance()?;
+        let conditional = parse_expression(tokens)?;
+
+        tokens.consume(Token::LCurly);
+        let mut if_stmts = Vec::new();
+        let mut else_stmts = Vec::new();
+        while *tokens.peek()? != Token::RCurly {
+            if_stmts.push(parse_statement(tokens)?);
+        }
+        tokens.consume(Token::RCurly);
+
+        if *tokens.peek()? == Token::Else {
+            tokens.advance()?;
+            if *tokens.peek()? == Token::If {
+                else_stmts.push(parse_statement(tokens)?);
+            } else {
+                tokens.consume(Token::LCurly);
+                while *tokens.peek()? != Token::RCurly {
+                    else_stmts.push(parse_statement(tokens)?);
+                }
+                tokens.consume(Token::RCurly);
+            }
+        }
+
+        Ok(Statement::If(conditional, if_stmts, else_stmts))
     } else if *tokens.peek()? == Token::Struct {
         tokens.advance()?;
         let ident = match tokens.pop()? {
@@ -600,6 +629,10 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
                     tokens.push(Token::Let);
                 } else if ident == b"fn" {
                     tokens.push(Token::Fn);
+                } else if ident == b"if" {
+                    tokens.push(Token::If);
+                } else if ident == b"else" {
+                    tokens.push(Token::Else);
                 } else if ident == b"struct" {
                     tokens.push(Token::Struct);
                 } else if ident == b"return" {
@@ -930,6 +963,29 @@ impl ShimValue {
         }
     }
 
+    fn is_truthy(&self, interpreter: &mut Interpreter) -> Result<bool, String> {
+        match self {
+            ShimValue::Integer(i) => Ok(*i != 0),
+            ShimValue::Float(f) => Ok(*f != 0.0),
+            ShimValue::Bool(false) => Ok(false),
+            ShimValue::Bool(true) => Ok(true),
+            ShimValue::String(position) => {
+                unsafe {
+                    let ptr: *mut Vec<u8> = std::mem::transmute(&mut interpreter.mem.mem[position.0 as usize]);
+                    Ok(!(*ptr).is_empty())
+                }
+            },
+            ShimValue::List(position) => {
+                let mut out = "[".to_string();
+                unsafe {
+                    let ptr: *mut Vec<ShimValue> = std::mem::transmute(&mut interpreter.mem.mem[position.0 as usize]);
+                    Ok((*ptr).len() != 0)
+                }
+            },
+            value => Ok(true),
+        }
+    }
+
     fn add(&self, other: &Self) -> Result<ShimValue, String> {
         match (self, other) {
             (ShimValue::Integer(a), ShimValue::Integer(b)) => {
@@ -1007,6 +1063,8 @@ enum ByteCode {
     Call,
     Return,
     Jmp,
+    JmpNZ,
+    JmpZ,
 }
 
 struct Program {
@@ -1023,6 +1081,17 @@ pub fn compile_ast(ast: &Ast) -> Result<Vec<u8>, String> {
         bytecode.extend(compile_statement(stmt)?);
     }
     Ok(bytecode)
+}
+
+pub fn u16_to_u8s(val: u16) -> [u8; 2] {
+    [
+        (val >> 8) as u8,
+        (val & 0xff) as u8
+    ]
+}
+
+pub fn u8s_to_u16(val: [u8; 2]) -> u16 {
+    ((val[0] as u16) << 8) + val[1] as u16
 }
 
 pub fn compile_statement(stmt: &Statement) -> Result<Vec<u8>, String> {
@@ -1093,6 +1162,51 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<u8>, String> {
             res.push(ByteCode::Return as u8);
             Ok(res)
         },
+        Statement::If(conditional, if_stmts, else_stmts) => {
+            let mut asm = compile_expression(conditional)?;
+            let conditional_check_idx = asm.len();
+            asm.extend(
+                [
+                    // This is where we'll jump in the else case
+                    ByteCode::JmpZ as u8,
+                    0,
+                    0,
+                ]
+            );
+            for stmt in if_stmts {
+                asm.extend(compile_statement(stmt)?);
+            }
+            asm.extend(
+                [
+                    // This is where we'll jump after the if case finishes
+                    ByteCode::Jmp as u8,
+                    0,
+                    0,
+                ]
+            );
+            // We jump to here when the condition is false
+            let else_case_start_idx = asm.len();
+
+            for stmt in else_stmts {
+                asm.extend(compile_statement(stmt)?);
+            }
+
+            // Offset from conditional to the else branch
+            let else_jump_offset = u16_to_u8s(
+                else_case_start_idx as u16 - conditional_check_idx as u16
+            );
+            asm[conditional_check_idx + 1] = else_jump_offset[0];
+            asm[conditional_check_idx + 2] = else_jump_offset[1];
+
+            // Offset from the end of the if branch to after the else branch
+            let if_jump_offset = u16_to_u8s(
+                else_case_start_idx as u16 - asm.len() as u16 + 3
+            );
+            asm[else_case_start_idx - 2] = if_jump_offset[0];
+            asm[else_case_start_idx - 1] = if_jump_offset[1];
+
+            Ok(asm)
+        },
         Statement::Expression(expr) => {
             // Expression evaluates to a value that's on the top of the stack
             let mut expr_asm = compile_expression(expr)?;
@@ -1100,7 +1214,7 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<u8>, String> {
             expr_asm.push(ByteCode::Pop as u8);
 
             Ok(expr_asm)
-        }
+        },
     }
 }
 
@@ -1242,7 +1356,7 @@ impl Interpreter {
                                 }
                             }
                         },
-                        other => return Err(format!("Can't assert len on non-list")),
+                        other => return Err(format!("Can't assert len on non-list {:?}", other)),
                     }
                     pc += 1;
                 },
@@ -1259,7 +1373,7 @@ impl Interpreter {
                                 }
                             }
                         },
-                        other => return Err(format!("Can't assert len on non-list")),
+                        other => return Err(format!("Can't assert len on non-list {:?}", other)),
                     }
                 },
                 val if val == ByteCode::LiteralShimValue as u8 => {
@@ -1355,6 +1469,30 @@ impl Interpreter {
                     pc = new_pc;
                     continue;
                 }
+                val if val == ByteCode::JmpNZ as u8 => {
+                    let conditional = stack.pop().expect("val to check");
+                    if conditional.is_truthy(self)? {
+                        // TODO: signed jumps
+                        let new_pc = pc +
+                            ((bytes[pc+1] as usize) << 8) +
+                            bytes[pc+2] as usize;
+                        pc = new_pc;
+                        continue;
+                    }
+                    pc += 2;
+                }
+                val if val == ByteCode::JmpZ as u8 => {
+                    let conditional = stack.pop().expect("val to check");
+                    if !conditional.is_truthy(self)? {
+                        // TODO: signed jumps
+                        let new_pc = pc +
+                            ((bytes[pc+1] as usize) << 8) +
+                            bytes[pc+2] as usize;
+                        pc = new_pc;
+                        continue;
+                    }
+                    pc += 2;
+                }
                 val if val == ByteCode::CreateList as u8 => {
                     let len = ((bytes[pc+1] as usize) << 8) + bytes[pc+2] as usize;
 
@@ -1388,6 +1526,12 @@ impl Interpreter {
                             eprint!("let");
                         } else if *b == ByteCode::Call as u8 {
                             eprint!("call");
+                        } else if *b == ByteCode::CreateFn as u8 {
+                            eprint!("fn");
+                        } else if *b == ByteCode::JmpZ as u8 {
+                            eprint!("JMPZ");
+                        } else if *b == ByteCode::JmpNZ as u8 {
+                            eprint!("JMPNZ");
                         } else if *b == ByteCode::CreateFn as u8 {
                             eprint!("fn");
                         } else if *b == ByteCode::Return as u8 {
