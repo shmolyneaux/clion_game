@@ -14,6 +14,7 @@ pub enum Primary {
     Identifier(Vec<u8>),
     Bool(bool),
     String(Vec<u8>),
+    List(Vec<Expression>),
     Expression(Box<Expression>),
 }
 
@@ -33,7 +34,9 @@ pub enum Expression {
 #[derive(Debug)]
 pub enum Statement {
     Let(Vec<u8>, Expression),
+    Fn(Vec<u8>, Vec<Vec<u8>>, Vec<Statement>),
     Expression(Expression),
+    Return(Option<Expression>),
 }
 
 #[derive(Debug)]
@@ -52,6 +55,9 @@ pub enum Token {
     Plus,
     Minus,
     Let,
+    Fn,
+    Struct,
+    Return,
     Equal,
     Semicolon,
     LSquare,
@@ -81,6 +87,71 @@ pub struct TokenStream {
 struct LineInfo {
     start_idx: u32,
     end_idx: u32,
+}
+
+fn script_lines(script: &[u8]) -> Vec<LineInfo> {
+    let mut line_info = Vec::new();
+    let mut line_start_idx: u32 = 0;
+    for (idx, c) in script.iter().enumerate() {
+        if *c == b'\n' {
+            line_info.push(
+                LineInfo { start_idx: line_start_idx, end_idx: idx as u32 }
+            );
+            line_start_idx = idx as u32 + 1;
+        }
+    }
+
+    // If the last character was not a newline
+    if line_start_idx != script.len() as u32 {
+        line_info.push(
+            LineInfo { start_idx: line_start_idx, end_idx: script.len() as u32 -1 }
+        );
+    }
+
+    line_info
+}
+
+fn format_script_err(span: (u32, u32), script: &[u8], msg: &str) -> String {
+    let script_lines = script_lines(script);
+    let header = format!(
+        "error: {}\n",
+        msg,
+    );
+    let mut out = header.clone();
+
+    // The `gutter_size` includes everything up to the first character of the line
+    let gutter_size = script_lines.len().to_string().len() + 4;
+    for (lineno, line_info) in script_lines.iter().enumerate() {
+        let lineno = lineno + 1;
+
+        let line: String = unsafe { std::str::from_utf8_unchecked(&script[line_info.start_idx as usize ..= line_info.end_idx as usize]).to_string() };
+        out.push_str(
+            &format!(" {:lineno_size$} | {}", lineno, line, lineno_size = gutter_size - 4)
+        );
+        if !line.ends_with("\n") {
+            // Last line?
+            out.push_str("\n");
+        }
+
+        let span_start_idx = span.0;
+        let span_end_idx = span.1;
+
+        // TODO: handle token going across line breaks
+        if line_info.start_idx <= span_start_idx && span_start_idx <= line_info.end_idx {
+            let line_span_start = span_start_idx - line_info.start_idx;
+            let line_span_end = if span_end_idx < line_info.end_idx {
+                span_end_idx - line_info.start_idx
+            } else {
+                line_info.end_idx
+            };
+            out.push_str(&" ".repeat(gutter_size));
+            out.push_str(&" ".repeat(line_span_start as usize));
+            out.push_str(&"^".repeat((line_span_end - line_span_start) as usize));
+            out.push('\n');
+        }
+    }
+
+    out
 }
 
 impl TokenStream {
@@ -127,25 +198,7 @@ impl TokenStream {
     }
 
     fn script_lines(&self) -> Vec<LineInfo> {
-        let mut line_info = Vec::new();
-        let mut line_start_idx: u32 = 0;
-        for (idx, c) in self.script.iter().enumerate() {
-            if *c == b'\n' {
-                line_info.push(
-                    LineInfo { start_idx: line_start_idx, end_idx: idx as u32 }
-                );
-                line_start_idx = idx as u32 + 1;
-            }
-        }
-
-        // If the last character was not a newline
-        if line_start_idx != self.script.len() as u32 {
-            line_info.push(
-                LineInfo { start_idx: line_start_idx, end_idx: self.script.len() as u32 -1 }
-            );
-        }
-
-        line_info
+        script_lines(&self.script)
     }
 
     fn idx_to_line_col(&self, _idx: u32) -> (u32, u32) {
@@ -153,47 +206,16 @@ impl TokenStream {
     }
 
     fn format_peek_err(&self, msg: &str) -> String {
-        let span = self.token_spans[self.idx];
-        let script_lines = self.script_lines();
-        let header = format!(
-            "error: {}\n",
-            msg,
-        );
-        let mut out = header.clone();
-
-        // The `gutter_size` includes everything up to the first character of the line
-        let gutter_size = script_lines.len().to_string().len() + 4;
-        for (lineno, line_info) in script_lines.iter().enumerate() {
-            let lineno = lineno + 1;
-
-            let line: String = unsafe { std::str::from_utf8_unchecked(&self.script[line_info.start_idx as usize ..= line_info.end_idx as usize]).to_string() };
-            out.push_str(
-                &format!(" {:lineno_size$} | {}", lineno, line, lineno_size = gutter_size - 4)
-            );
-            if !line.ends_with("\n") {
-                // Last line?
-                out.push_str("\n");
-            }
-
-            let span_start_idx = span.0;
-            let span_end_idx = span.1;
-
-            // TODO: handle token going across line breaks
-            if line_info.start_idx <= span_start_idx && span_start_idx <= line_info.end_idx {
-                let line_span_start = span_start_idx - line_info.start_idx;
-                let line_span_end = if span_end_idx < line_info.end_idx {
-                    span_end_idx - line_info.start_idx
-                } else {
-                    line_info.end_idx
-                };
-                out.push_str(&" ".repeat(gutter_size));
-                out.push_str(&" ".repeat(line_span_start as usize));
-                out.push_str(&"^".repeat((line_span_end - line_span_start) as usize));
-                out.push('\n');
-            }
-        }
-
-        out
+        let span = if !self.is_empty() {
+            self.token_spans[self.idx]
+        } else {
+            (self.script.len() as u32 - 1, self.script.len() as u32)
+        };
+        format_script_err(
+            span,
+            &self.script,
+            msg
+        )
     }
 
     fn format_err(&self, msg: &str) -> String {
@@ -244,6 +266,12 @@ pub fn parse_primary(tokens: &mut TokenStream) -> Result<Expression, String> {
             tokens.consume(Token::RBracket)?;
             Ok(expr)
         },
+        Token::LSquare => {
+            tokens.advance()?;
+            let items = parse_arguments(tokens, Token::RSquare)?;
+            let expr = Expression::Primary(Primary::List(items));
+            Ok(expr)
+        },
         token => {
             Err(tokens.format_peek_err(
                 &format!(
@@ -256,17 +284,15 @@ pub fn parse_primary(tokens: &mut TokenStream) -> Result<Expression, String> {
     }
 }
 
-pub fn parse_arguments(tokens: &mut TokenStream) -> Result<Vec<Expression>, String> {
+pub fn parse_arguments(tokens: &mut TokenStream, closing_token: Token) -> Result<Vec<Expression>, String> {
     let mut args = Vec::new();
     while !tokens.is_empty() {
         let expr = parse_expression(tokens)?;
         args.push(expr);
 
         match tokens.peek()? {
-            Token::RBracket => {
-                // Don't consume the closing bracket since we parse
-                // function arguments and list literals the same way
-                // and the parent needs to match the bracket
+            token if *token == closing_token => {
+                tokens.advance()?;
                 break;
             }
             Token::Comma => {
@@ -277,7 +303,7 @@ pub fn parse_arguments(tokens: &mut TokenStream) -> Result<Vec<Expression>, Stri
                 }
                 continue;
             }
-            token => return Err(format!("Expected command or closing bracket, found {:?}", token)),
+            token => return Err(format!("Expected comma or closing bracket, found {:?}", token)),
         }
     }
     Ok(args)
@@ -289,8 +315,7 @@ pub fn parse_call(tokens: &mut TokenStream) -> Result<Expression, String> {
         match *tokens.peek()? {
             Token::LBracket => {
                 tokens.advance()?;
-                expr = Expression::Call(Box::new(expr), parse_arguments(tokens)?);
-                tokens.consume(Token::RBracket)?;
+                expr = Expression::Call(Box::new(expr), parse_arguments(tokens, Token::RBracket)?);
             },
             _ => return Ok(expr),
         }
@@ -324,50 +349,126 @@ pub fn parse_expression(tokens: &mut TokenStream) -> Result<Expression, String> 
 pub fn parse_ast(tokens: &mut TokenStream) -> Result<Ast, String> {
     let mut stmts = Vec::new();
     while !tokens.is_empty() {
-        if *tokens.peek()? == Token::Let {
-            tokens.advance()?;
-            if tokens.is_empty() {
-                return Err("No token found after let".to_string());
-            }
-            let ident = match tokens.pop()? {
+        stmts.push(parse_statement(tokens)?);
+    }
+    Ok(Ast { stmts: stmts })
+}
+
+pub fn parse_statement(tokens: &mut TokenStream) -> Result<Statement, String> {
+    if *tokens.peek()? == Token::Let {
+        tokens.advance()?;
+        if tokens.is_empty() {
+            return Err("No token found after let".to_string());
+        }
+        let ident = match tokens.pop()? {
+            Token::Identifier(ident) => {
+                ident.clone()
+            },
+            token => return Err(format!("Expected ident after let, found {:?}", token))
+        };
+
+        match tokens.pop()? {
+            Token::Equal => (),
+            token => return Err(format!("Expected = after `let ident`, found {:?}", token))
+        }
+
+        let expr = parse_expression(tokens)?;
+        match tokens.pop()? {
+            Token::Semicolon => (),
+            token => return Err(format!("Expected semicolon after `let <ident> = <expr>`, found {:?}", token))
+        }
+
+        Ok(Statement::Let(ident, expr))
+    } else if *tokens.peek()? == Token::Fn {
+        tokens.advance()?;
+        let ident = match tokens.pop()? {
+            Token::Identifier(ident) => {
+                ident.clone()
+            },
+            token => return Err(
+                tokens.format_peek_err(&format!("Expected ident after fn, found {:?}", token))
+            )
+        };
+        tokens.consume(Token::LBracket);
+
+        let mut params = Vec::new();
+        while !tokens.is_empty() {
+            match tokens.peek()? {
                 Token::Identifier(ident) => {
-                    ident.clone()
-                },
-                token => return Err(format!("Expected ident after let, found {:?}", token))
-            };
-
-            match tokens.pop()? {
-                Token::Equal => (),
-                token => return Err(format!("Expected = after `let ident`, found {:?}", token))
+                    params.push(ident.clone())
+                }
+                Token::RBracket => break,
+                token => return Err(
+                    tokens.format_peek_err(&format!("Expected ident for fn params, found {:?}", token))
+                )
             }
+            tokens.advance()?;
 
+            if *tokens.peek()? != Token::Comma {
+                break;
+            }
+            tokens.advance()?;
+        }
+        tokens.consume(Token::RBracket)?;
+        tokens.consume(Token::LCurly)?;
+
+        let mut body = Vec::new();
+        while !tokens.is_empty() && *tokens.peek()? != Token::RCurly {
+            body.push(parse_statement(tokens)?);
+        }
+
+        // For now, last line should always be a return
+        // Later when the last line doesn't have a semicolon we can do this
+        // better, but that might happen at the AST-creation stage?
+        match body.last() {
+            Some(Statement::Return(_)) => (),
+            _ => body.push(Statement::Return(None)),
+        }
+
+        tokens.consume(Token::RCurly)?;
+
+        Ok(Statement::Fn(ident, params, body))
+    } else if *tokens.peek()? == Token::Struct {
+        tokens.advance()?;
+        let ident = match tokens.pop()? {
+            Token::Identifier(ident) => {
+                ident.clone()
+            },
+            token => return Err(format!("Expected ident after struct, found {:?}", token))
+        };
+        Err(
+            tokens.format_peek_err("Struct declarations not implemented yet")
+        )
+    } else if *tokens.peek()? == Token::Return {
+        tokens.advance()?;
+        if *tokens.peek()? == Token::Semicolon {
+            tokens.advance()?;
+            Ok(Statement::Return(None))
+        } else {
             let expr = parse_expression(tokens)?;
             match tokens.pop()? {
                 Token::Semicolon => (),
                 token => return Err(format!("Expected semicolon after `let <ident> = <expr>`, found {:?}", token))
             }
-
-            stmts.push(Statement::Let(ident, expr));
+            Ok(Statement::Return(Some(expr)))
         }
-        else {
-            let expr = parse_expression(tokens)?;
+    } else {
+        let expr = parse_expression(tokens)?;
 
-            match tokens.peek()? {
-                Token::Semicolon => {tokens.pop()?;},
-                token => return Err(
-                    tokens.format_peek_err(
-                        &format!(
-                            "Expected semicolon after expression statement, found {:?}",
-                            token
-                        )
+        match tokens.peek()? {
+            Token::Semicolon => {tokens.pop()?;},
+            token => return Err(
+                tokens.format_peek_err(
+                    &format!(
+                        "Expected semicolon after expression statement, found {:?}",
+                        token
                     )
                 )
-            }
-
-            stmts.push(Statement::Expression(expr));
+            )
         }
+
+        Ok(Statement::Expression(expr))
     }
-    Ok(Ast { stmts: stmts })
 }
 
 pub fn printable_byte(b: u8) -> String {
@@ -497,6 +598,12 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
                 let ident = lex_identifier(&mut text)?;
                 if ident == b"let" {
                     tokens.push(Token::Let);
+                } else if ident == b"fn" {
+                    tokens.push(Token::Fn);
+                } else if ident == b"struct" {
+                    tokens.push(Token::Struct);
+                } else if ident == b"return" {
+                    tokens.push(Token::Return);
                 } else {
                     tokens.push(Token::Identifier(ident))
                 }
@@ -733,9 +840,12 @@ pub enum ShimValue {
     Integer(i32),
     Float(f32),
     Bool(bool),
+    // This is a program counter
+    Fn(u32),
     // TODO: it seems like this should point to a more generic reference-counted
     // object type that all non-value types share
     String(Word),
+    List(Word),
 }
 
 use std::mem::{size_of};
@@ -752,21 +862,38 @@ fn format_float(val: f32) -> String {
     }
 }
 
+enum CallResult {
+    BuiltinReturnValue(ShimValue),
+    PC(u32),
+}
+
 impl ShimValue {
-    fn call(&self, interpreter: &mut Interpreter, args: Vec<ShimValue>) -> Result<ShimValue, String> {
+    fn call(&self, interpreter: &mut Interpreter, stack: &mut Vec<ShimValue>) -> Result<CallResult, String> {
         match self {
-            ShimValue::None => Err(format!("Can't call None as function with args {:?}", args)),
+            ShimValue::None => Err(format!("Can't call None as function")),
             ShimValue::Print => {
-                for (idx, arg) in args.iter().enumerate() {
-                    if idx != 0 {
-                        print!(" ");
+                let arg_pos: Word = match stack.pop() {
+                    Some(ShimValue::List(args)) => args,
+                    args => return Err(format!("Can't call print with non-list args {:?}", args)),
+                };
+
+                unsafe {
+                    let ptr: *mut Vec<ShimValue> = std::mem::transmute(&mut interpreter.mem.mem[arg_pos.0 as usize]);
+                    for (idx, arg) in (*ptr).iter().enumerate() {
+                        if idx != 0 {
+                            print!(" ");
+                        }
+                        print!("{}", arg.to_string(interpreter));
                     }
-                    print!("{}", arg.to_string(interpreter));
                 }
+
                 println!();
-                Ok(ShimValue::None)
+                Ok(CallResult::BuiltinReturnValue(ShimValue::None))
             },
-            other => Err(format!("Can't call value {:?} as function with args {:?}", other, args)),
+            ShimValue::Fn(pc) => {
+                Ok(CallResult::PC(*pc))
+            }
+            other => Err(format!("Can't call value {:?} as function", other)),
         }
     }
 
@@ -781,6 +908,23 @@ impl ShimValue {
                     let ptr: *mut Vec<u8> = std::mem::transmute(&mut interpreter.mem.mem[position.0 as usize]);
                     String::from_utf8((*ptr).clone()).expect("valid utf-8 string stored")
                 }
+            },
+            ShimValue::List(position) => {
+                let mut out = "[".to_string();
+                unsafe {
+                    let ptr: *mut Vec<ShimValue> = std::mem::transmute(&mut interpreter.mem.mem[position.0 as usize]);
+                    for (idx, item) in (*ptr).iter().enumerate() {
+                        if idx != 0 {
+                            out.push_str(",");
+                            out.push_str(" ");
+                        }
+                        out.push_str(&item.to_string(interpreter));
+                    }
+                }
+
+                out.push_str("]");
+
+                out
             },
             value => format!("{:?}", value),
         }
@@ -840,7 +984,9 @@ impl ShimValue {
 
 #[repr(u8)]
 enum ByteCode {
-    // NoOp,
+    NoOp,
+    AssertLen,
+    Splat,
     Pop,
     Add,
     Sub,
@@ -853,9 +999,22 @@ enum ByteCode {
     // JumpNZ,
     LiteralShimValue,
     LiteralString,
+    LiteralNone,
+    CreateFn,
+    CreateList,
     VariableDeclaration,
     VariableLoad,
     Call,
+    Return,
+    Jmp,
+}
+
+struct Program {
+    bytecode: Vec<u8>,
+    script: String,
+}
+
+impl Program {
 }
 
 pub fn compile_ast(ast: &Ast) -> Result<Vec<u8>, String> {
@@ -874,10 +1033,65 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<u8>, String> {
             // When getting VariableDeclaration the next byte is the length of
             // the identifier, followed by the 
             expr_asm.push(ByteCode::VariableDeclaration as u8);
-            expr_asm.push(ident.len().try_into().expect("Ident should into u8"));
+            expr_asm.push(ident.len().try_into().expect("Ident len should into u8"));
             expr_asm.extend(ident);
 
             Ok(expr_asm)
+        },
+        Statement::Fn(ident, params, body) => {
+            // This will be replaced with a relative jump to after the function
+            // declaration
+            let mut asm = vec![
+                ByteCode::Jmp as u8,
+                0,
+                0,
+            ];
+            asm.push(ByteCode::AssertLen as u8);
+            asm.push(params.len() as u8);
+            asm.push(ByteCode::Splat as u8);
+            for param in params.iter().rev() {
+                asm.push(ByteCode::VariableDeclaration as u8);
+                asm.push(param.len().try_into().expect("Param len should into u8"));
+                asm.extend(param);
+            }
+
+            for stmt in body {
+                asm.extend(compile_statement(stmt)?);
+            }
+            // Note: we know that last statement is a return at the AST-creation stage,
+            // we we know we'll jump back to the return address
+
+            if asm.len() > u16::MAX as usize {
+                return Err(format!("Function has more than {} instructions", u16::MAX));
+            }
+
+            // Fix the jump offset at the function declaration now that we know
+            // the size of the body
+            let pc_offset = asm.len() as u16;
+            asm[1] = (pc_offset >> 8) as u8;
+            asm[2] = (pc_offset & 0xff) as u8;
+
+            // Assign the value to the ident
+            let pc_offset = asm.len() as u16 - 3;
+            asm.push(ByteCode::CreateFn as u8);
+            asm.push((pc_offset >> 8) as u8);
+            asm.push((pc_offset & 0xff) as u8);
+
+            asm.push(ByteCode::VariableDeclaration as u8);
+            asm.push(ident.len().try_into().expect("Ident len should into u8"));
+            asm.extend(ident);
+
+            Ok(asm)
+        },
+        Statement::Return(expr) => {
+            let mut res = Vec::new();
+            if let Some(expr) = expr {
+                res.extend(compile_expression(expr)?);
+            } else {
+                res.push(ByteCode::LiteralNone as u8);
+            }
+            res.push(ByteCode::Return as u8);
+            Ok(res)
         },
         Statement::Expression(expr) => {
             // Expression evaluates to a value that's on the top of the stack
@@ -930,6 +1144,17 @@ pub fn compile_expression(expr: &Expression) -> Result<Vec<u8>, String> {
             res.extend(s);
             Ok(res)
         },
+        Expression::Primary(Primary::List(items)) => {
+            let mut res = Vec::new();
+            for expr in items {
+                res.extend(compile_expression(expr)?);
+            }
+            res.push(ByteCode::CreateList as u8);
+            let len: u16 = items.len().try_into().expect("List should fit into u16");
+            res.push((len >> 8) as u8);
+            res.push((len & 0xff) as u8);
+            Ok(res)
+        },
         Expression::Primary(Primary::Expression(expr)) => {
             compile_expression(expr)
         },
@@ -953,14 +1178,17 @@ pub fn compile_expression(expr: &Expression) -> Result<Vec<u8>, String> {
             // First we evaluate the thing that needs to be called
             let mut res = compile_expression(expr)?;
 
+
             // Then we evaluate each argument
             for arg_expr in args.iter() {
                 res.extend(compile_expression(arg_expr)?);
             }
-
-            // Then we push the call bytecode which takes one operand
-            res.push(ByteCode::Call as u8);
+            // And the args become a list to be passed to the callable
+            res.push(ByteCode::CreateList as u8);
+            res.push(0);
             res.push(args.len() as u8);
+
+            res.push(ByteCode::Call as u8);
             Ok(res)
         },
     }
@@ -980,6 +1208,8 @@ impl Interpreter {
     pub fn execute_bytecode(&mut self, bytes: &[u8]) -> Result<(), String> {
         let mut pc = 0;
         let mut stack: Vec<ShimValue> = Vec::new();
+        let mut stack_frame: Vec<usize> = Vec::new();
+
         while pc < bytes.len() {
             match bytes[pc] {
                 val if val == ByteCode::Pop as u8 => {
@@ -994,6 +1224,43 @@ impl Interpreter {
                     let b = stack.pop().expect("Operand for add");
                     let a = stack.pop().expect("Operand for add");
                     stack.push(a.sub(&b)?);
+                },
+                val if val == ByteCode::LiteralNone as u8 => {
+                    stack.push(ShimValue::None);
+                },
+                val if val == ByteCode::AssertLen as u8 => {
+                    let len = bytes[pc+1] as usize;
+                    if stack.is_empty() {
+                        return Err(format!("stack is empty!"));
+                    }
+                    match stack[stack.len()-1] {
+                        ShimValue::List(pos) => {
+                            unsafe {
+                                let ptr: *mut Vec<ShimValue> = std::mem::transmute(&mut self.mem.mem[pos.0 as usize]);
+                                if (*ptr).len() != len {
+                                    return Err(format!("len mismatch {} {}", (*ptr).len(), len));
+                                }
+                            }
+                        },
+                        other => return Err(format!("Can't assert len on non-list")),
+                    }
+                    pc += 1;
+                },
+                val if val == ByteCode::Splat as u8 => {
+                    if stack.is_empty() {
+                        return Err(format!("stack is empty!"));
+                    }
+                    match stack.pop() {
+                        Some(ShimValue::List(pos)) => {
+                            unsafe {
+                                let ptr: *mut Vec<ShimValue> = std::mem::transmute(&mut self.mem.mem[pos.0 as usize]);
+                                for item in (*ptr).iter() {
+                                    stack.push(*item);
+                                }
+                            }
+                        },
+                        other => return Err(format!("Can't assert len on non-list")),
+                    }
                 },
                 val if val == ByteCode::LiteralShimValue as u8 => {
                     let bytes = [
@@ -1059,96 +1326,81 @@ impl Interpreter {
                     pc += 1 + ident_len;
                 },
                 val if val == ByteCode::Call as u8 => {
-                    let arg_count = bytes[pc+1];
-                    let mut args = Vec::new();
-                    for _ in 0..arg_count {
-                        args.push(stack.pop().expect("Arg for call"));
+                    // When Call appears the args should already be in a list at
+                    // the top of the stack, followed by the callable
+
+                    // Remove the callable from the stack
+                    let callable = stack.swap_remove(stack.len() - 2);
+
+                    match callable.call(self, &mut stack)? {
+                        CallResult::BuiltinReturnValue(res) => stack.push(res),
+                        CallResult::PC(new_pc) => {
+                            stack_frame.push(pc+1);
+                            pc = new_pc as usize;
+                            continue;
+                        }
                     }
-                    args.reverse();
-                    let callable = stack.pop().expect("Callable for call");
-                    callable.call(self, args)?;
-                    pc += 1;
                 },
+                val if val == ByteCode::Return as u8 => {
+                    // The value at the top of the stack is the return value of
+                    // the function, so we just need to pop the PC
+                    pc = stack_frame.pop().expect("stack frame to return to");
+                    continue;
+                }
+                val if val == ByteCode::Jmp as u8 => {
+                    // TODO: signed jumps
+                    let new_pc = pc +
+                        ((bytes[pc+1] as usize) << 8) +
+                        bytes[pc+2] as usize;
+                    pc = new_pc;
+                    continue;
+                }
+                val if val == ByteCode::CreateList as u8 => {
+                    let len = ((bytes[pc+1] as usize) << 8) + bytes[pc+2] as usize;
+
+                    let word_count = Word(3);
+                    let position = self.mem.alloc(word_count);
+                    unsafe {
+                        let ptr: *mut Vec<ShimValue> = std::mem::transmute(
+                            &mut self.mem.mem[position.0 as usize]
+                        );
+                        *ptr = Vec::new();
+                        for item in stack.drain(stack.len()-len..) {
+                            (*ptr).push(item);
+                        }
+                    }
+                    stack.push(ShimValue::List(position));
+
+                    pc += 2;
+                }
+                val if val == ByteCode::CreateFn as u8 => {
+                    let instruction_offset = ((bytes[pc+1] as u32) << 8) + bytes[pc+2] as u32;
+                    stack.push(ShimValue::Fn(pc as u32 - instruction_offset));
+                    pc += 2;
+                }
                 b => {
-                    return Err(format!("Unknown bytecode {b}"));
+                    eprintln!("create fn code {}", ByteCode::CreateFn as u8);
+                    for (idx, b) in bytes.iter().enumerate() {
+                        eprint!("{idx}:  {b}  ");
+                        if *b == ByteCode::Jmp as u8 {
+                            eprint!("JMP");
+                        } else if *b == ByteCode::VariableDeclaration as u8 {
+                            eprint!("let");
+                        } else if *b == ByteCode::Call as u8 {
+                            eprint!("call");
+                        } else if *b == ByteCode::CreateFn as u8 {
+                            eprint!("fn");
+                        } else if *b == ByteCode::Return as u8 {
+                            eprint!("return");
+                        }
+                        eprintln!();
+                    }
+                    return Err(format!("Unknown bytecode {b} at PC {pc}"));
                 }
             }
             pc += 1;
         }
         Ok(())
-    }
-
-    pub fn execute(&mut self, ast: &Ast) -> Result<(), String> {
-        for stmt in ast.stmts.iter() {
-            self.execute_statement(stmt)?;
-        }
-        Ok(())
-    }
-
-    pub fn evaluate(&mut self, expr: &Expression) -> Result<ShimValue, String>  {
-        match expr {
-            Expression::Primary(p) => match p {
-                Primary::Identifier(s) => if s == b"print" {
-                    Ok(ShimValue::Print)
-                } 
-                else if s == b"true" {
-                    Ok(ShimValue::Bool(true))
-                } 
-                else if s == b"false" {
-                    Ok(ShimValue::Bool(false))
-                } else {
-                    if let Some(value) = self.env.get(s) {
-                        Ok(
-                            unsafe { ShimValue::from_u64(*value) }
-                        )
-                    } else {
-                        Err(format!("Unknown identifier {:?}", s))
-                    }
-                },
-                Primary::Integer(i) => Ok(ShimValue::Integer(*i)),
-                Primary::Float(f) => Ok(ShimValue::Float(*f)),
-                Primary::String(s) => {
-                    const _: () = {
-                        assert!(std::mem::size_of::<Vec<u8>>() == 24);
-                    };
-                    let word_count = Word(3);
-                    let position = self.mem.alloc(word_count);
-
-                    unsafe {
-                        let ptr: *mut Vec<u8> = std::mem::transmute(&mut self.mem.mem[position.0 as usize]);
-                        *ptr = s.clone();
-                    }
-
-                    Ok(ShimValue::String(position))
-                },
-                prim => Err(format!("Can't evaluate primary {:?}", prim)),
-            },
-            Expression::Call(expr, args) => {
-                let obj = self.evaluate(expr)?;
-                let args = args.iter().map(|a| self.evaluate(a)).collect::<Result<Vec<ShimValue>, String>>()?;
-                obj.call(self, args)
-            },
-            Expression::BinaryOp(BinaryOp::Add(a, b)) => {
-                let a = self.evaluate(a)?;
-                let b = self.evaluate(b)?;
-                a.add(&b)
-            },
-
-            expr => Err(format!("Can't evaluate {:?}", expr)),
-        }
-    }
-
-    pub fn execute_statement(&mut self, stmts: &Statement) -> Result<ShimValue, String>  {
-        match stmts {
-            Statement::Let(ident, expr) => {
-                let value = self.evaluate(expr)?;
-                self.env.insert(ident.clone(), value.to_u64());
-                Ok(ShimValue::None)
-            },
-            Statement::Expression(expr) => {
-                self.evaluate(expr)
-            }
-        }
     }
 }
 
