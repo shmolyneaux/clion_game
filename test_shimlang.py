@@ -16,6 +16,8 @@ RESET = "\033[0m"
 
 test_path = Path(__file__).parent / "shimlang"
 
+cli_scripts = [Path(p).resolve() for p in sys.argv[1:]]
+
 os.chdir(test_path)
 
 
@@ -57,13 +59,13 @@ def print_diff(expected, actual):
         )
         print(RESET, end='')
 
-
 failures = []
 
 for command in (
     "spans",
     "parse",
     "execute",
+    "errors",
 ):
     if command == "execute":
         scripts = []
@@ -74,10 +76,16 @@ for command in (
     elif command == "parse":
         scripts = []
         scripts.extend(Path("test_scripts/parse").glob("*.shm"))
+    elif command == "errors":
+        scripts = []
+        scripts.extend(Path("test_scripts/errors").glob("*.shm"))
     else:
         raise Exception("Unknown command")
 
-    for script in scripts:
+    for script in sorted(scripts):
+        if cli_scripts and script.resolve() not in cli_scripts:
+            continue
+
         pad = "-" * (40 - len(str(script)))
         print(f"{script} {pad} ", end="")
 
@@ -105,7 +113,7 @@ for command in (
         else:
             raise Exception(f"Unknown platform {sys.platform}")
 
-        if command == "execute":
+        if command == "execute" or command == "errors":
             proc = subprocess.run(f"{exe_path} {script}", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         elif command == "spans":
             proc = subprocess.run(f"{exe_path} --spans {script}", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -117,7 +125,7 @@ for command in (
         proc_stdout = proc.stdout.strip()
         proc_stderr = proc.stderr.strip()
 
-        if proc.returncode:
+        if command != "errors" and proc.returncode:
             msg = "FAILED (non-zero exit code)"
             print(f"{RED}{msg}{RESET}")
             print("")
@@ -150,12 +158,12 @@ for command in (
         else:
             print(f"{GREEN}PASSED{RESET}")
 
-    if failures:
-        print("Failures:")
-    else:
-        print(f"{GREEN}All testing passed!{RESET}")
+if failures:
+    print("Failures:")
+else:
+    print(f"{GREEN}All testing passed!{RESET}")
 
-    for failure in failures:
-        print(f"    {failure}")
+for failure in failures:
+    print(f"    {failure}")
 
-    print()
+print()

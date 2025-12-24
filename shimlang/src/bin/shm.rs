@@ -1,6 +1,7 @@
 use std::env;
 use std::fs::File;
 use std::io::Read;
+use std::process::ExitCode;
 
 use shimlang;
 
@@ -54,13 +55,13 @@ fn parse_args() -> Result<Args, String> {
     Ok(args)
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>>{
+fn run() -> Result<(), String> {
     let args = parse_args()?;
 
     if let Some(script_path) = args.path {
-        let mut file = File::open(&script_path)?;
+        let mut file = File::open(&script_path).map_err(|e| format!("{:?}", e))?;
         let mut contents = Vec::new();
-        file.read_to_end(&mut contents)?;
+        file.read_to_end(&mut contents).map_err(|e| format!("{:?}", e))?;
 
         match std::str::from_utf8(&contents) {
             Ok(_) => (),
@@ -78,9 +79,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>>{
                         return Err((format!("Failed to parse script")).into());
                     }
                 };
-                let bytecode = shimlang::compile_ast(&ast)?;
+                let program = shimlang::compile_ast(&ast)?;
                 let mut interpreter = shimlang::Interpreter::default();
-                interpreter.execute_bytecode(&bytecode)?;
+                match interpreter.execute_bytecode(&program) {
+                    Ok(()) => (),
+                    Err(msg) => {
+                        eprintln!(
+                            "{msg}"
+                        );
+                        return Err((format!("")).into());
+                    }
+                };
             },
             Command::Parse => {
                 match shimlang::ast_from_text(&contents) {
@@ -98,7 +107,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>>{
                 for span in tokens.spans() {
                     println!(
                         "{}",
-                        std::str::from_utf8(&contents[(span.0 as usize)..(span.1 as usize)])?
+                        std::str::from_utf8(&contents[(span.start as usize)..(span.end as usize)])
+                            .map_err(|e| format!("{:?}", e))?
                     );
                 }
             },
@@ -108,4 +118,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>>{
     }
 
     Ok(())
+}
+
+fn main() -> ExitCode {
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(msg) => {
+            if msg != "" {
+                eprintln!("{msg}");
+            }
+            ExitCode::from(1)
+        }
+    }
 }

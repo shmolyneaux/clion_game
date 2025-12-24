@@ -6,6 +6,21 @@ use facet::Facet;
 use std::ops::{Add, Sub};
 use std::ops::{AddAssign, SubAssign};
 
+#[derive(Debug, Clone, Copy)]
+pub struct Span {
+    pub start: u32,
+    pub end: u32,
+}
+
+#[derive(Debug)]
+pub struct Node<T> {
+    pub data: T,
+    pub span: Span,
+}
+
+// Now redefine your types using the wrapper
+pub type ExprNode = Node<Expression>;
+
 #[derive(Debug)]
 pub enum Primary {
     None,
@@ -14,35 +29,36 @@ pub enum Primary {
     Identifier(Vec<u8>),
     Bool(bool),
     String(Vec<u8>),
-    List(Vec<Expression>),
-    Expression(Box<Expression>),
+    List(Vec<ExprNode>),
+    Expression(Box<ExprNode>),
 }
 
 #[derive(Debug)]
 pub enum BinaryOp {
-    Add(Box<Expression>, Box<Expression>),
-    Subtract(Box<Expression>, Box<Expression>),
+    Add(Box<ExprNode>, Box<ExprNode>),
+    Subtract(Box<ExprNode>, Box<ExprNode>),
 }
 
 #[derive(Debug)]
 pub enum Expression {
     Primary(Primary),
     BinaryOp(BinaryOp),
-    Call(Box<Expression>, Vec<Expression>),
+    Call(Box<ExprNode>, Vec<ExprNode>),
 }
 
 #[derive(Debug)]
 pub enum Statement {
-    Let(Vec<u8>, Expression),
-    If(Expression, Vec<Statement>, Vec<Statement>),
+    Let(Vec<u8>, ExprNode),
+    If(ExprNode, Vec<Statement>, Vec<Statement>),
     Fn(Vec<u8>, Vec<Vec<u8>>, Vec<Statement>),
-    Expression(Expression),
-    Return(Option<Expression>),
+    Expression(ExprNode),
+    Return(Option<ExprNode>),
 }
 
 #[derive(Debug)]
 pub struct Ast {
-    stmts: Vec<Statement>
+    stmts: Vec<Statement>,
+    script: Vec<u8>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -82,7 +98,7 @@ pub struct TokenStream {
     // Technically we don't need to store this since we could recompute this
     // from the script when we need to show an error. This just keeps things
     // simple for now. The upper index is not inclusive, so (10,11) is 1 character.
-    token_spans: Vec<(u32, u32)>,
+    token_spans: Vec<Span>,
     script: Vec<u8>,
 }
 
@@ -114,13 +130,9 @@ fn script_lines(script: &[u8]) -> Vec<LineInfo> {
     line_info
 }
 
-fn format_script_err(span: (u32, u32), script: &[u8], msg: &str) -> String {
+fn format_script_err(span: Span, script: &[u8], msg: &str) -> String {
     let script_lines = script_lines(script);
-    let header = format!(
-        "error: {}\n",
-        msg,
-    );
-    let mut out = header.clone();
+    let mut out = "".to_string();
 
     // The `gutter_size` includes everything up to the first character of the line
     let gutter_size = script_lines.len().to_string().len() + 4;
@@ -136,23 +148,22 @@ fn format_script_err(span: (u32, u32), script: &[u8], msg: &str) -> String {
             out.push_str("\n");
         }
 
-        let span_start_idx = span.0;
-        let span_end_idx = span.1;
+        let span_start_idx = span.start;
+        let span_end_idx = span.end;
 
         // TODO: handle token going across line breaks
         if line_info.start_idx <= span_start_idx && span_start_idx <= line_info.end_idx {
             let line_span_start = span_start_idx - line_info.start_idx;
-            let line_span_end = if span_end_idx < line_info.end_idx {
-                span_end_idx - line_info.start_idx
-            } else {
-                line_info.end_idx
-            };
+            let line_span_end = span_end_idx - line_info.start_idx;
+
             out.push_str(&" ".repeat(gutter_size));
             out.push_str(&" ".repeat(line_span_start as usize));
             out.push_str(&"^".repeat((line_span_end - line_span_start) as usize));
             out.push('\n');
         }
     }
+
+    out.push_str(&format!("Error: {msg}"));
 
     out
 }
@@ -163,9 +174,21 @@ impl TokenStream {
      */
     fn peek(&self) -> Result<&Token, String> {
         if self.is_empty() {
-            Err("End of token stream".to_string())
+            Err(
+                self.format_peek_err("End of token stream")
+            )
         } else {
             Ok(&self.tokens[self.idx])
+        }
+    }
+
+    fn peek_span(&self) -> Result<Span, String> {
+        if self.is_empty() {
+            Err(
+                self.format_peek_err("End of token stream")
+            )
+        } else {
+            Ok(self.token_spans[self.idx])
         }
     }
 
@@ -212,7 +235,10 @@ impl TokenStream {
         let span = if !self.is_empty() {
             self.token_spans[self.idx]
         } else {
-            (self.script.len() as u32 - 1, self.script.len() as u32)
+            Span {
+                start: self.script.len() as u32 - 1,
+                end: self.script.len() as u32,
+            }
         };
         format_script_err(
             span,
@@ -231,52 +257,40 @@ impl TokenStream {
         )
     }
 
-    pub fn spans(&self) -> Vec<(u32, u32)> {
+    pub fn spans(&self) -> Vec<Span> {
         self.token_spans.clone()
     }
 }
 
-pub fn parse_primary(tokens: &mut TokenStream) -> Result<Expression, String> {
-    match tokens.peek()? {
+pub fn parse_primary(tokens: &mut TokenStream) -> Result<ExprNode, String> {
+    let span = tokens.peek_span()?;
+    let expr: Expression = match tokens.pop()? {
         Token::Integer(i) => {
-            let result = Ok(Expression::Primary(Primary::Integer(*i)));
-            tokens.advance()?;
-            result
+            Expression::Primary(Primary::Integer(i))
         },
         Token::Float(f) => {
-            let result = Ok(Expression::Primary(Primary::Float(*f)));
-            tokens.advance()?;
-            result
+            Expression::Primary(Primary::Float(f))
         },
         Token::String(s) => {
-            let result = Ok(Expression::Primary(Primary::String(s.clone())));
-            tokens.advance()?;
-            result
+            Expression::Primary(Primary::String(s))
         },
         Token::Bool(b) => {
-            let result = Ok(Expression::Primary(Primary::Bool(*b)));
-            tokens.advance()?;
-            result
+            Expression::Primary(Primary::Bool(b))
         },
         Token::Identifier(s) => {
-            let result = Ok(Expression::Primary(Primary::Identifier(s.clone())));
-            tokens.advance()?;
-            result
+            Expression::Primary(Primary::Identifier(s))
         },
         Token::LBracket => {
-            tokens.advance()?;
             let expr = parse_expression(tokens)?;
             tokens.consume(Token::RBracket)?;
-            Ok(expr)
+            expr.data
         },
         Token::LSquare => {
-            tokens.advance()?;
             let items = parse_arguments(tokens, Token::RSquare)?;
-            let expr = Expression::Primary(Primary::List(items));
-            Ok(expr)
+            Expression::Primary(Primary::List(items))
         },
         token => {
-            Err(tokens.format_peek_err(
+            return Err(tokens.format_peek_err(
                 &format!(
                     "Unexpected `{:?}` in parse_primary",
                     // TODO: should display the exact character like `[` rather than name line `SemiColon`
@@ -284,10 +298,16 @@ pub fn parse_primary(tokens: &mut TokenStream) -> Result<Expression, String> {
                 )
             ))
         },
-    }
+    };
+    Ok(
+        Node {
+            data: expr,
+            span: span,
+        }
+    )
 }
 
-pub fn parse_arguments(tokens: &mut TokenStream, closing_token: Token) -> Result<Vec<Expression>, String> {
+pub fn parse_arguments(tokens: &mut TokenStream, closing_token: Token) -> Result<Vec<ExprNode>, String> {
     let mut args = Vec::new();
     while !tokens.is_empty() {
         let expr = parse_expression(tokens)?;
@@ -312,13 +332,17 @@ pub fn parse_arguments(tokens: &mut TokenStream, closing_token: Token) -> Result
     Ok(args)
 }
 
-pub fn parse_call(tokens: &mut TokenStream) -> Result<Expression, String> {
+pub fn parse_call(tokens: &mut TokenStream) -> Result<ExprNode, String> {
     let mut expr = parse_term(tokens)?;
     while !tokens.is_empty() {
+        let span = tokens.peek_span()?;
         match *tokens.peek()? {
             Token::LBracket => {
                 tokens.advance()?;
-                expr = Expression::Call(Box::new(expr), parse_arguments(tokens, Token::RBracket)?);
+                expr = Node {
+                    data: Expression::Call(Box::new(expr), parse_arguments(tokens, Token::RBracket)?),
+                    span: span,
+                };
             },
             _ => return Ok(expr),
         }
@@ -327,17 +351,25 @@ pub fn parse_call(tokens: &mut TokenStream) -> Result<Expression, String> {
     Ok(expr)
 }
 
-pub fn parse_term(tokens: &mut TokenStream) -> Result<Expression, String> {
+pub fn parse_term(tokens: &mut TokenStream) -> Result<ExprNode, String> {
     let mut expr = parse_primary(tokens)?;
     while !tokens.is_empty() {
+        // TODO: this is just the operator
+        let span = tokens.peek_span()?;
         match tokens.peek()? {
             Token::Plus => {
                 tokens.advance()?;
-                expr = Expression::BinaryOp(BinaryOp::Add(Box::new(expr), Box::new(parse_expression(tokens)?)));
+                expr = Node {
+                    data: Expression::BinaryOp(BinaryOp::Add(Box::new(expr), Box::new(parse_expression(tokens)?))),
+                    span: span,
+                };
             },
             Token::Minus => {
                 tokens.advance()?;
-                expr = Expression::BinaryOp(BinaryOp::Subtract(Box::new(expr), Box::new(parse_expression(tokens)?)));
+                expr = Node {
+                    data: Expression::BinaryOp(BinaryOp::Subtract(Box::new(expr), Box::new(parse_expression(tokens)?))),
+                    span: span,
+                };
             },
             _ => return Ok(expr),
         }
@@ -345,7 +377,7 @@ pub fn parse_term(tokens: &mut TokenStream) -> Result<Expression, String> {
     Ok(expr)
 }
 
-pub fn parse_expression(tokens: &mut TokenStream) -> Result<Expression, String> {
+pub fn parse_expression(tokens: &mut TokenStream) -> Result<ExprNode, String> {
     parse_call(tokens)
 }
 
@@ -354,7 +386,7 @@ pub fn parse_ast(tokens: &mut TokenStream) -> Result<Ast, String> {
     while !tokens.is_empty() {
         stmts.push(parse_statement(tokens)?);
     }
-    Ok(Ast { stmts: stmts })
+    Ok(Ast { stmts: stmts, script: tokens.script.clone() })
 }
 
 pub fn parse_statement(tokens: &mut TokenStream) -> Result<Statement, String> {
@@ -392,7 +424,7 @@ pub fn parse_statement(tokens: &mut TokenStream) -> Result<Statement, String> {
                 tokens.format_peek_err(&format!("Expected ident after fn, found {:?}", token))
             )
         };
-        tokens.consume(Token::LBracket);
+        tokens.consume(Token::LBracket)?;
 
         let mut params = Vec::new();
         while !tokens.is_empty() {
@@ -435,31 +467,31 @@ pub fn parse_statement(tokens: &mut TokenStream) -> Result<Statement, String> {
         tokens.advance()?;
         let conditional = parse_expression(tokens)?;
 
-        tokens.consume(Token::LCurly);
+        tokens.consume(Token::LCurly)?;
         let mut if_stmts = Vec::new();
         let mut else_stmts = Vec::new();
         while *tokens.peek()? != Token::RCurly {
             if_stmts.push(parse_statement(tokens)?);
         }
-        tokens.consume(Token::RCurly);
+        tokens.consume(Token::RCurly)?;
 
         if *tokens.peek()? == Token::Else {
             tokens.advance()?;
             if *tokens.peek()? == Token::If {
                 else_stmts.push(parse_statement(tokens)?);
             } else {
-                tokens.consume(Token::LCurly);
+                tokens.consume(Token::LCurly)?;
                 while *tokens.peek()? != Token::RCurly {
                     else_stmts.push(parse_statement(tokens)?);
                 }
-                tokens.consume(Token::RCurly);
+                tokens.consume(Token::RCurly)?;
             }
         }
 
         Ok(Statement::If(conditional, if_stmts, else_stmts))
     } else if *tokens.peek()? == Token::Struct {
         tokens.advance()?;
-        let ident = match tokens.pop()? {
+        let _ident = match tokens.pop()? {
             Token::Identifier(ident) => {
                 ident.clone()
             },
@@ -667,10 +699,10 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
         let token_end_len = text.len();
         if tokens.len() > spans.len() {
             spans.push(
-                (
-                    (starting_len - token_start_len) as u32,
-                    (starting_len - token_end_len) as u32
-                )
+                Span {
+                    start: (starting_len - token_start_len) as u32,
+                    end: (starting_len - token_end_len) as u32,
+                }
             );
         }
     }
@@ -859,7 +891,7 @@ impl MMU {
     }
 }
 
-#[derive(Facet)]
+// TODO: uncomment #[derive(Facet)]
 pub struct Interpreter {
     pub mem: MMU,
     pub source: HashMap<String, String>,
@@ -976,13 +1008,12 @@ impl ShimValue {
                 }
             },
             ShimValue::List(position) => {
-                let mut out = "[".to_string();
                 unsafe {
                     let ptr: *mut Vec<ShimValue> = std::mem::transmute(&mut interpreter.mem.mem[position.0 as usize]);
                     Ok((*ptr).len() != 0)
                 }
             },
-            value => Ok(true),
+            _ => Ok(true),
         }
     }
 
@@ -1067,20 +1098,25 @@ enum ByteCode {
     JmpZ,
 }
 
-struct Program {
+pub struct Program {
     bytecode: Vec<u8>,
-    script: String,
+    spans: Vec<Span>,
+    script: Vec<u8>,
 }
 
-impl Program {
-}
-
-pub fn compile_ast(ast: &Ast) -> Result<Vec<u8>, String> {
-    let mut bytecode = Vec::new();
+pub fn compile_ast(ast: &Ast) -> Result<Program, String> {
+    let mut program: Vec<(u8, Span)> = Vec::new();
     for stmt in ast.stmts.iter() {
-        bytecode.extend(compile_statement(stmt)?);
+        program.extend(compile_statement(stmt)?);
     }
-    Ok(bytecode)
+    let (bytecode, spans): (Vec<u8>, Vec<Span>) = program.into_iter().unzip();
+    Ok(
+        Program {
+            bytecode: bytecode,
+            spans: spans,
+            script: ast.script.clone(),
+        }
+    )
 }
 
 pub fn u16_to_u8s(val: u16) -> [u8; 2] {
@@ -1094,16 +1130,18 @@ pub fn u8s_to_u16(val: [u8; 2]) -> u16 {
     ((val[0] as u16) << 8) + val[1] as u16
 }
 
-pub fn compile_statement(stmt: &Statement) -> Result<Vec<u8>, String> {
+pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
     match stmt {
         Statement::Let(ident, expr) => {
             // Expression evaluates to a value that's on the top of the stack
             let mut expr_asm = compile_expression(expr)?;
             // When getting VariableDeclaration the next byte is the length of
             // the identifier, followed by the 
-            expr_asm.push(ByteCode::VariableDeclaration as u8);
-            expr_asm.push(ident.len().try_into().expect("Ident len should into u8"));
-            expr_asm.extend(ident);
+            expr_asm.push((ByteCode::VariableDeclaration as u8, expr.span));
+            expr_asm.push((ident.len().try_into().expect("Ident len should into u8"), expr.span));
+            for b in ident.into_iter() {
+                expr_asm.push((*b, expr.span));
+            }
 
             Ok(expr_asm)
         },
@@ -1111,17 +1149,19 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<u8>, String> {
             // This will be replaced with a relative jump to after the function
             // declaration
             let mut asm = vec![
-                ByteCode::Jmp as u8,
-                0,
-                0,
+                (ByteCode::Jmp as u8, Span {start: 0, end: 1}),
+                (0, Span {start: 0, end: 1}),
+                (0, Span {start: 0, end: 1}),
             ];
-            asm.push(ByteCode::AssertLen as u8);
-            asm.push(params.len() as u8);
-            asm.push(ByteCode::Splat as u8);
+            asm.push((ByteCode::AssertLen as u8, Span {start:0, end:1}));
+            asm.push((params.len() as u8, Span {start:0, end:1}));
+            asm.push((ByteCode::Splat as u8, Span {start:0, end:1}));
             for param in params.iter().rev() {
-                asm.push(ByteCode::VariableDeclaration as u8);
-                asm.push(param.len().try_into().expect("Param len should into u8"));
-                asm.extend(param);
+                asm.push((ByteCode::VariableDeclaration as u8, Span {start:0, end:1}));
+                asm.push((param.len().try_into().expect("Param len should into u8"), Span {start:0, end:1}));
+                for b in param {
+                    asm.push((*b, Span {start:0, end:1}));
+                }
             }
 
             for stmt in body {
@@ -1137,18 +1177,20 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<u8>, String> {
             // Fix the jump offset at the function declaration now that we know
             // the size of the body
             let pc_offset = asm.len() as u16;
-            asm[1] = (pc_offset >> 8) as u8;
-            asm[2] = (pc_offset & 0xff) as u8;
+            asm[1].0 = (pc_offset >> 8) as u8;
+            asm[2].0 = (pc_offset & 0xff) as u8;
 
             // Assign the value to the ident
             let pc_offset = asm.len() as u16 - 3;
-            asm.push(ByteCode::CreateFn as u8);
-            asm.push((pc_offset >> 8) as u8);
-            asm.push((pc_offset & 0xff) as u8);
+            asm.push((ByteCode::CreateFn as u8, Span {start:0, end:1}));
+            asm.push(((pc_offset >> 8) as u8, Span {start:0, end:1}));
+            asm.push(((pc_offset & 0xff) as u8, Span {start:0, end:1}));
 
-            asm.push(ByteCode::VariableDeclaration as u8);
-            asm.push(ident.len().try_into().expect("Ident len should into u8"));
-            asm.extend(ident);
+            asm.push((ByteCode::VariableDeclaration as u8, Span {start:0, end:1}));
+            asm.push((ident.len().try_into().expect("Ident len should into u8"), Span {start:0, end:1}));
+            for b in ident.into_iter() {
+                asm.push((*b, Span {start:0, end:1}));
+            }
 
             Ok(asm)
         },
@@ -1157,33 +1199,23 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<u8>, String> {
             if let Some(expr) = expr {
                 res.extend(compile_expression(expr)?);
             } else {
-                res.push(ByteCode::LiteralNone as u8);
+                res.push((ByteCode::LiteralNone as u8, Span { start: 0, end: 1}));
             }
-            res.push(ByteCode::Return as u8);
+            res.push((ByteCode::Return as u8, Span { start: 0, end: 1}));
             Ok(res)
         },
         Statement::If(conditional, if_stmts, else_stmts) => {
             let mut asm = compile_expression(conditional)?;
             let conditional_check_idx = asm.len();
-            asm.extend(
-                [
-                    // This is where we'll jump in the else case
-                    ByteCode::JmpZ as u8,
-                    0,
-                    0,
-                ]
-            );
+            asm.push((ByteCode::JmpZ as u8, Span { start:0, end:0}));
+            asm.push((0, Span { start:0, end:0}));
+            asm.push((0, Span { start:0, end:0}));
             for stmt in if_stmts {
                 asm.extend(compile_statement(stmt)?);
             }
-            asm.extend(
-                [
-                    // This is where we'll jump after the if case finishes
-                    ByteCode::Jmp as u8,
-                    0,
-                    0,
-                ]
-            );
+            asm.push((ByteCode::Jmp as u8, Span { start:0, end:0}));
+            asm.push((0, Span { start:0, end:0}));
+            asm.push((0, Span { start:0, end:0}));
             // We jump to here when the condition is false
             let else_case_start_idx = asm.len();
 
@@ -1195,15 +1227,15 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<u8>, String> {
             let else_jump_offset = u16_to_u8s(
                 else_case_start_idx as u16 - conditional_check_idx as u16
             );
-            asm[conditional_check_idx + 1] = else_jump_offset[0];
-            asm[conditional_check_idx + 2] = else_jump_offset[1];
+            asm[conditional_check_idx + 1].0 = else_jump_offset[0];
+            asm[conditional_check_idx + 2].0 = else_jump_offset[1];
 
             // Offset from the end of the if branch to after the else branch
             let if_jump_offset = u16_to_u8s(
                 else_case_start_idx as u16 - asm.len() as u16 + 3
             );
-            asm[else_case_start_idx - 2] = if_jump_offset[0];
-            asm[else_case_start_idx - 1] = if_jump_offset[1];
+            asm[else_case_start_idx - 2].0 = if_jump_offset[0];
+            asm[else_case_start_idx - 1].0 = if_jump_offset[1];
 
             Ok(asm)
         },
@@ -1211,86 +1243,98 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<u8>, String> {
             // Expression evaluates to a value that's on the top of the stack
             let mut expr_asm = compile_expression(expr)?;
             // Pop the value since it's not used
-            expr_asm.push(ByteCode::Pop as u8);
+            expr_asm.push((ByteCode::Pop as u8, expr.span));
 
             Ok(expr_asm)
         },
     }
 }
 
-pub fn compile_expression(expr: &Expression) -> Result<Vec<u8>, String> {
-    match expr {
+pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
+    match &expr.data {
         Expression::Primary(Primary::None) => {
             let val = ShimValue::None;
-            let mut res = vec![ByteCode::LiteralShimValue as u8];
-            res.extend(val.to_bytes());
+            let mut res = vec![(ByteCode::LiteralShimValue as u8, expr.span)];
+            for b in val.to_bytes().into_iter() {
+                res.push((b, expr.span));
+            }
             Ok(res)
         },
         Expression::Primary(Primary::Bool(b)) => {
             let val = ShimValue::Bool(*b);
-            let mut res = vec![ByteCode::LiteralShimValue as u8];
-            res.extend(val.to_bytes());
+            let mut res = vec![(ByteCode::LiteralShimValue as u8, expr.span)];
+            for b in val.to_bytes().into_iter() {
+                res.push((b, expr.span));
+            }
             Ok(res)
         },
         Expression::Primary(Primary::Integer(i)) => {
             let val = ShimValue::Integer(*i);
-            let mut res = vec![ByteCode::LiteralShimValue as u8];
-            res.extend(val.to_bytes());
+            let mut res = vec![(ByteCode::LiteralShimValue as u8, expr.span)];
+            for b in val.to_bytes().into_iter() {
+                res.push((b, expr.span));
+            }
             Ok(res)
         },
         Expression::Primary(Primary::Float(f)) => {
             let val = ShimValue::Float(*f);
-            let mut res = vec![ByteCode::LiteralShimValue as u8];
-            res.extend(val.to_bytes());
+            let mut res = vec![(ByteCode::LiteralShimValue as u8, expr.span)];
+            for b in val.to_bytes().into_iter() {
+                res.push((b, expr.span));
+            }
             Ok(res)
         },
         Expression::Primary(Primary::Identifier(ident)) => {
             let mut res = Vec::new();
-            res.push(ByteCode::VariableLoad as u8);
-            res.push(ident.len().try_into().expect("Ident should into u8"));
-            res.extend(ident);
+            res.push((ByteCode::VariableLoad as u8, expr.span));
+            res.push((ident.len().try_into().expect("Ident should into u8"), expr.span));
+            for b in ident.into_iter() {
+                res.push((*b, expr.span));
+            }
             Ok(res)
         },
         Expression::Primary(Primary::String(s)) => {
             let mut res = Vec::new();
-            res.push(ByteCode::LiteralString as u8);
-            res.push(s.len().try_into().expect("Ident should into u8"));
-            res.extend(s);
+            res.push((ByteCode::LiteralString as u8, expr.span));
+            res.push((s.len().try_into().expect("Ident should into u8"), expr.span));
+            for b in s.into_iter() {
+                res.push((*b, expr.span));
+            }
             Ok(res)
         },
         Expression::Primary(Primary::List(items)) => {
             let mut res = Vec::new();
             for expr in items {
-                res.extend(compile_expression(expr)?);
+                res.extend(compile_expression(&expr)?);
             }
-            res.push(ByteCode::CreateList as u8);
+            res.push((ByteCode::CreateList as u8, expr.span));
             let len: u16 = items.len().try_into().expect("List should fit into u16");
-            res.push((len >> 8) as u8);
-            res.push((len & 0xff) as u8);
+            res.push(((len >> 8) as u8, expr.span));
+            res.push(((len & 0xff) as u8, expr.span));
             Ok(res)
         },
         Expression::Primary(Primary::Expression(expr)) => {
-            compile_expression(expr)
+            compile_expression(&expr)
         },
         Expression::BinaryOp(op) => {
             match op {
                 BinaryOp::Add(a, b) => {
-                    let mut res = compile_expression(a)?;
-                    res.extend(compile_expression(b)?);
-                    res.push(ByteCode::Add as u8);
+                    let mut res = compile_expression(&a)?;
+                    res.extend(compile_expression(&b)?);
+                    res.push((ByteCode::Add as u8, expr.span));
                     Ok(res)
                 },
                 BinaryOp::Subtract(a, b) => {
-                    let mut res = compile_expression(a)?;
-                    res.extend(compile_expression(b)?);
-                    res.push(ByteCode::Sub as u8);
+                    let mut res = compile_expression(&a)?;
+                    res.extend(compile_expression(&b)?);
+                    res.push((ByteCode::Sub as u8, expr.span));
                     Ok(res)
                 },
             }
         },
         Expression::Call(expr, args) => {
             // First we evaluate the thing that needs to be called
-            let mut res = compile_expression(expr)?;
+            let mut res = compile_expression(&expr)?;
 
 
             // Then we evaluate each argument
@@ -1298,11 +1342,11 @@ pub fn compile_expression(expr: &Expression) -> Result<Vec<u8>, String> {
                 res.extend(compile_expression(arg_expr)?);
             }
             // And the args become a list to be passed to the callable
-            res.push(ByteCode::CreateList as u8);
-            res.push(0);
-            res.push(args.len() as u8);
+            res.push((ByteCode::CreateList as u8, expr.span));
+            res.push((0, expr.span));
+            res.push((args.len() as u8, expr.span));
 
-            res.push(ByteCode::Call as u8);
+            res.push((ByteCode::Call as u8, expr.span));
             Ok(res)
         },
     }
@@ -1319,11 +1363,12 @@ impl Interpreter {
         }
     }
 
-    pub fn execute_bytecode(&mut self, bytes: &[u8]) -> Result<(), String> {
+    pub fn execute_bytecode(&mut self, program: &Program) -> Result<(), String> {
         let mut pc = 0;
         let mut stack: Vec<ShimValue> = Vec::new();
         let mut stack_frame: Vec<usize> = Vec::new();
 
+        let bytes = &program.bytecode;
         while pc < bytes.len() {
             match bytes[pc] {
                 val if val == ByteCode::Pop as u8 => {
@@ -1332,7 +1377,16 @@ impl Interpreter {
                 val if val == ByteCode::Add as u8 => {
                     let b = stack.pop().expect("Operand for add");
                     let a = stack.pop().expect("Operand for add");
-                    stack.push(a.add(&b)?);
+                    stack.push(
+                        a.add(&b)
+                            .map_err(
+                                |err_str| format_script_err(
+                                    program.spans[pc],
+                                    &program.script,
+                                    &err_str
+                                )
+                            )?
+                    );
                 },
                 val if val == ByteCode::Sub as u8 => {
                     let b = stack.pop().expect("Operand for add");

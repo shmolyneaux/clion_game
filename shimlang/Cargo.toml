@@ -14,6 +14,6 @@ facet = { path = "../facet/facet" }
 facet-reflect = { path = "../facet/facet-reflect" }
 
 [features]
-default = ["facet", "dev"]
+default = ["dev"]
 facet = ["dep:facet", "dep:facet-reflect"]
 dev = []
