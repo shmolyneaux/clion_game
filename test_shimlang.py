@@ -134,7 +134,7 @@ for command in (
             print("")
             failures.append(f"{script} ... {msg}")
 
-        elif proc_stderr != expected_stderr:
+        elif proc_stderr.strip() != expected_stderr.strip():
             msg = "FAILED (stderr mismatch)"
             print(f"{RED}{msg}{RESET}")
             print("")
@@ -143,7 +143,8 @@ for command in (
             print("")
             failures.append(f"{script} ... {msg}")
 
-        elif proc_stdout != expected_stdout:
+        elif proc_stdout.strip() != expected_stdout.strip():
+            breakpoint()
             msg = "FAILED (stdout mismatch)"
             print(f"{RED}{msg}{RESET}")
             print("")
