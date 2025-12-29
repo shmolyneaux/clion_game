@@ -97,12 +97,12 @@ for command in (
         stderr_file = script.with_suffix(".stderr")
 
         expected_stdout = ""
-        if stdout_file.exists(): 
-            expected_stdout = stdout_file.read_text().strip()
+        if stdout_file.exists():
+            expected_stdout = stdout_file.read_text()
 
         expected_stderr = ""
-        if stderr_file.exists(): 
-            expected_stderr = stderr_file.read_text().strip()
+        if stderr_file.exists():
+            expected_stderr = stderr_file.read_text()
 
         if sys.platform == "win32":
             exe_path = "target\\debug\\shm.exe"
@@ -122,8 +122,8 @@ for command in (
         else:
             raise Exception("Unknown command")
 
-        proc_stdout = proc.stdout.strip()
-        proc_stderr = proc.stderr.strip()
+        proc_stdout = proc.stdout
+        proc_stderr = proc.stderr
 
         if command != "errors" and proc.returncode:
             msg = "FAILED (non-zero exit code)"
