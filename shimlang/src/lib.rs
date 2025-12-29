@@ -51,6 +51,12 @@ pub enum Statement {
     Let(Vec<u8>, ExprNode),
     If(ExprNode, Vec<Statement>, Vec<Statement>),
     Fn(Vec<u8>, Vec<Vec<u8>>, Vec<Statement>),
+    Struct(
+        Vec<u8>,
+        Vec<Vec<u8>>,
+        /** These are methods */
+        Vec<Statement>
+    ),
     Expression(ExprNode),
     Return(Option<ExprNode>),
 }
@@ -217,6 +223,15 @@ impl TokenStream {
     fn advance(&mut self) -> Result<(), String> {
         self.pop()?;
         Ok(())
+    }
+
+    fn reverse(&mut self) -> Result<(), String> {
+        if self.idx != 0 {
+            self.idx -= 1;
+            Ok(())
+        } else {
+            Err("Can't reverse past beginning of token stream".to_string())
+        }
     }
 
     fn is_empty(&self) -> bool {
@@ -389,6 +404,57 @@ pub fn parse_ast(tokens: &mut TokenStream) -> Result<Ast, String> {
     Ok(Ast { stmts: stmts, script: tokens.script.clone() })
 }
 
+pub fn parse_function(tokens: &mut TokenStream) -> Result<Statement, String> {
+    tokens.consume(Token::Fn)?;
+    let ident = match tokens.pop()? {
+        Token::Identifier(ident) => {
+            ident.clone()
+        },
+        token => return Err(
+            tokens.format_peek_err(&format!("Expected ident after fn, found {:?}", token))
+        )
+    };
+    tokens.consume(Token::LBracket)?;
+
+    let mut params = Vec::new();
+    while !tokens.is_empty() {
+        match tokens.peek()? {
+            Token::Identifier(ident) => {
+                params.push(ident.clone())
+            }
+            Token::RBracket => break,
+            token => return Err(
+                tokens.format_peek_err(&format!("Expected ident for fn params, found {:?}", token))
+            )
+        }
+        tokens.advance()?;
+
+        if *tokens.peek()? != Token::Comma {
+            break;
+        }
+        tokens.advance()?;
+    }
+    tokens.consume(Token::RBracket)?;
+    tokens.consume(Token::LCurly)?;
+
+    let mut body = Vec::new();
+    while !tokens.is_empty() && *tokens.peek()? != Token::RCurly {
+        body.push(parse_statement(tokens)?);
+    }
+
+    // For now, last line should always be a return
+    // Later when the last line doesn't have a semicolon we can do this
+    // better, but that might happen at the AST-creation stage?
+    match body.last() {
+        Some(Statement::Return(_)) => (),
+        _ => body.push(Statement::Return(None)),
+    }
+
+    tokens.consume(Token::RCurly)?;
+
+    Ok(Statement::Fn(ident, params, body))
+}
+
 pub fn parse_statement(tokens: &mut TokenStream) -> Result<Statement, String> {
     if *tokens.peek()? == Token::Let {
         tokens.advance()?;
@@ -415,54 +481,7 @@ pub fn parse_statement(tokens: &mut TokenStream) -> Result<Statement, String> {
 
         Ok(Statement::Let(ident, expr))
     } else if *tokens.peek()? == Token::Fn {
-        tokens.advance()?;
-        let ident = match tokens.pop()? {
-            Token::Identifier(ident) => {
-                ident.clone()
-            },
-            token => return Err(
-                tokens.format_peek_err(&format!("Expected ident after fn, found {:?}", token))
-            )
-        };
-        tokens.consume(Token::LBracket)?;
-
-        let mut params = Vec::new();
-        while !tokens.is_empty() {
-            match tokens.peek()? {
-                Token::Identifier(ident) => {
-                    params.push(ident.clone())
-                }
-                Token::RBracket => break,
-                token => return Err(
-                    tokens.format_peek_err(&format!("Expected ident for fn params, found {:?}", token))
-                )
-            }
-            tokens.advance()?;
-
-            if *tokens.peek()? != Token::Comma {
-                break;
-            }
-            tokens.advance()?;
-        }
-        tokens.consume(Token::RBracket)?;
-        tokens.consume(Token::LCurly)?;
-
-        let mut body = Vec::new();
-        while !tokens.is_empty() && *tokens.peek()? != Token::RCurly {
-            body.push(parse_statement(tokens)?);
-        }
-
-        // For now, last line should always be a return
-        // Later when the last line doesn't have a semicolon we can do this
-        // better, but that might happen at the AST-creation stage?
-        match body.last() {
-            Some(Statement::Return(_)) => (),
-            _ => body.push(Statement::Return(None)),
-        }
-
-        tokens.consume(Token::RCurly)?;
-
-        Ok(Statement::Fn(ident, params, body))
+        parse_function(tokens)
     } else if *tokens.peek()? == Token::If {
         tokens.advance()?;
         let conditional = parse_expression(tokens)?;
@@ -491,15 +510,43 @@ pub fn parse_statement(tokens: &mut TokenStream) -> Result<Statement, String> {
         Ok(Statement::If(conditional, if_stmts, else_stmts))
     } else if *tokens.peek()? == Token::Struct {
         tokens.advance()?;
-        let _ident = match tokens.pop()? {
+        let ident = match tokens.pop()? {
             Token::Identifier(ident) => {
                 ident.clone()
             },
             token => return Err(format!("Expected ident after struct, found {:?}", token))
         };
-        Err(
-            tokens.format_peek_err("Struct declarations not implemented yet")
-        )
+        tokens.consume(Token::LCurly)?;
+
+        let mut members = Vec::new();
+        while !tokens.is_empty() {
+            match tokens.pop()? {
+                Token::Identifier(ident) => {
+                    members.push(ident.clone());
+                    if *tokens.peek()? != Token::Comma {
+                        break;
+                    }
+                    tokens.advance()?;
+                },
+                token => return Err(format!("Expected ident after struct, found {:?}", token))
+            };
+        }
+
+        let mut methods = Vec::new();
+        while !tokens.is_empty() {
+            match tokens.peek()? {
+                Token::Fn => {
+                    methods.push(parse_function(tokens)?);
+                },
+                Token::RCurly => {
+                    break;
+                }
+                token => return Err(format!("Unexpected token during method parsing {:?}", token))
+            }
+        }
+        tokens.consume(Token::RCurly)?;
+
+        Ok(Statement::Struct(ident, members, methods))
     } else if *tokens.peek()? == Token::Return {
         tokens.advance()?;
         if *tokens.peek()? == Token::Semicolon {
@@ -735,19 +782,42 @@ impl Default for Config {
     }
 }
 
+#[derive(Hash, Eq, PartialOrd, Ord, Copy, Clone, Debug, PartialEq)]
+#[repr(packed)]
+struct u24([u8; 3]);
+
+impl From<u32> for u24 {
+    fn from(val: u32) -> Self {
+        let b = val.to_be_bytes();
+        u24([b[1], b[2], b[3]])
+    }
+}
+
+impl From<u24> for u32 {
+    fn from(val: u24) -> u32 {
+        u32::from_be_bytes([0, val.0[0], val.0[1], val.0[2]])
+    }
+}
+
+impl From<u24> for usize {
+    fn from(val: u24) -> usize {
+        u32::from(val) as usize
+    }
+}
+
 /**
  * The interpreter stores memory in 8-byte words. Each `Word` is
  * an index into the interpreter memory.
  */
 #[cfg_attr(feature = "facet", derive(Facet))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Word(pub u32);
+pub struct Word(pub u24);
 
 impl Add<u32> for Word {
     type Output = Word;
 
     fn add(self, rhs: u32) -> Word {
-        Word(self.0 + rhs)
+        Word((u32::from(self.0) + rhs).into())
     }
 }
 
@@ -755,7 +825,7 @@ impl Sub<u32> for Word {
     type Output = Word;
 
     fn sub(self, rhs: u32) -> Word {
-        Word(self.0 - rhs)
+        Word((u32::from(self.0) - rhs).into())
     }
 }
 
@@ -763,7 +833,7 @@ impl Add<Word> for Word {
     type Output = Word;
 
     fn add(self, rhs: Word) -> Word {
-        Word(self.0 + rhs.0)
+        Word((u32::from(self.0) + u32::from(rhs.0)).into())
     }
 }
 
@@ -771,31 +841,31 @@ impl Sub<Word> for Word {
     type Output = Word;
 
     fn sub(self, rhs: Word) -> Word {
-        Word(self.0 - rhs.0)
+        Word((u32::from(self.0) - u32::from(rhs.0)).into())
     }
 }
 
 impl AddAssign<u32> for Word {
     fn add_assign(&mut self, rhs: u32) {
-        self.0 += rhs;
+        self.0 = (u32::from(self.0) + rhs).into()
     }
 }
 
 impl SubAssign<u32> for Word {
     fn sub_assign(&mut self, rhs: u32) {
-        self.0 -= rhs;
+        self.0 = (u32::from(self.0) - rhs).into()
     }
 }
 
 impl AddAssign<Word> for Word {
     fn add_assign(&mut self, rhs: Word) {
-        self.0 += rhs.0;
+        self.0 = (u32::from(self.0) + u32::from(rhs.0)).into()
     }
 }
 
 impl SubAssign<Word> for Word {
     fn sub_assign(&mut self, rhs: Word) {
-        self.0 -= rhs.0;
+        self.0 = (u32::from(self.0) - u32::from(rhs.0)).into()
     }
 }
 
@@ -844,8 +914,8 @@ pub struct MMU {
 
 impl MMU {
     fn with_capacity(word_count: Word) -> Self {
-        let mem = vec![0; word_count.0 as usize];
-        let free_list = vec![FreeBlock::new(Word(0), word_count)];
+        let mem = vec![0; usize::from(word_count.0)];
+        let free_list = vec![FreeBlock::new(Word(0.into()), word_count)];
         Self {
             mem: mem,
             free_list: free_list,
@@ -882,6 +952,8 @@ impl MMU {
                 // but we can keep things simple for now.
             
                 return returned_pos;
+            } else {
+                eprintln!("{:?} not larger than {:?}", block.size, words);
             }
         }
         panic!("Could not allocate {:?} words from free list {:#?}", words, self.free_list);
@@ -905,8 +977,14 @@ pub enum ShimValue {
     Integer(i32),
     Float(f32),
     Bool(bool),
-    // This is a program counter
+    // This is a program counter, TODO should be a memory position?
     Fn(u32),
+    BoundMethod(
+        // Object
+        Word,
+        // Fn, TODO: should be a memory position instead of PC
+        u32,
+    ),
     // TODO: it seems like this should point to a more generic reference-counted
     // object type that all non-value types share
     String(Word),
@@ -943,7 +1021,7 @@ impl ShimValue {
                 };
 
                 unsafe {
-                    let ptr: *mut Vec<ShimValue> = std::mem::transmute(&mut interpreter.mem.mem[arg_pos.0 as usize]);
+                    let ptr: *mut Vec<ShimValue> = std::mem::transmute(&mut interpreter.mem.mem[usize::from(arg_pos.0)]);
                     for (idx, arg) in (*ptr).iter().enumerate() {
                         if idx != 0 {
                             print!(" ");
@@ -970,14 +1048,14 @@ impl ShimValue {
             ShimValue::Bool(true) => "true".to_string(),
             ShimValue::String(position) => {
                 unsafe {
-                    let ptr: *mut Vec<u8> = std::mem::transmute(&mut interpreter.mem.mem[position.0 as usize]);
+                    let ptr: *mut Vec<u8> = std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
                     String::from_utf8((*ptr).clone()).expect("valid utf-8 string stored")
                 }
             },
             ShimValue::List(position) => {
                 let mut out = "[".to_string();
                 unsafe {
-                    let ptr: *mut Vec<ShimValue> = std::mem::transmute(&mut interpreter.mem.mem[position.0 as usize]);
+                    let ptr: *mut Vec<ShimValue> = std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
                     for (idx, item) in (*ptr).iter().enumerate() {
                         if idx != 0 {
                             out.push_str(",");
@@ -1003,13 +1081,13 @@ impl ShimValue {
             ShimValue::Bool(true) => Ok(true),
             ShimValue::String(position) => {
                 unsafe {
-                    let ptr: *mut Vec<u8> = std::mem::transmute(&mut interpreter.mem.mem[position.0 as usize]);
+                    let ptr: *mut Vec<u8> = std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
                     Ok(!(*ptr).is_empty())
                 }
             },
             ShimValue::List(position) => {
                 unsafe {
-                    let ptr: *mut Vec<ShimValue> = std::mem::transmute(&mut interpreter.mem.mem[position.0 as usize]);
+                    let ptr: *mut Vec<ShimValue> = std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
                     Ok((*ptr).len() != 0)
                 }
             },
@@ -1089,6 +1167,7 @@ enum ByteCode {
     LiteralNone,
     CreateFn,
     CreateList,
+    CreateStruct,
     VariableDeclaration,
     VariableLoad,
     Call,
@@ -1130,6 +1209,56 @@ pub fn u8s_to_u16(val: [u8; 2]) -> u16 {
     ((val[0] as u16) << 8) + val[1] as u16
 }
 
+pub fn compile_function(ident: &Vec<u8>,  params: &Vec<Vec<u8>>, body: &Vec<Statement>) -> Result<Vec<(u8, Span)>, String> {
+    // This will be replaced with a relative jump to after the function
+    // declaration
+    let mut asm = vec![
+        (ByteCode::Jmp as u8, Span {start: 0, end: 1}),
+        (0, Span {start: 0, end: 1}),
+        (0, Span {start: 0, end: 1}),
+    ];
+    asm.push((ByteCode::AssertLen as u8, Span {start:0, end:1}));
+    asm.push((params.len() as u8, Span {start:0, end:1}));
+    asm.push((ByteCode::Splat as u8, Span {start:0, end:1}));
+    for param in params.iter().rev() {
+        asm.push((ByteCode::VariableDeclaration as u8, Span {start:0, end:1}));
+        asm.push((param.len().try_into().expect("Param len should into u8"), Span {start:0, end:1}));
+        for b in param {
+            asm.push((*b, Span {start:0, end:1}));
+        }
+    }
+
+    for stmt in body {
+        asm.extend(compile_statement(stmt)?);
+    }
+    // Note: we know that last statement is a return at the AST-creation stage,
+    // we we know we'll jump back to the return address
+
+    if asm.len() > u16::MAX as usize {
+        return Err(format!("Function has more than {} instructions", u16::MAX));
+    }
+
+    // Fix the jump offset at the function declaration now that we know
+    // the size of the body
+    let pc_offset = asm.len() as u16;
+    asm[1].0 = (pc_offset >> 8) as u8;
+    asm[2].0 = (pc_offset & 0xff) as u8;
+
+    // Assign the value to the ident
+    let pc_offset = asm.len() as u16 - 3;
+    asm.push((ByteCode::CreateFn as u8, Span {start:0, end:1}));
+    asm.push(((pc_offset >> 8) as u8, Span {start:0, end:1}));
+    asm.push(((pc_offset & 0xff) as u8, Span {start:0, end:1}));
+
+    asm.push((ByteCode::VariableDeclaration as u8, Span {start:0, end:1}));
+    asm.push((ident.len().try_into().expect("Ident len should into u8"), Span {start:0, end:1}));
+    for b in ident.into_iter() {
+        asm.push((*b, Span {start:0, end:1}));
+    }
+
+    Ok(asm)
+}
+
 pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
     match stmt {
         Statement::Let(ident, expr) => {
@@ -1146,52 +1275,39 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
             Ok(expr_asm)
         },
         Statement::Fn(ident, params, body) => {
-            // This will be replaced with a relative jump to after the function
-            // declaration
+            compile_function(ident, params, body)
+        },
+        Statement::Struct(ident, members, methods) => {
             let mut asm = vec![
-                (ByteCode::Jmp as u8, Span {start: 0, end: 1}),
+                (ByteCode::CreateStruct as u8, Span {start: 0, end: 1}),
                 (0, Span {start: 0, end: 1}),
                 (0, Span {start: 0, end: 1}),
             ];
-            asm.push((ByteCode::AssertLen as u8, Span {start:0, end:1}));
-            asm.push((params.len() as u8, Span {start:0, end:1}));
-            asm.push((ByteCode::Splat as u8, Span {start:0, end:1}));
-            for param in params.iter().rev() {
-                asm.push((ByteCode::VariableDeclaration as u8, Span {start:0, end:1}));
-                asm.push((param.len().try_into().expect("Param len should into u8"), Span {start:0, end:1}));
-                for b in param {
+            asm.push((members.len() as u8, Span {start: 0, end: 1}));
+            asm.push((methods.len() as u8, Span {start: 0, end: 1}));
+
+            for member in members.iter() {
+                asm.push((member.len().try_into().expect("Member len should into u8"), Span {start:0, end:1}));
+                for b in member.into_iter() {
                     asm.push((*b, Span {start:0, end:1}));
                 }
             }
 
-            for stmt in body {
-                asm.extend(compile_statement(stmt)?);
+            for method in methods {
+                match method {
+                    Statement::Fn(ident, params, body) => {
+                        asm.extend(compile_function(ident, params, body)?);
+                    },
+                    other => return Err(format!("Unexpected statement as struct method {:?}", other)),
+                }
             }
-            // Note: we know that last statement is a return at the AST-creation stage,
-            // we we know we'll jump back to the return address
-
-            if asm.len() > u16::MAX as usize {
-                return Err(format!("Function has more than {} instructions", u16::MAX));
-            }
-
-            // Fix the jump offset at the function declaration now that we know
-            // the size of the body
-            let pc_offset = asm.len() as u16;
-            asm[1].0 = (pc_offset >> 8) as u8;
-            asm[2].0 = (pc_offset & 0xff) as u8;
-
-            // Assign the value to the ident
-            let pc_offset = asm.len() as u16 - 3;
-            asm.push((ByteCode::CreateFn as u8, Span {start:0, end:1}));
-            asm.push(((pc_offset >> 8) as u8, Span {start:0, end:1}));
-            asm.push(((pc_offset & 0xff) as u8, Span {start:0, end:1}));
 
             asm.push((ByteCode::VariableDeclaration as u8, Span {start:0, end:1}));
             asm.push((ident.len().try_into().expect("Ident len should into u8"), Span {start:0, end:1}));
+
             for b in ident.into_iter() {
                 asm.push((*b, Span {start:0, end:1}));
             }
-
             Ok(asm)
         },
         Statement::Return(expr) => {
@@ -1354,7 +1470,7 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
 
 impl Interpreter {
     pub fn create(config: &Config) -> Self {
-        let mmu = MMU::with_capacity(Word(config.memory_space_bytes / 8));
+        let mmu = MMU::with_capacity(Word((config.memory_space_bytes / 8).into()));
 
         Self {
             mem: mmu,
@@ -1404,7 +1520,7 @@ impl Interpreter {
                     match stack[stack.len()-1] {
                         ShimValue::List(pos) => {
                             unsafe {
-                                let ptr: *mut Vec<ShimValue> = std::mem::transmute(&mut self.mem.mem[pos.0 as usize]);
+                                let ptr: *mut Vec<ShimValue> = std::mem::transmute(&mut self.mem.mem[usize::from(pos.0)]);
                                 if (*ptr).len() != len {
                                     return Err(format!("len mismatch {} {}", (*ptr).len(), len));
                                 }
@@ -1421,7 +1537,7 @@ impl Interpreter {
                     match stack.pop() {
                         Some(ShimValue::List(pos)) => {
                             unsafe {
-                                let ptr: *mut Vec<ShimValue> = std::mem::transmute(&mut self.mem.mem[pos.0 as usize]);
+                                let ptr: *mut Vec<ShimValue> = std::mem::transmute(&mut self.mem.mem[usize::from(pos.0)]);
                                 for item in (*ptr).iter() {
                                     stack.push(*item);
                                 }
@@ -1452,10 +1568,10 @@ impl Interpreter {
                     const _: () = {
                         assert!(std::mem::size_of::<Vec<u8>>() == 24);
                     };
-                    let word_count = Word(3);
+                    let word_count = Word(3.into());
                     let position = self.mem.alloc(word_count);
                     unsafe {
-                        let ptr: *mut Vec<u8> = std::mem::transmute(&mut self.mem.mem[position.0 as usize]);
+                        let ptr: *mut Vec<u8> = std::mem::transmute(&mut self.mem.mem[usize::from(position.0)]);
                         *ptr = contents.to_vec();
                     }
 
@@ -1550,11 +1666,11 @@ impl Interpreter {
                 val if val == ByteCode::CreateList as u8 => {
                     let len = ((bytes[pc+1] as usize) << 8) + bytes[pc+2] as usize;
 
-                    let word_count = Word(3);
+                    let word_count = Word(3.into());
                     let position = self.mem.alloc(word_count);
                     unsafe {
                         let ptr: *mut Vec<ShimValue> = std::mem::transmute(
-                            &mut self.mem.mem[position.0 as usize]
+                            &mut self.mem.mem[usize::from(position.0)]
                         );
                         *ptr = Vec::new();
                         for item in stack.drain(stack.len()-len..) {
@@ -1614,7 +1730,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn it_works() {
-        assert_eq!(2+2, 4);
+    fn u24_conversion() {
+        assert_eq!(
+            u24::from(1u32),
+            u24([0, 0, 1])
+        );
+        assert_eq!(
+            u32::from(u24::from(1u32)),
+            1u32
+        );
+
+        assert_eq!(
+            u24::from(1u32).0,
+            [0, 0, 1]
+        );
     }
 }
