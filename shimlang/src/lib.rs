@@ -44,6 +44,7 @@ pub enum Expression {
     Primary(Primary),
     BinaryOp(BinaryOp),
     Call(Box<ExprNode>, Vec<ExprNode>),
+    Attribute(Box<ExprNode>, Vec<u8>),
 }
 
 #[derive(Debug)]
@@ -225,12 +226,12 @@ impl TokenStream {
         Ok(())
     }
 
-    fn reverse(&mut self) -> Result<(), String> {
+    fn unadvance(&mut self) -> Result<(), String> {
         if self.idx != 0 {
             self.idx -= 1;
             Ok(())
         } else {
-            Err("Can't reverse past beginning of token stream".to_string())
+            Err("Can't unadvance past beginning of token stream".to_string())
         }
     }
 
@@ -305,6 +306,7 @@ pub fn parse_primary(tokens: &mut TokenStream) -> Result<ExprNode, String> {
             Expression::Primary(Primary::List(items))
         },
         token => {
+            tokens.unadvance()?;
             return Err(tokens.format_peek_err(
                 &format!(
                     "Unexpected `{:?}` in parse_primary",
@@ -324,6 +326,10 @@ pub fn parse_primary(tokens: &mut TokenStream) -> Result<ExprNode, String> {
 
 pub fn parse_arguments(tokens: &mut TokenStream, closing_token: Token) -> Result<Vec<ExprNode>, String> {
     let mut args = Vec::new();
+    if !tokens.is_empty() && *tokens.peek()? == closing_token {
+        tokens.advance()?;
+        return Ok(args);
+    }
     while !tokens.is_empty() {
         let expr = parse_expression(tokens)?;
         args.push(expr);
@@ -335,20 +341,23 @@ pub fn parse_arguments(tokens: &mut TokenStream, closing_token: Token) -> Result
             }
             Token::Comma => {
                 tokens.advance()?;
-                if !tokens.is_empty() && *tokens.peek()? == Token::RBracket {
+                if !tokens.is_empty() && *tokens.peek()? == closing_token {
                     // Exit when there's a trailing comma
+                    tokens.advance()?;
                     break;
                 }
                 continue;
             }
-            token => return Err(format!("Expected comma or closing bracket, found {:?}", token)),
+            token => return Err(
+                tokens.format_peek_err(&format!("Expected comma or closing bracket, found {:?}", token))
+            ),
         }
     }
     Ok(args)
 }
 
 pub fn parse_call(tokens: &mut TokenStream) -> Result<ExprNode, String> {
-    let mut expr = parse_term(tokens)?;
+    let mut expr = parse_primary(tokens)?;
     while !tokens.is_empty() {
         let span = tokens.peek_span()?;
         match *tokens.peek()? {
@@ -356,6 +365,21 @@ pub fn parse_call(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                 tokens.advance()?;
                 expr = Node {
                     data: Expression::Call(Box::new(expr), parse_arguments(tokens, Token::RBracket)?),
+                    span: span,
+                };
+            },
+            Token::Dot => {
+                tokens.advance()?;
+                let ident = match tokens.pop()? {
+                    Token::Identifier(ident) => {
+                        ident.clone()
+                    },
+                    token => return Err(
+                        tokens.format_peek_err(&format!("Expected ident after dot, found {:?}", token))
+                    )
+                };
+                expr = Node {
+                    data: Expression::Attribute(Box::new(expr), ident),
                     span: span,
                 };
             },
@@ -367,7 +391,7 @@ pub fn parse_call(tokens: &mut TokenStream) -> Result<ExprNode, String> {
 }
 
 pub fn parse_term(tokens: &mut TokenStream) -> Result<ExprNode, String> {
-    let mut expr = parse_primary(tokens)?;
+    let mut expr = parse_call(tokens)?;
     while !tokens.is_empty() {
         // TODO: this is just the operator
         let span = tokens.peek_span()?;
@@ -393,7 +417,7 @@ pub fn parse_term(tokens: &mut TokenStream) -> Result<ExprNode, String> {
 }
 
 pub fn parse_expression(tokens: &mut TokenStream) -> Result<ExprNode, String> {
-    parse_call(tokens)
+    parse_term(tokens)
 }
 
 pub fn parse_ast(tokens: &mut TokenStream) -> Result<Ast, String> {
@@ -476,7 +500,14 @@ pub fn parse_statement(tokens: &mut TokenStream) -> Result<Statement, String> {
         let expr = parse_expression(tokens)?;
         match tokens.pop()? {
             Token::Semicolon => (),
-            token => return Err(format!("Expected semicolon after `let <ident> = <expr>`, found {:?}", token))
+            token => {
+                tokens.unadvance()?;
+                return Err(
+                    tokens.format_peek_err(
+                        &format!("Expected semicolon after `let <ident> = <expr>`, found {:?}", token)
+                    )
+                );
+            }
         }
 
         Ok(Statement::Let(ident, expr))
@@ -514,7 +545,12 @@ pub fn parse_statement(tokens: &mut TokenStream) -> Result<Statement, String> {
             Token::Identifier(ident) => {
                 ident.clone()
             },
-            token => return Err(format!("Expected ident after struct, found {:?}", token))
+            token => {
+                tokens.unadvance()?;
+                return Err(
+                    tokens.format_peek_err(&format!("Expected ident after struct, found {:?}", token))
+                );
+            }
         };
         tokens.consume(Token::LCurly)?;
 
@@ -528,7 +564,11 @@ pub fn parse_statement(tokens: &mut TokenStream) -> Result<Statement, String> {
                     }
                     tokens.advance()?;
                 },
-                token => return Err(format!("Expected ident after struct, found {:?}", token))
+                Token::RCurly | Token::Fn => {
+                    tokens.unadvance()?;
+                    break;
+                },
+                token => return Err(format!("Expected member list after struct, found {:?}", token))
             };
         }
 
@@ -556,7 +596,14 @@ pub fn parse_statement(tokens: &mut TokenStream) -> Result<Statement, String> {
             let expr = parse_expression(tokens)?;
             match tokens.pop()? {
                 Token::Semicolon => (),
-                token => return Err(format!("Expected semicolon after `let <ident> = <expr>`, found {:?}", token))
+                token => {
+                    tokens.unadvance()?;
+                    return Err(
+                        tokens.format_peek_err(
+                            &format!("Expected semicolon after `return <expr>`, found {:?}", token)
+                        )
+                    );
+                }
             }
             Ok(Statement::Return(Some(expr)))
         }
@@ -589,7 +636,7 @@ pub fn printable_byte(b: u8) -> String {
 pub fn lex_identifier(text: &mut &[u8]) -> Result<Vec<u8>, String> {
     for (idx, c) in text.iter().enumerate() {
         match c {
-            b'a' ..= b'z' | b'A' ..= b'Z' | b'0' ..= b'9' => continue,
+            b'a' ..= b'z' | b'A' ..= b'Z' | b'0' ..= b'9' | b'_' => continue,
             _ => {
                 let ident = text[0..idx].to_vec();
                 *text = &text[(idx-1)..];
@@ -702,7 +749,7 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
         let c = text[0];
         let token_start_len = text.len();
         match c {
-            b'a' ..= b'z' | b'A' ..= b'Z' => {
+            b'a' ..= b'z' | b'A' ..= b'Z' | b'_' => {
                 let ident = lex_identifier(&mut text)?;
                 if ident == b"let" {
                     tokens.push(Token::Let);
@@ -805,6 +852,12 @@ impl From<u24> for usize {
     }
 }
 
+impl From<u24> for u64 {
+    fn from(val: u24) -> u64 {
+        u32::from(val) as u64
+    }
+}
+
 /**
  * The interpreter stores memory in 8-byte words. Each `Word` is
  * an index into the interpreter memory.
@@ -812,6 +865,23 @@ impl From<u24> for usize {
 #[cfg_attr(feature = "facet", derive(Facet))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Word(pub u24);
+
+impl Add<u8> for Word {
+    type Output = Word;
+
+    fn add(self, rhs: u8) -> Word {
+        self + rhs as u32
+    }
+}
+
+impl Add<i32> for Word {
+    type Output = Word;
+
+    fn add(self, rhs: i32) -> Word {
+        let val = (u32::from(self.0) as i32 + rhs) as u32;
+        Word(val.into())
+    }
+}
 
 impl Add<u32> for Word {
     type Output = Word;
@@ -926,6 +996,20 @@ impl MMU {
         todo!("compact_free_list not implemented");
     }
 
+    unsafe fn get<T>(&self, word: Word) -> &T {
+        unsafe {
+            let ptr: *const T = std::mem::transmute(&self.mem[usize::from(word.0)]);
+            &*ptr
+        }
+    }
+
+    unsafe fn get_mut<T>(&mut self, word: Word) -> &mut T {
+        unsafe {
+            let ptr: *mut T = std::mem::transmute(&mut self.mem[usize::from(word.0)]);
+            &mut *ptr
+        }
+    }
+
     /**
      * Returns the position in `self.mem` of the block allocted
      */
@@ -989,6 +1073,8 @@ pub enum ShimValue {
     // object type that all non-value types share
     String(Word),
     List(Word),
+    StructDef(Word),
+    Struct(Word),
 }
 
 use std::mem::{size_of};
@@ -1005,38 +1091,83 @@ fn format_float(val: f32) -> String {
     }
 }
 
+#[derive(Debug)]
+enum StructAttribute {
+    MemberInstanceOffset(u8),
+    MethodDefPC(u32),
+}
+
+struct StructDef {
+    member_count: u8,
+    method_count: u8,
+    lookup: Vec<(Vec<u8>, StructAttribute)>,
+}
+
 enum CallResult {
-    BuiltinReturnValue(ShimValue),
+    ReturnValue(ShimValue),
     PC(u32),
 }
 
 impl ShimValue {
     fn call(&self, interpreter: &mut Interpreter, stack: &mut Vec<ShimValue>) -> Result<CallResult, String> {
-        match self {
-            ShimValue::None => Err(format!("Can't call None as function")),
-            ShimValue::Print => {
-                let arg_pos: Word = match stack.pop() {
-                    Some(ShimValue::List(args)) => args,
-                    args => return Err(format!("Can't call print with non-list args {:?}", args)),
-                };
+        let arg_pos: Word = match stack[stack.len()-1] {
+            ShimValue::List(arg_pos) => arg_pos,
+            args => return Err(format!("Can't call print with non-list args {:?}", args)),
+        };
 
-                unsafe {
-                    let ptr: *mut Vec<ShimValue> = std::mem::transmute(&mut interpreter.mem.mem[usize::from(arg_pos.0)]);
-                    for (idx, arg) in (*ptr).iter().enumerate() {
-                        if idx != 0 {
-                            print!(" ");
-                        }
-                        print!("{}", arg.to_string(interpreter));
+        let args: &mut Vec<ShimValue> = unsafe {
+            let ptr: *mut Vec<ShimValue> = std::mem::transmute(&mut interpreter.mem.mem[usize::from(arg_pos.0)]);
+            &mut *ptr
+        };
+        match self {
+            ShimValue::None => Err(format!("Can't call None as a function")),
+            ShimValue::Print => {
+                stack.pop();
+                for (idx, arg) in args.iter().enumerate() {
+                    if idx != 0 {
+                        print!(" ");
                     }
+                    print!("{}", arg.to_string(interpreter));
                 }
 
                 println!();
-                Ok(CallResult::BuiltinReturnValue(ShimValue::None))
+                Ok(CallResult::ReturnValue(ShimValue::None))
             },
             ShimValue::Fn(pc) => {
                 Ok(CallResult::PC(*pc))
             }
-            other => Err(format!("Can't call value {:?} as function", other)),
+            ShimValue::BoundMethod(pos, pc) => {
+                // push struct pos to strt of arg list then return the pc of the method
+                args.insert(0, *self);
+                Ok(CallResult::PC(*pc))
+            }
+            ShimValue::StructDef(struct_def_pos) => {
+                let struct_def: &StructDef = unsafe { interpreter.mem.get(*struct_def_pos) };
+                if struct_def.member_count as usize != args.len() {
+                    return Err(
+                        format!(
+                            "Expected {} arguments in initializer, got {}",
+                            struct_def.member_count,
+                            args.len(),
+                        )
+                    );
+                }
+
+                // Allocate space for each member, plus the header
+                let word_count = Word((struct_def.member_count as u32 + 1).into());
+                let new_pos = interpreter.mem.alloc(word_count);
+
+                // The first word points to the StructDef
+                interpreter.mem.mem[usize::from(new_pos.0)] = u64::from(struct_def_pos.0);
+
+                // The remaining words get copies of the arguments to the initializer
+                for (idx, arg) in args.into_iter().enumerate() {
+                    interpreter.mem.mem[usize::from(new_pos.0)+1+idx] = arg.to_u64();
+                }
+
+                Ok(CallResult::ReturnValue(ShimValue::Struct(new_pos)))
+            }
+            other => Err(format!("Can't call value {:?} as a function", other.to_string(interpreter))),
         }
     }
 
@@ -1113,6 +1244,38 @@ impl ShimValue {
         }
     }
 
+    fn get_attr(&self, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
+        match self {
+            ShimValue::Struct(pos) => {
+                unsafe {
+                    let def_pos: Word = *interpreter.mem.get(*pos);
+                    let def: &StructDef = interpreter.mem.get(def_pos);
+                    for (attr, loc) in def.lookup.iter() {
+                        if ident == attr {
+                            return match loc {
+                                StructAttribute::MemberInstanceOffset(offset) => {
+                                    Ok(
+                                        *interpreter.mem.get(*pos + *offset as u32 + 1)
+                                    )
+                                }
+                                StructAttribute::MethodDefPC(pc) => {
+                                    Ok(
+                                        ShimValue::BoundMethod(
+                                            *pos,
+                                            *pc
+                                        )
+                                    )
+                                }
+                            };
+                        }
+                    }
+                }
+                Err(format!("Ident {:?} not found for {:?}", ident, self))
+            },
+            val => Err(format!("Ident {:?} not available on {:?}", ident, val))
+        }
+    }
+
     fn to_u64(&self) -> u64 {
         unsafe {
             let mut tmp: u64 = 0;
@@ -1150,6 +1313,16 @@ impl ShimValue {
 #[repr(u8)]
 enum ByteCode {
     NoOp,
+    Pad0,
+    Pad1,
+    Pad2,
+    Pad3,
+    Pad4,
+    Pad5,
+    Pad6,
+    Pad7,
+    Pad8,
+    Pad9,
     AssertLen,
     Splat,
     Pop,
@@ -1170,6 +1343,7 @@ enum ByteCode {
     CreateStruct,
     VariableDeclaration,
     VariableLoad,
+    AttributeAccess,
     Call,
     Return,
     Jmp,
@@ -1209,14 +1383,8 @@ pub fn u8s_to_u16(val: [u8; 2]) -> u16 {
     ((val[0] as u16) << 8) + val[1] as u16
 }
 
-pub fn compile_function(ident: &Vec<u8>,  params: &Vec<Vec<u8>>, body: &Vec<Statement>) -> Result<Vec<(u8, Span)>, String> {
-    // This will be replaced with a relative jump to after the function
-    // declaration
-    let mut asm = vec![
-        (ByteCode::Jmp as u8, Span {start: 0, end: 1}),
-        (0, Span {start: 0, end: 1}),
-        (0, Span {start: 0, end: 1}),
-    ];
+pub fn compile_function_body(params: &Vec<Vec<u8>>, body: &Vec<Statement>) -> Result<Vec<(u8, Span)>, String> {
+    let mut asm = Vec::new();
     asm.push((ByteCode::AssertLen as u8, Span {start:0, end:1}));
     asm.push((params.len() as u8, Span {start:0, end:1}));
     asm.push((ByteCode::Splat as u8, Span {start:0, end:1}));
@@ -1237,25 +1405,6 @@ pub fn compile_function(ident: &Vec<u8>,  params: &Vec<Vec<u8>>, body: &Vec<Stat
     if asm.len() > u16::MAX as usize {
         return Err(format!("Function has more than {} instructions", u16::MAX));
     }
-
-    // Fix the jump offset at the function declaration now that we know
-    // the size of the body
-    let pc_offset = asm.len() as u16;
-    asm[1].0 = (pc_offset >> 8) as u8;
-    asm[2].0 = (pc_offset & 0xff) as u8;
-
-    // Assign the value to the ident
-    let pc_offset = asm.len() as u16 - 3;
-    asm.push((ByteCode::CreateFn as u8, Span {start:0, end:1}));
-    asm.push(((pc_offset >> 8) as u8, Span {start:0, end:1}));
-    asm.push(((pc_offset & 0xff) as u8, Span {start:0, end:1}));
-
-    asm.push((ByteCode::VariableDeclaration as u8, Span {start:0, end:1}));
-    asm.push((ident.len().try_into().expect("Ident len should into u8"), Span {start:0, end:1}));
-    for b in ident.into_iter() {
-        asm.push((*b, Span {start:0, end:1}));
-    }
-
     Ok(asm)
 }
 
@@ -1275,7 +1424,34 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
             Ok(expr_asm)
         },
         Statement::Fn(ident, params, body) => {
-            compile_function(ident, params, body)
+            // This will be replaced with a relative jump to after the function
+            // declaration
+            let mut asm = vec![
+                (ByteCode::Jmp as u8, Span {start: 0, end: 1}),
+                (0, Span {start: 0, end: 1}),
+                (0, Span {start: 0, end: 1}),
+            ];
+            asm.extend(compile_function_body(params, body)?);
+
+            // Fix the jump offset at the function declaration now that we know
+            // the size of the body
+            let pc_offset = asm.len() as u16;
+            asm[1].0 = (pc_offset >> 8) as u8;
+            asm[2].0 = (pc_offset & 0xff) as u8;
+
+            // Assign the value to the ident
+            let pc_offset = asm.len() as u16 - 3;
+            asm.push((ByteCode::CreateFn as u8, Span {start:0, end:1}));
+            asm.push(((pc_offset >> 8) as u8, Span {start:0, end:1}));
+            asm.push(((pc_offset & 0xff) as u8, Span {start:0, end:1}));
+
+            asm.push((ByteCode::VariableDeclaration as u8, Span {start:0, end:1}));
+            asm.push((ident.len().try_into().expect("Ident len should into u8"), Span {start:0, end:1}));
+            for b in ident.into_iter() {
+                asm.push((*b, Span {start:0, end:1}));
+            }
+
+            Ok(asm)
         },
         Statement::Struct(ident, members, methods) => {
             let mut asm = vec![
@@ -1287,20 +1463,44 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
             asm.push((methods.len() as u8, Span {start: 0, end: 1}));
 
             for member in members.iter() {
-                asm.push((member.len().try_into().expect("Member len should into u8"), Span {start:0, end:1}));
+                asm.push((member.len().try_into().expect("Member ident len should into u8"), Span {start:0, end:1}));
                 for b in member.into_iter() {
                     asm.push((*b, Span {start:0, end:1}));
                 }
             }
 
+            let mut method_defs = Vec::new();
             for method in methods {
                 match method {
                     Statement::Fn(ident, params, body) => {
-                        asm.extend(compile_function(ident, params, body)?);
+                        method_defs.push((ident, compile_function_body(params, body)?));
                     },
                     other => return Err(format!("Unexpected statement as struct method {:?}", other)),
                 }
             }
+
+            let mut jump_asm_idx = Vec::new();
+            for (ident, _method_def) in method_defs.iter() {
+                jump_asm_idx.push(asm.len());
+                asm.push((0, Span {start: 0, end: 1}));
+                asm.push((0, Span {start: 0, end: 1}));
+                asm.push((ident.len().try_into().expect("Method ident len should into u8"), Span {start:0, end:1}));
+                for b in ident.into_iter() {
+                    asm.push((*b, Span {start:0, end:1}));
+                }
+            }
+
+            for (method_idx, (_, method_def)) in method_defs.into_iter().enumerate() {
+                let jump_idx = jump_asm_idx[method_idx];
+                let pc_offset = asm.len() as u16;
+                asm[jump_idx].0 = (pc_offset >> 8) as u8;
+                asm[jump_idx+1].0 = (pc_offset & 0xff) as u8;
+                asm.extend(method_def);
+            }
+
+            let pc_offset = asm.len() as u16;
+            asm[1].0 = (pc_offset >> 8) as u8;
+            asm[2].0 = (pc_offset & 0xff) as u8;
 
             asm.push((ByteCode::VariableDeclaration as u8, Span {start:0, end:1}));
             asm.push((ident.len().try_into().expect("Ident len should into u8"), Span {start:0, end:1}));
@@ -1308,6 +1508,7 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
             for b in ident.into_iter() {
                 asm.push((*b, Span {start:0, end:1}));
             }
+
             Ok(asm)
         },
         Statement::Return(expr) => {
@@ -1403,7 +1604,7 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
         Expression::Primary(Primary::Identifier(ident)) => {
             let mut res = Vec::new();
             res.push((ByteCode::VariableLoad as u8, expr.span));
-            res.push((ident.len().try_into().expect("Ident should into u8"), expr.span));
+            res.push((ident.len().try_into().expect("Ident len should into u8"), expr.span));
             for b in ident.into_iter() {
                 res.push((*b, expr.span));
             }
@@ -1465,6 +1666,15 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
             res.push((ByteCode::Call as u8, expr.span));
             Ok(res)
         },
+        Expression::Attribute(expr, ident) => {
+            let mut res = compile_expression(&expr)?;
+            res.push((ByteCode::AttributeAccess as u8, expr.span));
+            res.push((ident.len().try_into().expect("Ident len should into u8"), expr.span));
+            for b in ident.into_iter() {
+                res.push((*b, expr.span));
+            }
+            Ok(res)
+        }
     }
 }
 
@@ -1522,7 +1732,15 @@ impl Interpreter {
                             unsafe {
                                 let ptr: *mut Vec<ShimValue> = std::mem::transmute(&mut self.mem.mem[usize::from(pos.0)]);
                                 if (*ptr).len() != len {
-                                    return Err(format!("len mismatch {} {}", (*ptr).len(), len));
+                                    return Err(
+                                        format_script_err(
+                                            program.spans[
+                                                stack_frame[stack_frame.len()-1]
+                                            ],
+                                            &program.script,
+                                            &format!("Function expects {} arguments, but got {}", len, (*ptr).len())
+                                        )
+                                    );
                                 }
                             }
                         },
@@ -1609,6 +1827,15 @@ impl Interpreter {
                     }
                     pc += 1 + ident_len;
                 },
+                val if val == ByteCode::AttributeAccess as u8 => {
+                    let ident_len = bytes[pc+1] as usize;
+                    let ident = &bytes[pc+2..pc+2+ident_len as usize];
+
+                    let obj = stack.pop().expect("val to access");
+                    stack.push(obj.get_attr(self, ident)?);
+
+                    pc += 1 + ident_len;
+                },
                 val if val == ByteCode::Call as u8 => {
                     // When Call appears the args should already be in a list at
                     // the top of the stack, followed by the callable
@@ -1616,8 +1843,16 @@ impl Interpreter {
                     // Remove the callable from the stack
                     let callable = stack.swap_remove(stack.len() - 2);
 
-                    match callable.call(self, &mut stack)? {
-                        CallResult::BuiltinReturnValue(res) => stack.push(res),
+                    match callable.call(self, &mut stack)
+                        .map_err(
+                            |err_str| format_script_err(
+                                program.spans[pc],
+                                &program.script,
+                                &err_str
+                            )
+                        )?
+                    {
+                        CallResult::ReturnValue(res) => stack.push(res),
                         CallResult::PC(new_pc) => {
                             stack_frame.push(pc+1);
                             pc = new_pc as usize;
@@ -1686,35 +1921,134 @@ impl Interpreter {
                     stack.push(ShimValue::Fn(pc as u32 - instruction_offset));
                     pc += 2;
                 }
-                b => {
-                    eprintln!("create fn code {}", ByteCode::CreateFn as u8);
-                    for (idx, b) in bytes.iter().enumerate() {
-                        eprint!("{idx}:  {b}  ");
-                        if *b == ByteCode::Jmp as u8 {
-                            eprint!("JMP");
-                        } else if *b == ByteCode::VariableDeclaration as u8 {
-                            eprint!("let");
-                        } else if *b == ByteCode::Call as u8 {
-                            eprint!("call");
-                        } else if *b == ByteCode::CreateFn as u8 {
-                            eprint!("fn");
-                        } else if *b == ByteCode::JmpZ as u8 {
-                            eprint!("JMPZ");
-                        } else if *b == ByteCode::JmpNZ as u8 {
-                            eprint!("JMPNZ");
-                        } else if *b == ByteCode::CreateFn as u8 {
-                            eprint!("fn");
-                        } else if *b == ByteCode::Return as u8 {
-                            eprint!("return");
-                        }
-                        eprintln!();
+                val if val == ByteCode::CreateStruct as u8 => {
+                    // Everything after the first two bytes is data for the
+                    // struct definition.
+                    let new_pc = pc +
+                        ((bytes[pc+1] as usize) << 8) +
+                        bytes[pc+2] as usize;
+
+                    let member_count = bytes[pc+3];
+                    let method_count = bytes[pc+4];
+
+                    let mut struct_table = Vec::new();
+
+                    let mut idx = pc+5;
+                    for member_idx in 0..member_count {
+                        let ident_len = bytes[idx];
+                        let ident = &bytes[idx+1..idx+1+ident_len as usize];
+                        struct_table.push(
+                            (
+                                ident.to_vec(),
+                                StructAttribute::MemberInstanceOffset(member_idx),
+                            )
+                        );
+                        idx = idx + 1 + ident_len as usize;
                     }
+
+                    for method_idx in 0..method_count {
+                        let method_pc = pc +
+                            ((bytes[idx] as usize) << 8) +
+                            bytes[idx+1] as usize;
+
+                        idx += 2;
+
+                        let ident_len = bytes[idx];
+                        let ident = &bytes[idx+1..idx+1+ident_len as usize];
+                        struct_table.push(
+                            (
+                                ident.to_vec(),
+                                StructAttribute::MethodDefPC(pc as u32 + method_pc as u32),
+                            )
+                        );
+                        idx = idx + 1 + ident_len as usize;
+                    }
+                    const _: () = {
+                        assert!(std::mem::size_of::<StructDef>() == 32);
+                    };
+                    let pos = self.mem.alloc(Word(4.into()));
+                    let mut def: &mut StructDef = unsafe { self.mem.get_mut(pos) };
+
+                    *def = StructDef {
+                        member_count: member_count,
+                        method_count: method_count,
+                        lookup: struct_table,
+                    };
+
+                    // Then push the struct definition to the stack
+                    stack.push(ShimValue::StructDef(pos));
+
+                    pc = new_pc;
+                    continue;
+                }
+                b => {
+                    print_asm(bytes);
                     return Err(format!("Unknown bytecode {b} at PC {pc}"));
                 }
             }
             pc += 1;
         }
         Ok(())
+    }
+}
+
+fn print_asm(bytes: &[u8]) {
+    for (idx, b) in bytes.iter().enumerate() {
+        eprint!("{idx:4}:  {b:3}  ");
+
+        let text = printable_byte(*b);
+        if !text.starts_with('\\') {
+            eprint!("{:4} ", text);
+        }
+
+        if *b == ByteCode::Jmp as u8 {
+            eprint!("JMP");
+        } else if *b == ByteCode::VariableDeclaration as u8 {
+            eprint!("let");
+        } else if *b == ByteCode::Call as u8 {
+            eprint!("call");
+        } else if *b == ByteCode::Add as u8 {
+            eprint!("add");
+        } else if *b == ByteCode::CreateFn as u8 {
+            eprint!("fn");
+        } else if *b == ByteCode::JmpZ as u8 {
+            eprint!("JMPZ");
+        } else if *b == ByteCode::JmpNZ as u8 {
+            eprint!("JMPNZ");
+        } else if *b == ByteCode::AssertLen as u8 {
+            eprint!("assert_len");
+        } else if *b == ByteCode::Splat as u8 {
+            eprint!("SPLAT");
+        } else if *b == ByteCode::CreateFn as u8 {
+            eprint!("fn");
+        } else if *b == ByteCode::CreateStruct as u8 {
+            eprint!("create struct");
+        } else if *b == ByteCode::AttributeAccess as u8 {
+            eprint!("get");
+        } else if *b == ByteCode::Pad0 as u8 {
+            eprint!("");
+        } else if *b == ByteCode::Pad1 as u8 {
+            eprint!("");
+        } else if *b == ByteCode::Pad2 as u8 {
+            eprint!("");
+        } else if *b == ByteCode::Pad3 as u8 {
+            eprint!("");
+        } else if *b == ByteCode::Pad4 as u8 {
+            eprint!("");
+        } else if *b == ByteCode::Pad5 as u8 {
+            eprint!("");
+        } else if *b == ByteCode::Pad6 as u8 {
+            eprint!("");
+        } else if *b == ByteCode::Pad7 as u8 {
+            eprint!("");
+        } else if *b == ByteCode::Pad8 as u8 {
+            eprint!("");
+        } else if *b == ByteCode::Pad9 as u8 {
+            eprint!("");
+        } else if *b == ByteCode::Return as u8 {
+            eprint!("return");
+        }
+        eprintln!();
     }
 }
 
@@ -1746,3 +2080,44 @@ mod tests {
         );
     }
 }
+
+/**
+ *
+ * Struct Bytecode Format
+ *  - CreateStruct OpCode
+ *    - Two byte relative jump to end of struct def
+ *    - u8 member count
+ *    - u8 method count
+ *    - List of members
+ *      - u8 len followed by that number of bytes for the ident
+ *    - List of methods
+ *      - u16 relative jump to method, u8 len, ident bytes
+ *    - Method defs
+ *
+ * Struct Instance Data Format:
+ *  - Header value that points to object metadata
+ *    - Contains mapping of ident to member offset or method PC
+ *  - Member 0
+ *  - Member 1
+ *  - ...
+ *
+ * Struct Metadata Format:
+ *  - Just a list for now
+ *    - Vec<(Vec<u8>, Offset | PC)>
+ *
+ *
+ *
+ *
+ *
+ *
+ *
+ *
+ *
+ *
+ *
+ *
+ *
+ *
+ *
+ */
+const _todo: u8 = 42;

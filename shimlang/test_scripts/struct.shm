@@ -1,15 +1,15 @@
 struct Point {
-    x,
-    y
+    xval,
+    yval
 
-    fn new(x, y) {
-        Point {
-            x: x,
-            y: y,
-        }
+    fn add(self, other) {
+        return Point(
+            self.xval + other.xval,
+            self.yval + other.yval,
+        );
     }
 }
 
-let p = Point::new(1, 2);
-print(p.x);
-print(p.y);
+let p = Point(1, 2);
+print(p.xval);
+print(p.yval);
