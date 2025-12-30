@@ -50,6 +50,8 @@ pub enum Expression {
 #[derive(Debug)]
 pub enum Statement {
     Let(Vec<u8>, ExprNode),
+    Assignment(Vec<u8>, ExprNode),
+    AttributeAssignment(ExprNode, Vec<u8>, ExprNode),
     If(ExprNode, Vec<Statement>, Vec<Statement>),
     Fn(Vec<u8>, Vec<Vec<u8>>, Vec<Statement>),
     Struct(
@@ -612,6 +614,30 @@ pub fn parse_statement(tokens: &mut TokenStream) -> Result<Statement, String> {
 
         match tokens.peek()? {
             Token::Semicolon => {tokens.pop()?;},
+            Token::Equal => {
+                tokens.pop()?;
+                match expr.data {
+                    Expression::Primary(Primary::Identifier(ident)) => {
+                        let expr_to_assign = parse_expression(tokens)?;
+                        tokens.consume(Token::Semicolon);
+                        return Ok(Statement::Assignment(ident.clone(), expr_to_assign));
+                    },
+                    Expression::Attribute(expr, ident) => {
+                        let expr_to_assign = parse_expression(tokens)?;
+                        tokens.consume(Token::Semicolon);
+                        return Ok(Statement::AttributeAssignment(*expr, ident.clone(), expr_to_assign));
+                    },
+                    expr_data => {
+                        return Err(
+                            format_script_err(
+                                expr.span,
+                                &tokens.script,
+                                &format!("Can't assign to {:?}", expr_data),
+                            )
+                        );
+                    }
+                }
+            },
             token => return Err(
                 tokens.format_peek_err(
                     &format!(
@@ -1047,11 +1073,72 @@ impl MMU {
     }
 }
 
+struct Environment {
+    env_chain: Vec<HashMap<Vec<u8>, u64>>
+}
+
+impl Environment {
+    fn new() -> Self {
+        Self {
+            env_chain: vec![HashMap::new()]
+        }
+    }
+
+    fn insert_new(&mut self, key: Vec<u8>, val: ShimValue) {
+        let idx = self.env_chain.len() - 1;
+        self.env_chain[idx].insert(key, val.to_u64());
+    }
+
+    fn update(&mut self, key: &[u8], val: ShimValue) -> Result<(), String> {
+        for env in self.env_chain.iter_mut().rev() {
+            if let Some(entry_val) = env.get_mut(key) {
+                *entry_val = val.to_u64();
+                return Ok(());
+            }
+        }
+
+        Err(format!("Key {:?} not found in environment", key))
+    }
+
+    fn get(&self, key: &[u8]) -> Option<ShimValue> {
+        for env in self.env_chain.iter().rev() {
+            if env.contains_key(key) {
+                unsafe {
+                    return Some(ShimValue::from_u64(*env.get(key).unwrap()));
+                }
+            }
+        }
+        None
+    }
+
+    fn contains_key(&self, key: &[u8]) -> bool {
+        for env in self.env_chain.iter().rev() {
+            if env.contains_key(key) {
+                return true
+            }
+        }
+        false
+    }
+
+    fn push_scope(&mut self) {
+        self.env_chain.push(HashMap::new());
+    }
+
+    fn pop_scope(&mut self) -> Result<(), String> {
+        match self.env_chain.pop() {
+            Some(_) => Ok(()),
+            None => {
+                return Err(format!("Ran out of scopes to pop!"));
+            }
+        }
+    }
+}
+
 // TODO: uncomment #[derive(Facet)]
 pub struct Interpreter {
     pub mem: MMU,
     pub source: HashMap<String, String>,
-    pub env: HashMap<Vec<u8>, u64>,
+    pub env: Environment,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -1276,6 +1363,35 @@ impl ShimValue {
         }
     }
 
+    fn set_attr(&self, interpreter: &mut Interpreter, ident: &[u8], val: ShimValue) -> Result<(), String> {
+        match self {
+            ShimValue::Struct(pos) => {
+                unsafe {
+                    let def_pos: Word = *interpreter.mem.get(*pos);
+                    let def: &StructDef = interpreter.mem.get(def_pos);
+                    for (attr, loc) in def.lookup.iter() {
+                        if ident == attr {
+                            return match loc {
+                                StructAttribute::MemberInstanceOffset(offset) => {
+                                    let mut slot: &mut ShimValue = interpreter.mem.get_mut(*pos + *offset as u32 + 1);
+                                    *slot = val;
+                                    Ok(())
+                                }
+                                StructAttribute::MethodDefPC(pc) => {
+                                    Err(
+                                        format!("Can't assign to struct method {:?} for {:?}", ident, self)
+                                    )
+                                }
+                            };
+                        }
+                    }
+                }
+                Err(format!("Ident {:?} not found for {:?}", ident, self))
+            },
+            val => Err(format!("Ident {:?} not available on {:?}", ident, val))
+        }
+    }
+
     fn to_u64(&self) -> u64 {
         unsafe {
             let mut tmp: u64 = 0;
@@ -1342,8 +1458,10 @@ enum ByteCode {
     CreateList,
     CreateStruct,
     VariableDeclaration,
+    Assignment,
     VariableLoad,
-    AttributeAccess,
+    GetAttr,
+    SetAttr,
     Call,
     Return,
     Jmp,
@@ -1416,6 +1534,27 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
             // When getting VariableDeclaration the next byte is the length of
             // the identifier, followed by the 
             expr_asm.push((ByteCode::VariableDeclaration as u8, expr.span));
+            expr_asm.push((ident.len().try_into().expect("Ident len should into u8"), expr.span));
+            for b in ident.into_iter() {
+                expr_asm.push((*b, expr.span));
+            }
+
+            Ok(expr_asm)
+        },
+        Statement::Assignment(ident, expr) => {
+            let mut expr_asm = compile_expression(expr)?;
+            expr_asm.push((ByteCode::Assignment as u8, expr.span));
+            expr_asm.push((ident.len().try_into().expect("Ident len should into u8"), expr.span));
+            for b in ident.into_iter() {
+                expr_asm.push((*b, expr.span));
+            }
+
+            Ok(expr_asm)
+        },
+        Statement::AttributeAssignment(obj_expr, ident, expr) => {
+            let mut expr_asm = compile_expression(obj_expr)?;
+            expr_asm.extend(compile_expression(expr)?);
+            expr_asm.push((ByteCode::SetAttr as u8, expr.span));
             expr_asm.push((ident.len().try_into().expect("Ident len should into u8"), expr.span));
             for b in ident.into_iter() {
                 expr_asm.push((*b, expr.span));
@@ -1668,7 +1807,7 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
         },
         Expression::Attribute(expr, ident) => {
             let mut res = compile_expression(&expr)?;
-            res.push((ByteCode::AttributeAccess as u8, expr.span));
+            res.push((ByteCode::GetAttr as u8, expr.span));
             res.push((ident.len().try_into().expect("Ident len should into u8"), expr.span));
             for b in ident.into_iter() {
                 res.push((*b, expr.span));
@@ -1685,7 +1824,7 @@ impl Interpreter {
         Self {
             mem: mmu,
             source: HashMap::new(),
-            env: HashMap::new(),
+            env: Environment::new(),
         }
     }
 
@@ -1800,7 +1939,25 @@ impl Interpreter {
                     let val = stack.pop().expect("Value for declaration");
                     let ident_len = bytes[pc+1] as usize;
                     let ident = &bytes[pc+2..pc+2+ident_len as usize];
-                    self.env.insert(ident.to_vec(), val.to_u64());
+                    self.env.insert_new(ident.to_vec(), val);
+                    pc += 1 + ident_len;
+                },
+                val if val == ByteCode::Assignment as u8 => {
+                    let val = stack.pop().expect("Value for assignment");
+                    let ident_len = bytes[pc+1] as usize;
+                    let ident = &bytes[pc+2..pc+2+ident_len as usize];
+
+                    if !self.env.contains_key(ident) {
+                        return Err(
+                            format_script_err(
+                                program.spans[pc],
+                                &program.script,
+                                &format!("Identifier {:?} not found", ident)
+                            )
+                        );
+                    }
+                    self.env.update(ident, val);
+
                     pc += 1 + ident_len;
                 },
                 val if val == ByteCode::VariableLoad as u8 => {
@@ -1819,20 +1976,35 @@ impl Interpreter {
                             ShimValue::Bool(false)
                         );
                     } else if let Some(value) = self.env.get(ident) {
-                        stack.push(
-                            unsafe { ShimValue::from_u64(*value) }
-                        );
+                        stack.push(value);
                     } else {
                         return Err(format!("Unknown identifier {:?}", ident));
                     }
                     pc += 1 + ident_len;
                 },
-                val if val == ByteCode::AttributeAccess as u8 => {
+                val if val == ByteCode::GetAttr as u8 => {
                     let ident_len = bytes[pc+1] as usize;
                     let ident = &bytes[pc+2..pc+2+ident_len as usize];
 
                     let obj = stack.pop().expect("val to access");
                     stack.push(obj.get_attr(self, ident)?);
+
+                    pc += 1 + ident_len;
+                },
+                val if val == ByteCode::SetAttr as u8 => {
+                    let ident_len = bytes[pc+1] as usize;
+                    let ident = &bytes[pc+2..pc+2+ident_len as usize];
+
+                    let val = stack.pop().expect("val to assign");
+                    let obj = stack.pop().expect("obj to set");
+                    obj.set_attr(self, ident, val)
+                        .map_err(
+                            |err_str| format_script_err(
+                                program.spans[pc],
+                                &program.script,
+                                &err_str
+                            )
+                        )?;
 
                     pc += 1 + ident_len;
                 },
@@ -1855,6 +2027,7 @@ impl Interpreter {
                         CallResult::ReturnValue(res) => stack.push(res),
                         CallResult::PC(new_pc) => {
                             stack_frame.push(pc+1);
+                            self.env.push_scope();
                             pc = new_pc as usize;
                             continue;
                         }
@@ -1864,6 +2037,7 @@ impl Interpreter {
                     // The value at the top of the stack is the return value of
                     // the function, so we just need to pop the PC
                     pc = stack_frame.pop().expect("stack frame to return to");
+                    self.env.pop_scope()?;
                     continue;
                 }
                 val if val == ByteCode::Jmp as u8 => {
@@ -2005,6 +2179,8 @@ fn print_asm(bytes: &[u8]) {
             eprint!("JMP");
         } else if *b == ByteCode::VariableDeclaration as u8 {
             eprint!("let");
+        } else if *b == ByteCode::Assignment as u8 {
+            eprint!("assignment");
         } else if *b == ByteCode::Call as u8 {
             eprint!("call");
         } else if *b == ByteCode::Add as u8 {
@@ -2023,7 +2199,7 @@ fn print_asm(bytes: &[u8]) {
             eprint!("fn");
         } else if *b == ByteCode::CreateStruct as u8 {
             eprint!("create struct");
-        } else if *b == ByteCode::AttributeAccess as u8 {
+        } else if *b == ByteCode::GetAttr as u8 {
             eprint!("get");
         } else if *b == ByteCode::Pad0 as u8 {
             eprint!("");

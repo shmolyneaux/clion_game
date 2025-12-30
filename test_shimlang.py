@@ -69,7 +69,10 @@ for command in (
 ):
     if command == "execute":
         scripts = []
-        scripts.extend(Path("test_scripts").glob("*.shm"))
+        scripts.extend(
+            p for p in Path("test_scripts/").glob("**/*.shm")
+            if p.parts[1] not in ("spans", "parse", "errors")
+        )
     elif command == "spans":
         scripts = []
         scripts.extend(Path("test_scripts/spans").glob("*.shm"))
@@ -86,7 +89,7 @@ for command in (
         if cli_scripts and script.resolve() not in cli_scripts:
             continue
 
-        pad = "-" * (40 - len(str(script)))
+        pad = "-" * (60 - len(str(script)))
         print(f"{script} {pad} ", end="")
 
         if script.read_text().strip() == "":
@@ -144,7 +147,6 @@ for command in (
             failures.append(f"{script} ... {msg}")
 
         elif proc_stdout.strip() != expected_stdout.strip():
-            breakpoint()
             msg = "FAILED (stdout mismatch)"
             print(f"{RED}{msg}{RESET}")
             print("")
