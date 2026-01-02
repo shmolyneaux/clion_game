@@ -1308,8 +1308,7 @@ impl ShimValue {
             }
             ShimValue::BoundMethod(pos, pc) => {
                 // push struct pos to start of arg list then return the pc of the method
-                // XXX: HOW DOES THIS WORK???? Shouldn't it insert the struct pos not `self`????
-                args.insert(0, *self);
+                args.insert(0, ShimValue::Struct(*pos));
                 Ok(CallResult::PC(*pc))
             }
             ShimValue::StructDef(struct_def_pos) => {
