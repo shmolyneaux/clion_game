@@ -120,6 +120,7 @@ pub enum Token {
     RAngle,
     LCurly,
     RCurly,
+    None,
     Integer(i32),
     Float(f32),
     Bool(bool),
@@ -322,6 +323,9 @@ pub fn parse_block(tokens: &mut TokenStream) -> Result<Block, String> {
 pub fn parse_primary(tokens: &mut TokenStream) -> Result<ExprNode, String> {
     let span = tokens.peek_span()?;
     let expr: Expression = match tokens.pop()? {
+        Token::None => {
+            Expression::Primary(Primary::None)
+        },
         Token::Integer(i) => {
             Expression::Primary(Primary::Integer(i))
         },
@@ -914,6 +918,8 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
                     tokens.push(Token::Bool(true));
                 } else if ident == b"false" {
                     tokens.push(Token::Bool(false));
+                } else if ident == b"None" {
+                    tokens.push(Token::None);
                 } else {
                     tokens.push(Token::Identifier(ident))
                 }
@@ -1472,6 +1478,7 @@ impl ShimValue {
             (ShimValue::Bool(a), ShimValue::Bool(b)) => Ok(ShimValue::Bool(a == b)),
             (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Bool(a == b)),
             (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(a == b)),
+            (ShimValue::None, ShimValue::None) => Ok(ShimValue::Bool(true)),
             (a, b) => Ok(ShimValue::Bool(false)),
         }
     }
@@ -1480,7 +1487,8 @@ impl ShimValue {
         match self {
             ShimValue::Struct(pos) => {
                 unsafe {
-                    let def_pos: Word = *interpreter.mem.get(*pos);
+                    let def_pos: u64 = *interpreter.mem.get(*pos);
+                    let def_pos: Word = Word((def_pos as u32).into());
                     let def: &StructDef = interpreter.mem.get(def_pos);
                     for (attr, loc) in def.lookup.iter() {
                         if ident == attr {
