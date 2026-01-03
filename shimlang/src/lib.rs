@@ -71,6 +71,7 @@ pub enum Statement {
     Assignment(Vec<u8>, ExprNode),
     AttributeAssignment(ExprNode, Vec<u8>, ExprNode),
     If(ExprNode, Block, Block),
+    For(Vec<u8>, ExprNode, Block),
     While(ExprNode, Block),
     Break,
     Continue,
@@ -107,6 +108,7 @@ pub enum Token {
     Else,
     While,
     For,
+    In,
     Break,
     Continue,
     Struct,
@@ -634,6 +636,24 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
             } else {
                 Statement::If(cond.conditional, cond.if_body, cond.else_body)
             }
+        } else if *tokens.peek()? == Token::For {
+            tokens.advance()?;
+            let ident = match tokens.pop()? {
+                Token::Identifier(ident) => {
+                    ident
+                },
+                token => {
+                    tokens.unadvance()?;
+                    return Err(
+                        tokens.format_peek_err(&format!("Expected ident after for, found {:?}", token))
+                    );
+                }
+            };
+            tokens.consume(Token::In)?;
+            let expr = parse_expression(tokens)?;
+            let body = parse_block(tokens)?;
+
+            Statement::For(ident, expr, body)
         } else if *tokens.peek()? == Token::While {
             tokens.advance()?;
             let conditional = parse_expression(tokens)?;
@@ -902,6 +922,8 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
                     tokens.push(Token::If);
                 } else if ident == b"else" {
                     tokens.push(Token::Else);
+                } else if ident == b"in" {
+                    tokens.push(Token::In);
                 } else if ident == b"for" {
                     tokens.push(Token::For);
                 } else if ident == b"while" {
@@ -1624,6 +1646,7 @@ enum ByteCode {
     // ToBool,
     // JumpZ,
     // JumpNZ,
+    Copy,
     LiteralShimValue,
     LiteralString,
     LiteralNone,
@@ -1864,6 +1887,95 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
 
             Ok(asm)
         },
+        Statement::For(ident, expr, body) => {
+            let mut asm = compile_expression(expr)?;
+
+            // Call .iter() and put its .next on the top of the stack
+            {
+                asm.push((ByteCode::GetAttr as u8, expr.span));
+                asm.extend([
+                   (4, expr.span),
+                   (b'i', expr.span),
+                   (b't', expr.span),
+                   (b'e', expr.span),
+                   (b'r', expr.span),
+                ]);
+
+                // Create empty args and call
+                asm.push((ByteCode::CreateList as u8, expr.span));
+                asm.push((0, expr.span));
+                asm.push((0, expr.span));
+                asm.push((ByteCode::Call as u8, expr.span));
+
+                asm.push((ByteCode::GetAttr as u8, expr.span));
+                asm.extend([
+                   (4, expr.span),
+                   (b'n', expr.span),
+                   (b'e', expr.span),
+                   (b'x', expr.span),
+                   (b't', expr.span),
+                ]);
+            }
+
+            let loop_start_idx = asm.len();
+            asm.extend(
+                vec![
+                    (ByteCode::LoopStart as u8, Span {start: 0, end: 1}),
+                    (0, Span {start: 0, end: 1}),
+                    (0, Span {start: 0, end: 1}),
+                ]
+            );
+
+            // Copy the .next bound method and call it
+            asm.push((ByteCode::Copy as u8, expr.span));
+            asm.push((ByteCode::CreateList as u8, expr.span));
+            asm.push((0, expr.span));
+            asm.push((0, expr.span));
+            asm.push((ByteCode::Call as u8, expr.span));
+
+            // Copy the result of .next() so we can later check if it's None
+            asm.push((ByteCode::Copy as u8, expr.span));
+            asm.push((ByteCode::VariableDeclaration as u8, Span {start:0, end:1}));
+            asm.push((ident.len().try_into().expect("For loop ident len should into u8"), Span {start:0, end:1}));
+            for b in ident {
+                asm.push((*b, Span {start:0, end:1}));
+            }
+
+            asm.push((ByteCode::LiteralNone as u8, expr.span));
+            asm.push((ByteCode::Equal as u8, expr.span));
+
+            // Jump to `LoopEnd` if calling .next() returns None
+            let none_check_idx = asm.len();
+            asm.push((ByteCode::JmpNZ as u8, Span { start:0, end:0}));
+            asm.push((0, Span { start:0, end:0}));
+            asm.push((0, Span { start:0, end:0}));
+
+            asm.extend(compile_block(body, false)?);
+
+            // Jump to start of loop to check the condition again
+            let loop_start_offset = u16_to_u8s(
+                asm.len() as u16 - loop_start_idx as u16 - 3
+            );
+            asm.push((ByteCode::JmpUp as u8, Span { start:0, end:0}));
+            asm.push((loop_start_offset[0], Span { start:0, end:0}));
+            asm.push((loop_start_offset[1], Span { start:0, end:0}));
+
+            // This is the offset from none_check_idx that will get us
+            // out of the loop
+            let pc_offset = u16_to_u8s(
+                asm.len() as u16 - none_check_idx as u16
+            );
+            asm[none_check_idx+1].0 = pc_offset[0];
+            asm[none_check_idx+2].0 = pc_offset[1];
+
+            let loop_end = u16_to_u8s(asm.len() as u16 - loop_start_idx as u16);
+            asm[loop_start_idx + 1].0 = loop_end[0];
+            asm[loop_start_idx + 2].0 = loop_end[1];
+
+            asm.push((ByteCode::LoopEnd as u8, Span { start:0, end:0}));
+
+            Ok(asm)
+        },
         Statement::While(conditional, body) => {
             let mut asm = vec![
                 (ByteCode::LoopStart as u8, Span {start: 0, end: 1}),
@@ -2080,7 +2192,6 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
             // First we evaluate the thing that needs to be called
             let mut res = compile_expression(&expr)?;
 
-
             // Then we evaluate each argument
             for arg_expr in args.iter() {
                 res.extend(compile_expression(arg_expr)?);
@@ -2172,6 +2283,9 @@ impl Interpreter {
                 },
                 val if val == ByteCode::LiteralNone as u8 => {
                     stack.push(ShimValue::None);
+                },
+                val if val == ByteCode::Copy as u8 => {
+                    stack.push(*stack.last().expect("non-empty stack"));
                 },
                 val if val == ByteCode::LoopStart as u8 => {
                     let loop_end = pc + (
@@ -2392,7 +2506,7 @@ impl Interpreter {
                 val if val == ByteCode::Return as u8 => {
                     // The value at the top of the stack is the return value of
                     // the function, so we just need to pop the PC
-                    let mut scope_count = 0;
+                    let scope_count;
                     (pc, loop_info, scope_count) = stack_frame.pop().expect("stack frame to return to");
                     while self.env.env_chain.len() > scope_count {
                         self.env.pop_scope();
@@ -2582,6 +2696,8 @@ pub fn print_asm(bytes: &[u8]) {
             eprint!("String");
         } else if *b == ByteCode::LiteralNone as u8 {
             eprint!("None");
+        } else if *b == ByteCode::Copy as u8 {
+            eprint!("Copy");
         } else if *b == ByteCode::LoopStart as u8 {
             eprint!("Loop Start");
         } else if *b == ByteCode::LoopEnd as u8 {
