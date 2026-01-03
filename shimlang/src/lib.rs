@@ -910,6 +910,10 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
                     tokens.push(Token::Struct);
                 } else if ident == b"return" {
                     tokens.push(Token::Return);
+                } else if ident == b"true" {
+                    tokens.push(Token::Bool(true));
+                } else if ident == b"false" {
+                    tokens.push(Token::Bool(false));
                 } else {
                     tokens.push(Token::Identifier(ident))
                 }
@@ -2117,26 +2121,16 @@ impl Interpreter {
         // this stack, return values go on this stack etc.
         let mut stack: Vec<ShimValue> = Vec::new();
 
-        // This is the (PC, loop_info) call stack
-        let mut stack_frame: Vec<(usize, Vec<(usize, usize)>)> = Vec::new();
+        // This is the (PC, loop_info, scope_count) call stack
+        let mut stack_frame: Vec<(usize, Vec<(usize, usize, usize)>, usize)> = Vec::new();
 
-        // This is the PC of the (start, end) of the current loop for the
+        // This is the PC of the (start, end, scope_count) of the current loop for the
         // current function
-        let mut loop_info: Vec<(usize, usize)> = Vec::new();
+        let mut loop_info: Vec<(usize, usize, usize)> = Vec::new();
 
-        let mut caller_info: Vec<
-            (
-                // loop_info
-                Vec<(usize, usize)>,
-            )
-        > = Vec::new();
-
-        // TODO: need pc to jump to on break
-        // TODO: need pc to jump to on continue
         // TODO: need stack depth to reset to on break
         // TODO: need stack depth to reset to on continue
         // TODO: need stack depth to reset to on return
-        // TODO: need loop into to reset on return
 
         let bytes = &program.bytecode;
         while pc < bytes.len() {
@@ -2180,6 +2174,7 @@ impl Interpreter {
                         (
                             pc + 3,
                             loop_end,
+                            self.env.env_chain.len(),
                         )
                     );
                     pc += 2;
@@ -2188,14 +2183,18 @@ impl Interpreter {
                     loop_info.pop().expect("loop end should have loop info");
                 },
                 val if val == ByteCode::Break as u8 => {
-                    let (_, end_pc) = loop_info.last().expect("break should have loop info");
-                    // TODO: end the correct number of scopes
+                    let (_, end_pc, scope_count) = loop_info.last().expect("break should have loop info");
+                    while self.env.env_chain.len() > *scope_count {
+                        self.env.pop_scope();
+                    }
                     pc = *end_pc;
                     continue;
                 },
                 val if val == ByteCode::Continue as u8 => {
-                    let (start_pc, _) = loop_info.last().expect("continue should have loop info");
-                    // TODO: end the correct number of scopes
+                    let (start_pc, _, scope_count) = loop_info.last().expect("continue should have loop info");
+                    while self.env.env_chain.len() > *scope_count {
+                        self.env.pop_scope();
+                    }
                     pc = *start_pc;
                     continue;
                 },
@@ -2305,14 +2304,6 @@ impl Interpreter {
                         stack.push(
                             ShimValue::Print
                         );
-                    } else if ident == b"true" {
-                        stack.push(
-                            ShimValue::Bool(true)
-                        );
-                    } else if ident == b"false" {
-                        stack.push(
-                            ShimValue::Bool(false)
-                        );
                     } else if let Some(value) = self.env.get(ident) {
                         stack.push(value);
                     } else {
@@ -2374,6 +2365,7 @@ impl Interpreter {
                                 (
                                     pc+1,
                                     loop_info.clone(),
+                                    self.env.env_chain.len(),
                                 )
                             );
                             loop_info = Vec::new();
@@ -2392,13 +2384,11 @@ impl Interpreter {
                 val if val == ByteCode::Return as u8 => {
                     // The value at the top of the stack is the return value of
                     // the function, so we just need to pop the PC
-
-                    // TODO: when we hit a return we may need to pop multiple
-                    // scopes, so we need to keep track of which frame is the
-                    // caller's
-                    // TODO: we also need to fixup the break/continue PC
-                    (pc, loop_info) = stack_frame.pop().expect("stack frame to return to");
-                    self.env.pop_scope()?;
+                    let mut scope_count = 0;
+                    (pc, loop_info, scope_count) = stack_frame.pop().expect("stack frame to return to");
+                    while self.env.env_chain.len() > scope_count {
+                        self.env.pop_scope();
+                    }
                     continue;
                 }
                 val if val == ByteCode::JmpUp as u8 => {
