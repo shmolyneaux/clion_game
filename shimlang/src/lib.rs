@@ -46,6 +46,7 @@ pub enum Primary {
 pub enum BinaryOp {
     Add(Box<ExprNode>, Box<ExprNode>),
     Subtract(Box<ExprNode>, Box<ExprNode>),
+    Equal(Box<ExprNode>, Box<ExprNode>),
 }
 
 #[derive(Debug)]
@@ -70,6 +71,9 @@ pub enum Statement {
     Assignment(Vec<u8>, ExprNode),
     AttributeAssignment(ExprNode, Vec<u8>, ExprNode),
     If(ExprNode, Block, Block),
+    While(ExprNode, Block),
+    Break,
+    Continue,
     Fn(Vec<u8>, Vec<Vec<u8>>, Block),
     Struct(
         Vec<u8>,
@@ -101,6 +105,10 @@ pub enum Token {
     Fn,
     If,
     Else,
+    While,
+    For,
+    Break,
+    Continue,
     Struct,
     Return,
     Equal,
@@ -429,6 +437,24 @@ pub fn parse_call(tokens: &mut TokenStream) -> Result<ExprNode, String> {
     Ok(expr)
 }
 
+pub fn parse_equality(tokens: &mut TokenStream) -> Result<ExprNode, String> {
+    let mut expr = parse_term(tokens)?;
+    while !tokens.is_empty() {
+        let span = tokens.peek_span()?;
+        match tokens.peek()? {
+            Token::DEqual => {
+                tokens.advance()?;
+                expr = Node {
+                    data: Expression::BinaryOp(BinaryOp::Equal(Box::new(expr), Box::new(parse_expression(tokens)?))),
+                    span: span,
+                };
+            },
+            _ => return Ok(expr),
+        }
+    }
+    Ok(expr)
+}
+
 pub fn parse_term(tokens: &mut TokenStream) -> Result<ExprNode, String> {
     let mut expr = parse_call(tokens)?;
     while !tokens.is_empty() {
@@ -502,7 +528,7 @@ pub fn parse_expression(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                 }
             )
         },
-        _ => parse_term(tokens)
+        _ => parse_equality(tokens)
     }
 }
 
@@ -589,6 +615,7 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
         } else if *tokens.peek()? == Token::If {
             let cond = parse_conditional(tokens)?;
 
+            // Do we treat this as an expression or statement?
             if *tokens.peek()? == Token::RCurly {
                 let expr = Expression::If(Box::new(cond.conditional), cond.if_body, cond.else_body);
                 last_expr = Some(
@@ -603,6 +630,20 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
             } else {
                 Statement::If(cond.conditional, cond.if_body, cond.else_body)
             }
+        } else if *tokens.peek()? == Token::While {
+            tokens.advance()?;
+            let conditional = parse_expression(tokens)?;
+            let loop_body = parse_block(tokens)?;
+
+            Statement::While(conditional, loop_body)
+        } else if *tokens.peek()? == Token::Break {
+            tokens.advance()?;
+            tokens.consume(Token::Semicolon)?;
+            Statement::Break
+        } else if *tokens.peek()? == Token::Continue {
+            tokens.advance()?;
+            tokens.consume(Token::Semicolon)?;
+            Statement::Continue
         } else if *tokens.peek()? == Token::Struct {
             tokens.advance()?;
             let ident = match tokens.pop()? {
@@ -857,6 +898,14 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
                     tokens.push(Token::If);
                 } else if ident == b"else" {
                     tokens.push(Token::Else);
+                } else if ident == b"for" {
+                    tokens.push(Token::For);
+                } else if ident == b"while" {
+                    tokens.push(Token::While);
+                } else if ident == b"break" {
+                    tokens.push(Token::Break);
+                } else if ident == b"continue" {
+                    tokens.push(Token::Continue);
                 } else if ident == b"struct" {
                     tokens.push(Token::Struct);
                 } else if ident == b"return" {
@@ -1414,6 +1463,15 @@ impl ShimValue {
         }
     }
 
+    fn equal(&self, _interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
+        match (self, other) {
+            (ShimValue::Bool(a), ShimValue::Bool(b)) => Ok(ShimValue::Bool(a == b)),
+            (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Bool(a == b)),
+            (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(a == b)),
+            (a, b) => Ok(ShimValue::Bool(false)),
+        }
+    }
+
     fn get_attr(&self, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
         match self {
             ShimValue::Struct(pos) => {
@@ -1546,6 +1604,7 @@ enum ByteCode {
     Pop,
     Add,
     Sub,
+    Equal,
     // Or,
     // Not,
     // And,
@@ -1566,15 +1625,20 @@ enum ByteCode {
     SetAttr,
     StartScope,
     EndScope,
+    LoopStart,
+    LoopEnd,
+    Break,
+    Continue,
     Call,
     Return,
     Jmp,
+    JmpUp,
     JmpNZ,
     JmpZ,
 }
 
 pub struct Program {
-    bytecode: Vec<u8>,
+    pub bytecode: Vec<u8>,
     spans: Vec<Span>,
     script: Vec<u8>,
 }
@@ -1788,6 +1852,60 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
 
             Ok(asm)
         },
+        Statement::While(conditional, body) => {
+            let mut asm = vec![
+                (ByteCode::LoopStart as u8, Span {start: 0, end: 1}),
+                (0, Span {start: 0, end: 1}),
+                (0, Span {start: 0, end: 1}),
+            ];
+            asm.extend(compile_expression(conditional)?);
+
+            // Jump to `LoopEnd` if the condition is falsy
+            let conditional_check_idx = asm.len();
+            asm.push((ByteCode::JmpZ as u8, Span { start:0, end:0}));
+            asm.push((0, Span { start:0, end:0}));
+            asm.push((0, Span { start:0, end:0}));
+
+            asm.extend(compile_block(body, false)?);
+
+            // Jump to start of loop to check the condition again
+            let loop_start_offset = u16_to_u8s(
+                asm.len() as u16 - 3
+            );
+            asm.push((ByteCode::JmpUp as u8, Span { start:0, end:0}));
+            asm.push((loop_start_offset[0], Span { start:0, end:0}));
+            asm.push((loop_start_offset[1], Span { start:0, end:0}));
+
+            // This is the offset from conditional_check_idx that will get us
+            // out of the loop
+            let pc_offset = u16_to_u8s(
+                asm.len() as u16 - conditional_check_idx as u16
+            );
+            asm[conditional_check_idx+1].0 = pc_offset[0];
+            asm[conditional_check_idx+2].0 = pc_offset[1];
+
+            let loop_end = u16_to_u8s(asm.len() as u16);
+            asm[1].0 = loop_end[0];
+            asm[2].0 = loop_end[1];
+
+            asm.push((ByteCode::LoopEnd as u8, Span { start:0, end:0}));
+
+            Ok(asm)
+        },
+        Statement::Break => {
+            Ok(
+                vec![
+                    (ByteCode::Break as u8, Span {start: 0, end: 1}),
+                ]
+            )
+        },
+        Statement::Continue => {
+            Ok(
+                vec![
+                    (ByteCode::Continue as u8, Span {start: 0, end: 1}),
+                ]
+            )
+        },
         Statement::Return(expr) => {
             compile_return(&expr.as_ref())
         },
@@ -1938,6 +2056,12 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
                     res.push((ByteCode::Sub as u8, expr.span));
                     Ok(res)
                 },
+                BinaryOp::Equal(a, b) => {
+                    let mut res = compile_expression(&a)?;
+                    res.extend(compile_expression(&b)?);
+                    res.push((ByteCode::Equal as u8, expr.span));
+                    Ok(res)
+                },
             }
         },
         Expression::Call(expr, args) => {
@@ -1988,8 +2112,31 @@ impl Interpreter {
 
     pub fn execute_bytecode(&mut self, program: &Program) -> Result<(), String> {
         let mut pc = 0;
+
+        // These are values that are operated on. Expressions push and pop to
+        // this stack, return values go on this stack etc.
         let mut stack: Vec<ShimValue> = Vec::new();
-        let mut stack_frame: Vec<usize> = Vec::new();
+
+        // This is the (PC, loop_info) call stack
+        let mut stack_frame: Vec<(usize, Vec<(usize, usize)>)> = Vec::new();
+
+        // This is the PC of the (start, end) of the current loop for the
+        // current function
+        let mut loop_info: Vec<(usize, usize)> = Vec::new();
+
+        let mut caller_info: Vec<
+            (
+                // loop_info
+                Vec<(usize, usize)>,
+            )
+        > = Vec::new();
+
+        // TODO: need pc to jump to on break
+        // TODO: need pc to jump to on continue
+        // TODO: need stack depth to reset to on break
+        // TODO: need stack depth to reset to on continue
+        // TODO: need stack depth to reset to on return
+        // TODO: need loop into to reset on return
 
         let bytes = &program.bytecode;
         while pc < bytes.len() {
@@ -2016,8 +2163,41 @@ impl Interpreter {
                     let a = stack.pop().expect("Operand for add");
                     stack.push(a.sub(&b)?);
                 },
+                val if val == ByteCode::Equal as u8 => {
+                    let b = stack.pop().expect("Operand for add");
+                    let a = stack.pop().expect("Operand for add");
+                    stack.push(a.equal(self, &b)?);
+                },
                 val if val == ByteCode::LiteralNone as u8 => {
                     stack.push(ShimValue::None);
+                },
+                val if val == ByteCode::LoopStart as u8 => {
+                    let loop_end = pc + (
+                        ((bytes[pc+1] as usize) << 8) +
+                        bytes[pc+2] as usize
+                    );
+                    loop_info.push(
+                        (
+                            pc + 3,
+                            loop_end,
+                        )
+                    );
+                    pc += 2;
+                },
+                val if val == ByteCode::LoopEnd as u8 => {
+                    loop_info.pop().expect("loop end should have loop info");
+                },
+                val if val == ByteCode::Break as u8 => {
+                    let (_, end_pc) = loop_info.last().expect("break should have loop info");
+                    // TODO: end the correct number of scopes
+                    pc = *end_pc;
+                    continue;
+                },
+                val if val == ByteCode::Continue as u8 => {
+                    let (start_pc, _) = loop_info.last().expect("continue should have loop info");
+                    // TODO: end the correct number of scopes
+                    pc = *start_pc;
+                    continue;
                 },
                 val if val == ByteCode::AssertLen as u8 => {
                     let len = bytes[pc+1] as usize;
@@ -2032,7 +2212,7 @@ impl Interpreter {
                                     return Err(
                                         format_script_err(
                                             program.spans[
-                                                stack_frame[stack_frame.len()-1]
+                                                stack_frame[stack_frame.len()-1].0
                                             ],
                                             &program.script,
                                             &format!("Function expects {} arguments, but got {}", len, (*ptr).len())
@@ -2136,7 +2316,13 @@ impl Interpreter {
                     } else if let Some(value) = self.env.get(ident) {
                         stack.push(value);
                     } else {
-                        return Err(format!("Unknown identifier {:?}", ident));
+                        return Err(
+                            format_script_err(
+                                program.spans[pc],
+                                &program.script,
+                                &format!("Unknown identifier {:?}", ident)
+                            )
+                        );
                     }
                     pc += 1 + ident_len;
                 },
@@ -2184,7 +2370,13 @@ impl Interpreter {
                     {
                         CallResult::ReturnValue(res) => stack.push(res),
                         CallResult::PC(new_pc) => {
-                            stack_frame.push(pc+1);
+                            stack_frame.push(
+                                (
+                                    pc+1,
+                                    loop_info.clone(),
+                                )
+                            );
+                            loop_info = Vec::new();
                             self.env.push_scope();
                             pc = new_pc as usize;
                             continue;
@@ -2204,8 +2396,17 @@ impl Interpreter {
                     // TODO: when we hit a return we may need to pop multiple
                     // scopes, so we need to keep track of which frame is the
                     // caller's
-                    pc = stack_frame.pop().expect("stack frame to return to");
+                    // TODO: we also need to fixup the break/continue PC
+                    (pc, loop_info) = stack_frame.pop().expect("stack frame to return to");
                     self.env.pop_scope()?;
+                    continue;
+                }
+                val if val == ByteCode::JmpUp as u8 => {
+                    let new_pc = pc - (
+                        ((bytes[pc+1] as usize) << 8) +
+                        bytes[pc+2] as usize
+                    );
+                    pc = new_pc;
                     continue;
                 }
                 val if val == ByteCode::Jmp as u8 => {
@@ -2334,7 +2535,7 @@ impl Interpreter {
     }
 }
 
-fn print_asm(bytes: &[u8]) {
+pub fn print_asm(bytes: &[u8]) {
     for (idx, b) in bytes.iter().enumerate() {
         eprint!("{idx:4}:  {b:3}  ");
 
@@ -2359,6 +2560,8 @@ fn print_asm(bytes: &[u8]) {
             eprint!("JMPZ");
         } else if *b == ByteCode::JmpNZ as u8 {
             eprint!("JMPNZ");
+        } else if *b == ByteCode::JmpUp as u8 {
+            eprint!("JMPUP");
         } else if *b == ByteCode::AssertLen as u8 {
             eprint!("assert_len");
         } else if *b == ByteCode::Splat as u8 {
@@ -2371,12 +2574,20 @@ fn print_asm(bytes: &[u8]) {
             eprint!("get");
         } else if *b == ByteCode::VariableLoad as u8 {
             eprint!("load");
+        } else if *b == ByteCode::Break as u8 {
+            eprint!("break");
+        } else if *b == ByteCode::Continue as u8 {
+            eprint!("continue");
         } else if *b == ByteCode::LiteralShimValue as u8 {
             eprint!("ShimValue");
         } else if *b == ByteCode::LiteralString as u8 {
             eprint!("String");
         } else if *b == ByteCode::LiteralNone as u8 {
             eprint!("None");
+        } else if *b == ByteCode::LoopStart as u8 {
+            eprint!("Loop Start");
+        } else if *b == ByteCode::LoopEnd as u8 {
+            eprint!("Loop End");
         } else if *b == ByteCode::StartScope as u8 {
             eprint!("start_scope");
         } else if *b == ByteCode::EndScope as u8 {

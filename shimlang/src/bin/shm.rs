@@ -9,7 +9,8 @@ use shimlang;
 enum Command {
     Parse,
     Execute,
-    Spans
+    Spans,
+    Compile,
 }
 
 impl Default for Command {
@@ -47,6 +48,11 @@ fn parse_args() -> Result<Args, String> {
                 return Err(format!("Attempted to set command multiple times! {}", arg));
             }
             args.command = Command::Spans;
+        } else if arg == "--compile" {
+            if args.command != Command::default() {
+                return Err(format!("Attempted to set command multiple times! {}", arg));
+            }
+            args.command = Command::Compile;
         } else {
             return Err(format!("Unknown args {}", arg));
         }
@@ -111,6 +117,19 @@ fn run() -> Result<(), String> {
                             .map_err(|e| format!("{:?}", e))?
                     );
                 }
+            },
+            Command::Compile => {
+                let ast = match shimlang::ast_from_text(&contents) {
+                    Ok(ast) => ast,
+                    Err(msg) => {
+                        eprintln!(
+                            "Parse Error:\n{msg}"
+                        );
+                        return Err((format!("Failed to parse script")).into());
+                    }
+                };
+                let program = shimlang::compile_ast(&ast)?;
+                shimlang::print_asm(&program.bytecode);
             },
         }
     } else {
