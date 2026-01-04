@@ -43,10 +43,29 @@ pub enum Primary {
 }
 
 #[derive(Debug)]
+pub enum UnaryOp {
+    Not(Box<ExprNode>),
+    Negate(Box<ExprNode>),
+}
+
+#[derive(Debug)]
 pub enum BinaryOp {
     Add(Box<ExprNode>, Box<ExprNode>),
     Subtract(Box<ExprNode>, Box<ExprNode>),
+    Multiply(Box<ExprNode>, Box<ExprNode>),
+    Divide(Box<ExprNode>, Box<ExprNode>),
     Equal(Box<ExprNode>, Box<ExprNode>),
+    NotEqual(Box<ExprNode>, Box<ExprNode>),
+    GT(Box<ExprNode>, Box<ExprNode>),
+    GTE(Box<ExprNode>, Box<ExprNode>),
+    LT(Box<ExprNode>, Box<ExprNode>),
+    LTE(Box<ExprNode>, Box<ExprNode>),
+}
+
+#[derive(Debug)]
+pub enum BooleanOp {
+    And(Box<ExprNode>, Box<ExprNode>),
+    Or(Box<ExprNode>, Box<ExprNode>),
 }
 
 #[derive(Debug)]
@@ -58,7 +77,9 @@ pub struct Block {
 #[derive(Debug)]
 pub enum Expression {
     Primary(Primary),
+    BooleanOp(BooleanOp),
     BinaryOp(BinaryOp),
+    UnaryOp(UnaryOp),
     Call(Box<ExprNode>, Vec<ExprNode>),
     Attribute(Box<ExprNode>, Vec<u8>),
     Block(Block),
@@ -102,6 +123,8 @@ pub enum Token {
     RBracket,
     Plus,
     Minus,
+    Slash,
+    Star,
     Let,
     Fn,
     If,
@@ -109,12 +132,19 @@ pub enum Token {
     While,
     For,
     In,
+    And,
+    Or,
     Break,
     Continue,
     Struct,
     Return,
     Equal,
     DEqual,
+    BangEqual,
+    GT,
+    GTE,
+    LT,
+    LTE,
     Semicolon,
     LSquare,
     RSquare,
@@ -443,8 +473,108 @@ pub fn parse_call(tokens: &mut TokenStream) -> Result<ExprNode, String> {
     Ok(expr)
 }
 
-pub fn parse_equality(tokens: &mut TokenStream) -> Result<ExprNode, String> {
+pub fn parse_logical_or(tokens: &mut TokenStream) -> Result<ExprNode, String> {
+    let mut expr = parse_logical_and(tokens)?;
+    while !tokens.is_empty() {
+        let span = tokens.peek_span()?;
+        match tokens.peek()? {
+            Token::Or => {
+                tokens.advance()?;
+                expr = Node {
+                    data: Expression::BooleanOp(BooleanOp::Or(Box::new(expr), Box::new(parse_expression(tokens)?))),
+                    span: span,
+                };
+            },
+            _ => return Ok(expr),
+        }
+    }
+    Ok(expr)
+}
+
+pub fn parse_logical_and(tokens: &mut TokenStream) -> Result<ExprNode, String> {
+    let mut expr = parse_equality(tokens)?;
+    while !tokens.is_empty() {
+        let span = tokens.peek_span()?;
+        match tokens.peek()? {
+            Token::And => {
+                tokens.advance()?;
+                expr = Node {
+                    data: Expression::BooleanOp(BooleanOp::And(Box::new(expr), Box::new(parse_expression(tokens)?))),
+                    span: span,
+                };
+            },
+            _ => return Ok(expr),
+        }
+    }
+    Ok(expr)
+}
+
+pub fn parse_comparison(tokens: &mut TokenStream) -> Result<ExprNode, String> {
     let mut expr = parse_term(tokens)?;
+    while !tokens.is_empty() {
+        let span = tokens.peek_span()?;
+        match tokens.peek()? {
+            Token::GT => {
+                tokens.advance()?;
+                expr = Node {
+                    data: Expression::BinaryOp(BinaryOp::GT(Box::new(expr), Box::new(parse_expression(tokens)?))),
+                    span: span,
+                };
+            },
+            Token::GTE => {
+                tokens.advance()?;
+                expr = Node {
+                    data: Expression::BinaryOp(BinaryOp::GTE(Box::new(expr), Box::new(parse_expression(tokens)?))),
+                    span: span,
+                };
+            },
+            Token::LT => {
+                tokens.advance()?;
+                expr = Node {
+                    data: Expression::BinaryOp(BinaryOp::LT(Box::new(expr), Box::new(parse_expression(tokens)?))),
+                    span: span,
+                };
+            },
+            Token::LTE => {
+                tokens.advance()?;
+                expr = Node {
+                    data: Expression::BinaryOp(BinaryOp::LTE(Box::new(expr), Box::new(parse_expression(tokens)?))),
+                    span: span,
+                };
+            },
+            _ => return Ok(expr),
+        }
+    }
+    Ok(expr)
+}
+
+pub fn parse_factor(tokens: &mut TokenStream) -> Result<ExprNode, String> {
+    let mut expr = parse_unary(tokens)?;
+    while !tokens.is_empty() {
+        let span = tokens.peek_span()?;
+        match tokens.peek()? {
+            Token::Star => {
+                tokens.advance()?;
+                expr = Node {
+                    data: Expression::BinaryOp(BinaryOp::Multiply(Box::new(expr), Box::new(parse_expression(tokens)?))),
+                    span: span,
+                };
+            },
+            Token::Slash => {
+                tokens.advance()?;
+                expr = Node {
+                    data: Expression::BinaryOp(BinaryOp::Divide(Box::new(expr), Box::new(parse_expression(tokens)?))),
+                    span: span,
+                };
+            },
+            _ => return Ok(expr),
+        }
+    }
+    Ok(expr)
+}
+
+pub fn parse_equality(tokens: &mut TokenStream) -> Result<ExprNode, String> {
+    let mut expr = parse_comparison(tokens)?;
     while !tokens.is_empty() {
         let span = tokens.peek_span()?;
         match tokens.peek()? {
@@ -455,6 +585,13 @@ pub fn parse_equality(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                     span: span,
                 };
             },
+            Token::BangEqual => {
+                tokens.advance()?;
+                expr = Node {
+                    data: Expression::BinaryOp(BinaryOp::NotEqual(Box::new(expr), Box::new(parse_expression(tokens)?))),
+                    span: span,
+                };
+            },
             _ => return Ok(expr),
         }
     }
@@ -462,9 +599,8 @@ pub fn parse_equality(tokens: &mut TokenStream) -> Result<ExprNode, String> {
 }
 
 pub fn parse_term(tokens: &mut TokenStream) -> Result<ExprNode, String> {
-    let mut expr = parse_call(tokens)?;
+    let mut expr = parse_factor(tokens)?;
     while !tokens.is_empty() {
-        // TODO: this is just the operator
         let span = tokens.peek_span()?;
         match tokens.peek()? {
             Token::Plus => {
@@ -485,6 +621,29 @@ pub fn parse_term(tokens: &mut TokenStream) -> Result<ExprNode, String> {
         }
     }
     Ok(expr)
+}
+
+pub fn parse_unary(tokens: &mut TokenStream) -> Result<ExprNode, String> {
+    let span = tokens.peek_span()?;
+    match tokens.peek()? {
+        Token::Bang => {
+            tokens.advance()?;
+            let expr = parse_unary(tokens)?;
+            Ok(Node {
+                data: Expression::UnaryOp(UnaryOp::Not(Box::new(expr))),
+                span: span,
+            })
+        },
+        Token::Minus => {
+            tokens.advance()?;
+            let expr = parse_unary(tokens)?;
+            Ok(Node {
+                data: Expression::UnaryOp(UnaryOp::Not(Box::new(expr))),
+                span: span,
+            })
+        },
+        _ => parse_call(tokens),
+    }
 }
 
 
@@ -534,7 +693,7 @@ pub fn parse_expression(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                 }
             )
         },
-        _ => parse_equality(tokens)
+        _ => parse_logical_or(tokens)
     }
 }
 
@@ -936,6 +1095,10 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
                     tokens.push(Token::Struct);
                 } else if ident == b"return" {
                     tokens.push(Token::Return);
+                } else if ident == b"and" {
+                    tokens.push(Token::And);
+                } else if ident == b"or" {
+                    tokens.push(Token::Or);
                 } else if ident == b"true" {
                     tokens.push(Token::Bool(true));
                 } else if ident == b"false" {
@@ -964,6 +1127,24 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
                         tokens.push(Token::DEqual);
                     },
                     _ => tokens.push(Token::Equal),
+                }
+            },
+            b'>' => {
+                match text[1] {
+                    b'=' => {
+                        text = &text[1..];
+                        tokens.push(Token::GTE);
+                    },
+                    _ => tokens.push(Token::LT),
+                }
+            },
+            b'<' => {
+                match text[1] {
+                    b'=' => {
+                        text = &text[1..];
+                        tokens.push(Token::LTE);
+                    },
+                    _ => tokens.push(Token::LT),
                 }
             },
             b';' => tokens.push(Token::Semicolon),
@@ -1307,6 +1488,7 @@ pub enum ShimValue {
     Unit,
     None,
     Print,
+    Panic,
     Integer(i32),
     Float(f32),
     Bool(bool),
@@ -1383,6 +1565,19 @@ impl ShimValue {
 
                 println!();
                 Ok(CallResult::ReturnValue(ShimValue::None))
+            },
+            ShimValue::Panic => {
+                stack.pop();
+                let mut out = String::new();
+                for (idx, arg) in args.iter().enumerate() {
+                    if idx != 0 {
+                        out.push(' ');
+                    }
+                    out.push_str(&format!("{}", arg.to_string(interpreter)));
+                }
+
+                out.push('\n');
+                Err(out)
             },
             ShimValue::Fn(pc) => {
                 Ok(CallResult::PC(*pc))
@@ -1501,7 +1696,91 @@ impl ShimValue {
             (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Bool(a == b)),
             (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(a == b)),
             (ShimValue::None, ShimValue::None) => Ok(ShimValue::Bool(true)),
-            (a, b) => Ok(ShimValue::Bool(false)),
+            _ => Ok(ShimValue::Bool(false)),
+        }
+    }
+
+    fn not_equal(&self, _interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
+        match (self, other) {
+            (ShimValue::Bool(a), ShimValue::Bool(b)) => Ok(ShimValue::Bool(a != b)),
+            (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Bool(a != b)),
+            (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(a != b)),
+            (ShimValue::None, ShimValue::None) => Ok(ShimValue::Bool(true)),
+            _ => Ok(ShimValue::Bool(true)),
+        }
+    }
+
+    fn mul(&self, _interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
+        match (self, other) {
+            (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Float(a * b)),
+            (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Integer(a * b)),
+            (a, b) => Err(format!("Can't Multiply {:?} and {:?}", a, b))
+        }
+    }
+
+    fn div(&self, _interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
+        match (self, other) {
+            (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Float(a / b)),
+            (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Integer(a / b)),
+            (a, b) => Err(format!("Can't Divide {:?} and {:?}", a, b))
+        }
+    }
+
+    fn gt(&self, _interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
+        match (self, other) {
+            (ShimValue::Bool(a), ShimValue::Bool(b)) => Ok(ShimValue::Bool(*a == true && *b == false)),
+            (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Bool(a > b)),
+            (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(a > b)),
+            (ShimValue::None, ShimValue::None) => Ok(ShimValue::Bool(false)),
+            (a, b) => Err(format!("Can't GT {:?} and {:?}", a, b))
+        }
+    }
+
+    fn gte(&self, _interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
+        match (self, other) {
+            (ShimValue::Bool(a), ShimValue::Bool(b)) => Ok(ShimValue::Bool(a == b)),
+            (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Bool(a >= b)),
+            (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(a >= b)),
+            (ShimValue::None, ShimValue::None) => Ok(ShimValue::Bool(true)),
+            (a, b) => Err(format!("Can't GTE {:?} and {:?}", a, b))
+        }
+    }
+
+    fn lt(&self, _interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
+        match (self, other) {
+            (ShimValue::Bool(a), ShimValue::Bool(b)) => Ok(ShimValue::Bool(*a == false && *b == true)),
+            (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Bool(a < b)),
+            (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(a < b)),
+            (ShimValue::None, ShimValue::None) => Ok(ShimValue::Bool(false)),
+            (a, b) => Err(format!("Can't LT {:?} and {:?}", a, b))
+        }
+    }
+
+    fn lte(&self, _interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
+        match (self, other) {
+            (ShimValue::Bool(a), ShimValue::Bool(b)) => Ok(ShimValue::Bool(a == b)),
+            (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Bool(a <= b)),
+            (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(a <= b)),
+            (ShimValue::None, ShimValue::None) => Ok(ShimValue::Bool(true)),
+            (a, b) => Err(format!("Can't LTE {:?} and {:?}", a, b))
+        }
+    }
+
+    fn not(&self, _interpreter: &mut Interpreter) -> Result<ShimValue, String> {
+        match self {
+            ShimValue::Bool(a) => Ok(ShimValue::Bool(!a)),
+            ShimValue::Float(a) => Ok(ShimValue::Bool(*a == 0.0)),
+            ShimValue::Integer(a) => Ok(ShimValue::Bool(*a == 0)),
+            ShimValue::None => Ok(ShimValue::Bool(true)),
+            other => Ok(ShimValue::Bool(false)),
+        }
+    }
+
+    fn neg(&self, _interpreter: &mut Interpreter) -> Result<ShimValue, String> {
+        match self {
+            ShimValue::Float(a) => Ok(ShimValue::Float(-a)),
+            ShimValue::Integer(a) => Ok(ShimValue::Integer(-a)),
+            _ => Err(format!("Can't Negate {:?}", self))
         }
     }
 
@@ -1639,8 +1918,15 @@ enum ByteCode {
     Add,
     Sub,
     Equal,
-    // Or,
-    // Not,
+    NotEqual,
+    Multiply,
+    Divide,
+    GT,
+    GTE,
+    LT,
+    LTE,
+    Not,
+    Negate,
     // And,
     // ToString,
     // ToBool,
@@ -2166,27 +2452,80 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
         Expression::Primary(Primary::Expression(expr)) => {
             compile_expression(&expr)
         },
+        Expression::BooleanOp(BooleanOp::And(a, b)) => {
+            let mut asm = compile_expression(&a)?;
+            asm.push((ByteCode::Copy as u8, Span { start:0, end:0}));
+
+            let short_circuit_idx = asm.len();
+            asm.push((ByteCode::JmpZ as u8, Span { start:0, end:0}));
+            asm.push((0, Span { start:0, end:0}));
+            asm.push((0, Span { start:0, end:0}));
+
+            // Since the result of a is truthy we get rid of it and return the result of b
+            asm.push((ByteCode::Pop as u8, Span { start:0, end:0}));
+
+            asm.extend(compile_expression(&b)?);
+
+            let short_circuit_offset = u16_to_u8s(
+                asm.len() as u16 - short_circuit_idx as u16
+            );
+            asm[short_circuit_idx+1].0 = short_circuit_offset[0];
+            asm[short_circuit_idx+2].0 = short_circuit_offset[1];
+
+            Ok(asm)
+        },
+        Expression::BooleanOp(BooleanOp::Or(a, b)) => {
+            let mut asm = compile_expression(&a)?;
+            asm.push((ByteCode::Copy as u8, Span { start:0, end:0}));
+
+            let short_circuit_idx = asm.len();
+            asm.push((ByteCode::JmpNZ as u8, Span { start:0, end:0}));
+            asm.push((0, Span { start:0, end:0}));
+            asm.push((0, Span { start:0, end:0}));
+
+            // Since the result of a is falsy we get rid of it and return the result of b
+            asm.push((ByteCode::Pop as u8, Span { start:0, end:0}));
+
+            asm.extend(compile_expression(&b)?);
+
+            let short_circuit_offset = u16_to_u8s(
+                asm.len() as u16 - short_circuit_idx as u16
+            );
+            asm[short_circuit_idx+1].0 = short_circuit_offset[0];
+            asm[short_circuit_idx+2].0 = short_circuit_offset[1];
+
+            Ok(asm)
+        },
         Expression::BinaryOp(op) => {
-            match op {
-                BinaryOp::Add(a, b) => {
-                    let mut res = compile_expression(&a)?;
-                    res.extend(compile_expression(&b)?);
-                    res.push((ByteCode::Add as u8, expr.span));
-                    Ok(res)
-                },
-                BinaryOp::Subtract(a, b) => {
-                    let mut res = compile_expression(&a)?;
-                    res.extend(compile_expression(&b)?);
-                    res.push((ByteCode::Sub as u8, expr.span));
-                    Ok(res)
-                },
-                BinaryOp::Equal(a, b) => {
-                    let mut res = compile_expression(&a)?;
-                    res.extend(compile_expression(&b)?);
-                    res.push((ByteCode::Equal as u8, expr.span));
-                    Ok(res)
-                },
-            }
+            let (opcode, a, b) = match op {
+                BinaryOp::Add(a, b) => (ByteCode::Add, a, b),
+                BinaryOp::Subtract(a, b) => (ByteCode::Sub, a, b),
+                BinaryOp::Equal(a, b) => (ByteCode::Equal, a, b),
+                BinaryOp::NotEqual(a, b) => (ByteCode::NotEqual, a, b),
+                BinaryOp::Multiply(a, b) => (ByteCode::Multiply, a, b),
+                BinaryOp::Divide(a, b) => (ByteCode::Divide, a, b),
+                BinaryOp::GT(a, b) => (ByteCode::GT, a, b),
+                BinaryOp::GTE(a, b) => (ByteCode::GTE, a, b),
+                BinaryOp::LT(a, b) => (ByteCode::LT, a, b),
+                BinaryOp::LTE(a, b) => (ByteCode::LTE, a, b),
+            };
+            let mut res = compile_expression(&a)?;
+            res.extend(compile_expression(&b)?);
+            res.push(
+                (opcode as u8, expr.span)
+            );
+            Ok(res)
+        },
+        Expression::UnaryOp(op) => {
+            let (opcode, a) = match op {
+                UnaryOp::Not(a) => (ByteCode::Not, a),
+                UnaryOp::Negate(a) => (ByteCode::Negate, a),
+            };
+            let mut res = compile_expression(&a)?;
+            res.push(
+                (opcode as u8, expr.span)
+            );
+            Ok(res)
         },
         Expression::Call(expr, args) => {
             // First we evaluate the thing that needs to be called
@@ -2281,6 +2620,49 @@ impl Interpreter {
                     let a = stack.pop().expect("Operand for add");
                     stack.push(a.equal(self, &b)?);
                 },
+                val if val == ByteCode::NotEqual as u8 => {
+                    let a = stack.pop().expect("Operand for ByteCode::NotEqual");
+                    let b = stack.pop().expect("Operand for ByteCode::NotEqual");
+                    stack.push(a.not_equal(self, &b)?);
+                },
+                val if val == ByteCode::Multiply as u8 => {
+                    let a = stack.pop().expect("Operand for ByteCode::Multiply");
+                    let b = stack.pop().expect("Operand for ByteCode::Multiply");
+                    stack.push(a.mul(self, &b)?);
+                },
+                val if val == ByteCode::Divide as u8 => {
+                    let a = stack.pop().expect("Operand for ByteCode::Divide");
+                    let b = stack.pop().expect("Operand for ByteCode::Divide");
+                    stack.push(a.div(self, &b)?);
+                },
+                val if val == ByteCode::GT as u8 => {
+                    let a = stack.pop().expect("Operand for ByteCode::GT");
+                    let b = stack.pop().expect("Operand for ByteCode::GT");
+                    stack.push(a.gt(self, &b)?);
+                },
+                val if val == ByteCode::GTE as u8 => {
+                    let a = stack.pop().expect("Operand for ByteCode::GTE");
+                    let b = stack.pop().expect("Operand for ByteCode::GTE");
+                    stack.push(a.gte(self, &b)?);
+                },
+                val if val == ByteCode::LT as u8 => {
+                    let a = stack.pop().expect("Operand for ByteCode::LT");
+                    let b = stack.pop().expect("Operand for ByteCode::LT");
+                    stack.push(a.lt(self, &b)?);
+                },
+                val if val == ByteCode::LTE as u8 => {
+                    let a = stack.pop().expect("Operand for ByteCode::LTE");
+                    let b = stack.pop().expect("Operand for ByteCode::LTE");
+                    stack.push(a.lte(self, &b)?);
+                },
+                val if val == ByteCode::Not as u8 => {
+                    let a = stack.pop().expect("Operand for ByteCode::Not");
+                    stack.push(a.not(self)?);
+                },
+                val if val == ByteCode::Negate as u8 => {
+                    let a = stack.pop().expect("Operand for ByteCode::Negate");
+                    stack.push(a.neg(self)?);
+                },
                 val if val == ByteCode::LiteralNone as u8 => {
                     stack.push(ShimValue::None);
                 },
@@ -2307,7 +2689,7 @@ impl Interpreter {
                 val if val == ByteCode::Break as u8 => {
                     let (_, end_pc, scope_count) = loop_info.last().expect("break should have loop info");
                     while self.env.env_chain.len() > *scope_count {
-                        self.env.pop_scope();
+                        self.env.pop_scope().unwrap();
                     }
                     pc = *end_pc;
                     continue;
@@ -2315,7 +2697,7 @@ impl Interpreter {
                 val if val == ByteCode::Continue as u8 => {
                     let (start_pc, _, scope_count) = loop_info.last().expect("continue should have loop info");
                     while self.env.env_chain.len() > *scope_count {
-                        self.env.pop_scope();
+                        self.env.pop_scope().unwrap();
                     }
                     pc = *start_pc;
                     continue;
@@ -2426,6 +2808,10 @@ impl Interpreter {
                         stack.push(
                             ShimValue::Print
                         );
+                    } else if ident == b"panic" {
+                        stack.push(
+                            ShimValue::Panic
+                        );
                     } else if let Some(value) = self.env.get(ident) {
                         stack.push(value);
                     } else {
@@ -2509,7 +2895,7 @@ impl Interpreter {
                     let scope_count;
                     (pc, loop_info, scope_count) = stack_frame.pop().expect("stack frame to return to");
                     while self.env.env_chain.len() > scope_count {
-                        self.env.pop_scope();
+                        self.env.pop_scope().unwrap();
                     }
                     continue;
                 }
@@ -2530,7 +2916,7 @@ impl Interpreter {
                     continue;
                 }
                 val if val == ByteCode::JmpNZ as u8 => {
-                    let conditional = stack.pop().expect("val to check");
+                    let conditional = stack.pop().expect("JMPNZ val to check");
                     if conditional.is_truthy(self)? {
                         // TODO: signed jumps
                         let new_pc = pc +
@@ -2542,7 +2928,7 @@ impl Interpreter {
                     pc += 2;
                 }
                 val if val == ByteCode::JmpZ as u8 => {
-                    let conditional = stack.pop().expect("val to check");
+                    let conditional = stack.pop().expect("JMP val to check");
                     if !conditional.is_truthy(self)? {
                         // TODO: signed jumps
                         let new_pc = pc +

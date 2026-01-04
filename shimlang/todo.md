@@ -1,9 +1,5 @@
-- For loops
 - List methods
 - Dicts
 - String methods
-- All numeric operators
-- Boolean operators
-- Boolean short-circuiting
 - Removing use of `Vec` in values stored in MMU
 - Adding ident cache to Fn bytecode
