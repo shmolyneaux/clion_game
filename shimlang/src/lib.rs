@@ -1504,6 +1504,10 @@ pub enum ShimValue {
         // Fn, TODO: should be a memory position instead of PC
         u32,
     ),
+    BoundNativeMethod(
+        // ShimValue followed by NativeFn
+        Word,
+    ),
     // A function pointer doesn't fit in the ShimValue, so we need to store the
     // function pointer in interpreter memory
     NativeFn(Word),
@@ -1578,6 +1582,25 @@ fn shim_panic(interpreter: &mut Interpreter, args: &Vec<ShimValue>) -> Result<Sh
     Err(out)
 }
 
+fn shim_list_len(interpreter: &mut Interpreter, args: &Vec<ShimValue>) -> Result<ShimValue, String> {
+    if args.len() != 1 {
+        return Err(format!("No args expected for list len"));
+    }
+
+    let lst = if let ShimValue::List(position) = args[0] {
+        unsafe {
+            let ptr: *mut Vec<ShimValue> = std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
+            ptr
+        }
+    } else {
+        return Err(format!("Can't get list len on non-list {:?}", args[0]));
+    };
+
+    unsafe {
+        Ok(ShimValue::Integer((*lst).len() as i32))
+    }
+}
+
 impl ShimValue {
     fn call(&self, interpreter: &mut Interpreter, stack: &mut Vec<ShimValue>) -> Result<CallResult, String> {
         let arg_pos: Word = match stack[stack.len()-1] {
@@ -1598,6 +1621,14 @@ impl ShimValue {
                 // push struct pos to start of arg list then return the pc of the method
                 args.insert(0, ShimValue::Struct(*pos));
                 Ok(CallResult::PC(*pc))
+            }
+            ShimValue::BoundNativeMethod(pos) => {
+                let obj: &ShimValue = unsafe { interpreter.mem.get(*pos) };
+                let native_fn: &NativeFn = unsafe { interpreter.mem.get(*pos + 1) };
+
+                stack.pop();
+                args.insert(0, *obj);
+                Ok(CallResult::ReturnValue(native_fn(interpreter, args)?))
             }
             ShimValue::StructDef(struct_def_pos) => {
                 let struct_def: &StructDef = unsafe { interpreter.mem.get(*struct_def_pos) };
@@ -1848,6 +1879,29 @@ impl ShimValue {
                     }
                 }
                 Err(format!("Ident {:?} not found for {:?}", ident, self))
+            },
+            ShimValue::List(lst_pos) => {
+                // TODO: this would be more efficient memorywise if all the native
+                // list functions were already in memory. Then the bound native
+                // method wouldn't need to be pushed to memory every time a
+                // native method is called
+                if ident == b"len" {
+                    let position = interpreter.mem.alloc(Word(2.into()));
+                    unsafe {
+                        let obj_ptr: *mut ShimValue = std::mem::transmute(
+                            &mut interpreter.mem.mem[usize::from(position.0)]
+                        );
+                        *obj_ptr = *self;
+                        let fn_ptr: *mut NativeFn = std::mem::transmute(
+                            &mut interpreter.mem.mem[usize::from(position.0)+1]
+                        );
+                        *fn_ptr = shim_list_len;
+
+                        Ok(ShimValue::BoundNativeMethod(position))
+                    }
+                } else {
+                    Err(format!("No ident {:?} on list", self))
+                }
             },
             val => Err(format!("Ident {:?} not available on {:?}", ident, val))
         }
