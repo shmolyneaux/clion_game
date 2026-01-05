@@ -1,5 +1,10 @@
 - List methods
 - Dicts
 - String methods
+- Keyword args, variable arguments
+- Operator overloading
+- Type annotations
+- Runtime type checking
+- Static type checking
 - Removing use of `Vec` in values stored in MMU
 - Adding ident cache to Fn bytecode
