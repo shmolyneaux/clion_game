@@ -1,3 +1,3 @@
  1 | 1 + "test";
        ^
-Error: Can't add Integer(1) and String(Word(u24([0, 0, 0])))
+Error: Can't add Integer(1) and String(Word(u24([0, 0, 2])))

@@ -1350,6 +1350,8 @@ pub struct MMU {
     // should be freed.
 }
 
+use std::any::TypeId;
+
 impl MMU {
     fn with_capacity(word_count: Word) -> Self {
         let mem = vec![0; usize::from(word_count.0)];
@@ -1364,7 +1366,11 @@ impl MMU {
         todo!("compact_free_list not implemented");
     }
 
-    unsafe fn get<T>(&self, word: Word) -> &T {
+    unsafe fn get<T: 'static>(&self, word: Word) -> &T {
+        if TypeId::of::<T>() == TypeId::of::<Word>() {
+            panic!("Can't MMU::get<Word>");
+        }
+
         unsafe {
             let ptr: *const T = std::mem::transmute(&self.mem[usize::from(word.0)]);
             &*ptr
@@ -1487,8 +1493,6 @@ pub struct Interpreter {
 pub enum ShimValue {
     Unit,
     None,
-    Print,
-    Panic,
     Integer(i32),
     Float(f32),
     Bool(bool),
@@ -1500,6 +1504,9 @@ pub enum ShimValue {
         // Fn, TODO: should be a memory position instead of PC
         u32,
     ),
+    // A function pointer doesn't fit in the ShimValue, so we need to store the
+    // function pointer in interpreter memory
+    NativeFn(Word),
     // TODO: it seems like this should point to a more generic reference-counted
     // object type that all non-value types share
     String(Word),
@@ -1511,6 +1518,11 @@ pub enum ShimValue {
 use std::mem::{size_of};
 const _: () = {
     assert!(std::mem::size_of::<ShimValue>() <= 8);
+};
+
+type NativeFn = fn(&mut Interpreter, &Vec<ShimValue>) -> Result<ShimValue, String>;
+const _: () = {
+    assert!(std::mem::size_of::<NativeFn>() == 8);
 };
 
 fn format_float(val: f32) -> String {
@@ -1541,6 +1553,31 @@ enum CallResult {
     PC(u32),
 }
 
+fn shim_print(interpreter: &mut Interpreter, args: &Vec<ShimValue>) -> Result<ShimValue, String> {
+    for (idx, arg) in args.iter().enumerate() {
+        if idx != 0 {
+            print!(" ");
+        }
+        print!("{}", arg.to_string(interpreter));
+    }
+
+    println!();
+    Ok(ShimValue::None)
+}
+
+fn shim_panic(interpreter: &mut Interpreter, args: &Vec<ShimValue>) -> Result<ShimValue, String> {
+    let mut out = String::new();
+    for (idx, arg) in args.iter().enumerate() {
+        if idx != 0 {
+            out.push(' ');
+        }
+        out.push_str(&format!("{}", arg.to_string(interpreter)));
+    }
+
+    out.push('\n');
+    Err(out)
+}
+
 impl ShimValue {
     fn call(&self, interpreter: &mut Interpreter, stack: &mut Vec<ShimValue>) -> Result<CallResult, String> {
         let arg_pos: Word = match stack[stack.len()-1] {
@@ -1554,31 +1591,6 @@ impl ShimValue {
         };
         match self {
             ShimValue::None => Err(format!("Can't call None as a function")),
-            ShimValue::Print => {
-                stack.pop();
-                for (idx, arg) in args.iter().enumerate() {
-                    if idx != 0 {
-                        print!(" ");
-                    }
-                    print!("{}", arg.to_string(interpreter));
-                }
-
-                println!();
-                Ok(CallResult::ReturnValue(ShimValue::None))
-            },
-            ShimValue::Panic => {
-                stack.pop();
-                let mut out = String::new();
-                for (idx, arg) in args.iter().enumerate() {
-                    if idx != 0 {
-                        out.push(' ');
-                    }
-                    out.push_str(&format!("{}", arg.to_string(interpreter)));
-                }
-
-                out.push('\n');
-                Err(out)
-            },
             ShimValue::Fn(pc) => {
                 Ok(CallResult::PC(*pc))
             }
@@ -1612,6 +1624,11 @@ impl ShimValue {
                 }
 
                 Ok(CallResult::ReturnValue(ShimValue::Struct(new_pos)))
+            }
+            ShimValue::NativeFn(pos) => {
+                stack.pop();
+                let native_fn: &NativeFn = unsafe { interpreter.mem.get(*pos) };
+                Ok(CallResult::ReturnValue(native_fn(interpreter, args)?))
             }
             other => Err(format!("Can't call value {:?} as a function", other.to_string(interpreter))),
         }
@@ -1840,7 +1857,8 @@ impl ShimValue {
         match self {
             ShimValue::Struct(pos) => {
                 unsafe {
-                    let def_pos: Word = *interpreter.mem.get(*pos);
+                    let def_pos: u64 = *interpreter.mem.get(*pos);
+                    let def_pos: Word = Word((def_pos as u32).into());
                     let def: &StructDef = interpreter.mem.get(def_pos);
                     for (attr, loc) in def.lookup.iter() {
                         if ident == attr {
@@ -2563,12 +2581,33 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
 
 impl Interpreter {
     pub fn create(config: &Config) -> Self {
-        let mmu = MMU::with_capacity(Word((config.memory_space_bytes / 8).into()));
+        let mut mmu = MMU::with_capacity(Word((config.memory_space_bytes / 8).into()));
+        let mut env = Environment::new();
+
+        let builtins: &[(&[u8], Box<NativeFn>)] = &[
+            (b"print", Box::new(shim_print)),
+            (b"panic", Box::new(shim_panic)),
+        ];
+
+        for (name, func) in builtins {
+            let position = mmu.alloc(Word(1.into()));
+            unsafe {
+                let ptr: *mut NativeFn = std::mem::transmute(
+                    &mut mmu.mem[usize::from(position.0)]
+                );
+                *ptr = **func;
+            }
+
+            env.insert_new(
+                name.to_vec(),
+                ShimValue::NativeFn(position)
+            );
+        }
 
         Self {
             mem: mmu,
             source: HashMap::new(),
-            env: Environment::new(),
+            env,
         }
     }
 
@@ -2804,15 +2843,7 @@ impl Interpreter {
                 val if val == ByteCode::VariableLoad as u8 => {
                     let ident_len = bytes[pc+1] as usize;
                     let ident = &bytes[pc+2..pc+2+ident_len as usize];
-                    if ident == b"print" {
-                        stack.push(
-                            ShimValue::Print
-                        );
-                    } else if ident == b"panic" {
-                        stack.push(
-                            ShimValue::Panic
-                        );
-                    } else if let Some(value) = self.env.get(ident) {
+                    if let Some(value) = self.env.get(ident) {
                         stack.push(value);
                     } else {
                         return Err(
@@ -3070,6 +3101,8 @@ pub fn print_asm(bytes: &[u8]) {
             eprint!("create struct");
         } else if *b == ByteCode::GetAttr as u8 {
             eprint!("get");
+        } else if *b == ByteCode::SetAttr as u8 {
+            eprint!("set");
         } else if *b == ByteCode::VariableLoad as u8 {
             eprint!("load");
         } else if *b == ByteCode::Break as u8 {
