@@ -7,4 +7,11 @@
 - Runtime type checking
 - Static type checking
 - Removing use of `Vec` in values stored in MMU
+- Ref-counting in MMU
+- Debugger
+- Memory viewer
+- Assemby viewer
+- Stack viewer
+- Spans for statements
+- Garbage collection
 - Adding ident cache to Fn bytecode

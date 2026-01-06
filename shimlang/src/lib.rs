@@ -81,6 +81,7 @@ pub enum Expression {
     BinaryOp(BinaryOp),
     UnaryOp(UnaryOp),
     Call(Box<ExprNode>, Vec<ExprNode>),
+    Index(Box<ExprNode>, Box<ExprNode>),
     Attribute(Box<ExprNode>, Vec<u8>),
     Block(Block),
     If(Box<ExprNode>, Block, Block),
@@ -451,6 +452,15 @@ pub fn parse_call(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                     span: span,
                 };
             },
+            Token::LSquare => {
+                tokens.advance()?;
+                let index_expr = parse_expression(tokens)?;
+                tokens.consume(Token::RSquare)?;
+                expr = Node {
+                    data: Expression::Index(Box::new(expr), Box::new(index_expr)),
+                    span: span,
+                };
+            },
             Token::Dot => {
                 tokens.advance()?;
                 let ident = match tokens.pop()? {
@@ -638,7 +648,7 @@ pub fn parse_unary(tokens: &mut TokenStream) -> Result<ExprNode, String> {
             tokens.advance()?;
             let expr = parse_unary(tokens)?;
             Ok(Node {
-                data: Expression::UnaryOp(UnaryOp::Not(Box::new(expr))),
+                data: Expression::UnaryOp(UnaryOp::Negate(Box::new(expr))),
                 span: span,
             })
         },
@@ -1601,6 +1611,25 @@ fn shim_list_len(interpreter: &mut Interpreter, args: &Vec<ShimValue>) -> Result
     }
 }
 
+fn shim_str_len(interpreter: &mut Interpreter, args: &Vec<ShimValue>) -> Result<ShimValue, String> {
+    if args.len() != 1 {
+        return Err(format!("No args expected for str len"));
+    }
+
+    let lst = if let ShimValue::String(position) = args[0] {
+        unsafe {
+            let ptr: *mut Vec<u8> = std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
+            ptr
+        }
+    } else {
+        return Err(format!("Can't get str len on non-str {:?}", args[0]));
+    };
+
+    unsafe {
+        Ok(ShimValue::Integer((*lst).len() as i32))
+    }
+}
+
 impl ShimValue {
     fn call(&self, interpreter: &mut Interpreter, stack: &mut Vec<ShimValue>) -> Result<CallResult, String> {
         let arg_pos: Word = match stack[stack.len()-1] {
@@ -1662,6 +1691,53 @@ impl ShimValue {
                 Ok(CallResult::ReturnValue(native_fn(interpreter, args)?))
             }
             other => Err(format!("Can't call value {:?} as a function", other.to_string(interpreter))),
+        }
+    }
+
+    fn index(&self, interpreter: &mut Interpreter, index: &ShimValue) -> Result<ShimValue, String> {
+        match (self, index) {
+            (ShimValue::String(position), ShimValue::Integer(index)) => {
+                unsafe {
+                    let index = *index as isize;
+                    let ptr: *mut Vec<u8> = std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
+
+                    let len = (*ptr).len() as isize;
+                    let index: isize = if index < -len || index >= len {
+                        return Err(format!("Index {} is out of bounds", index));
+                    } else if index < 0 {
+                        len + index as isize
+                    } else {
+                        index as isize
+                    };
+
+                    let b: u8 = (&(*ptr))[index as usize];
+
+                    let word_count = Word(3.into());
+                    let new_str = interpreter.mem.alloc(word_count);
+                    let ptr: *mut Vec<u8> = std::mem::transmute(&mut interpreter.mem.mem[usize::from(new_str.0)]);
+                    *ptr = [b].to_vec();
+
+                    Ok(ShimValue::String(new_str))
+                }
+            },
+            (ShimValue::List(position), ShimValue::Integer(index)) => {
+                unsafe {
+                    let index = *index as isize;
+                    let ptr: *mut Vec<ShimValue> = std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
+
+                    let len = (*ptr).len() as isize;
+                    let index: isize = if index < -len || index >= len {
+                        return Err(format!("Index {} is out of bounds", index));
+                    } else if index < 0 {
+                        len + index as isize
+                    } else {
+                        index as isize
+                    };
+
+                    Ok((&(*ptr))[index as usize])
+                }
+            },
+            (a, b) => Err(format!("Can't index {:?} with {:?}", a, b)),
         }
     }
 
@@ -1880,7 +1956,26 @@ impl ShimValue {
                 }
                 Err(format!("Ident {:?} not found for {:?}", ident, self))
             },
-            ShimValue::List(lst_pos) => {
+            ShimValue::String(_) => {
+                if ident == b"len" {
+                    let position = interpreter.mem.alloc(Word(2.into()));
+                    unsafe {
+                        let obj_ptr: *mut ShimValue = std::mem::transmute(
+                            &mut interpreter.mem.mem[usize::from(position.0)]
+                        );
+                        *obj_ptr = *self;
+                        let fn_ptr: *mut NativeFn = std::mem::transmute(
+                            &mut interpreter.mem.mem[usize::from(position.0)+1]
+                        );
+                        *fn_ptr = shim_str_len;
+
+                        Ok(ShimValue::BoundNativeMethod(position))
+                    }
+                } else {
+                    Err(format!("No ident {:?} on list", self))
+                }
+            },
+            ShimValue::List(_) => {
                 // TODO: this would be more efficient memorywise if all the native
                 // list functions were already in memory. Then the bound native
                 // method wouldn't need to be pushed to memory every time a
@@ -2023,6 +2118,7 @@ enum ByteCode {
     Break,
     Continue,
     Call,
+    Index,
     Return,
     Jmp,
     JmpUp,
@@ -2599,6 +2695,13 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
             );
             Ok(res)
         },
+        Expression::Index(obj_expr, index_expr) => {
+            let mut asm = compile_expression(&obj_expr)?;
+            asm.extend(compile_expression(index_expr)?);
+            asm.push((ByteCode::Index as u8, expr.span));
+
+            Ok(asm)
+        },
         Expression::Call(expr, args) => {
             // First we evaluate the thing that needs to be called
             let mut res = compile_expression(&expr)?;
@@ -2936,6 +3039,12 @@ impl Interpreter {
 
                     pc += 1 + ident_len;
                 },
+                val if val == ByteCode::Index as u8 => {
+                    let index = stack.pop().expect("index val");
+                    let obj = stack.pop().expect("index obj");
+
+                    stack.push(obj.index(self, &index)?);
+                },
                 val if val == ByteCode::Call as u8 => {
                     // When Call appears the args should already be in a list at
                     // the top of the stack, followed by the callable
@@ -3135,6 +3244,8 @@ pub fn print_asm(bytes: &[u8]) {
             eprint!("assignment");
         } else if *b == ByteCode::Call as u8 {
             eprint!("call");
+        } else if *b == ByteCode::Index as u8 {
+            eprint!("index");
         } else if *b == ByteCode::Add as u8 {
             eprint!("add");
         } else if *b == ByteCode::CreateFn as u8 {
