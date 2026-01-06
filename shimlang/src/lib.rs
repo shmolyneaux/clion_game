@@ -1801,6 +1801,9 @@ impl ShimValue {
             (ShimValue::Integer(a), ShimValue::Integer(b)) => {
                 Ok(ShimValue::Integer(a + b))
             },
+            (ShimValue::Float(a), ShimValue::Float(b)) => {
+                Ok(ShimValue::Float(a + b))
+            },
             (a, b) => Err(format!("Can't add {:?} and {:?}", a, b))
         }
     }
@@ -1809,6 +1812,9 @@ impl ShimValue {
         match (self, other) {
             (ShimValue::Integer(a), ShimValue::Integer(b)) => {
                 Ok(ShimValue::Integer(a - b))
+            },
+            (ShimValue::Float(a), ShimValue::Float(b)) => {
+                Ok(ShimValue::Float(a - b))
             },
             (a, b) => Err(format!("Can't sub {:?} and {:?}", a, b))
         }
