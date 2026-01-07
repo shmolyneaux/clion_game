@@ -88,6 +88,21 @@ pub enum Expression {
 }
 
 #[derive(Debug)]
+struct Fn {
+    ident: Vec<u8>,
+    args: Vec<(Vec<u8>, Option<ExprNode>)>,
+    kw_only_args: Vec<(Vec<u8>, Option<ExprNode>)>,
+    body: Block,
+}
+
+#[derive(Debug)]
+struct Struct {
+    ident: Vec<u8>,
+    members: Vec<Vec<u8>>,
+    methods: Vec<Fn>,
+}
+
+#[derive(Debug)]
 pub enum Statement {
     Let(Vec<u8>, ExprNode),
     Assignment(Vec<u8>, ExprNode),
@@ -97,13 +112,8 @@ pub enum Statement {
     While(ExprNode, Block),
     Break,
     Continue,
-    Fn(Vec<u8>, Vec<Vec<u8>>, Block),
-    Struct(
-        Vec<u8>,
-        Vec<Vec<u8>>,
-        /** These are methods */
-        Vec<Statement>
-    ),
+    Fn(Fn),
+    Struct(Struct),
     Expression(ExprNode),
     Return(Option<ExprNode>),
 }
@@ -712,7 +722,7 @@ pub fn parse_ast(tokens: &mut TokenStream) -> Result<Ast, String> {
     Ok(Ast { block: block, script: tokens.script.clone() })
 }
 
-pub fn parse_function(tokens: &mut TokenStream) -> Result<Statement, String> {
+pub fn parse_function(tokens: &mut TokenStream) -> Result<Fn, String> {
     tokens.consume(Token::Fn)?;
     let ident = match tokens.pop()? {
         Token::Identifier(ident) => {
@@ -728,7 +738,7 @@ pub fn parse_function(tokens: &mut TokenStream) -> Result<Statement, String> {
     while !tokens.is_empty() {
         match tokens.peek()? {
             Token::Identifier(ident) => {
-                params.push(ident.clone())
+                params.push((ident.clone(), None))
             }
             Token::RBracket => break,
             token => return Err(
@@ -746,7 +756,7 @@ pub fn parse_function(tokens: &mut TokenStream) -> Result<Statement, String> {
 
     let mut body = parse_block(tokens)?;
 
-    Ok(Statement::Fn(ident, params, body))
+    Ok(Fn{ident: ident, args: params, kw_only_args: Vec::new(), body: body})
 }
 
 pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
@@ -786,7 +796,7 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
 
             Statement::Let(ident, expr)
         } else if *tokens.peek()? == Token::Fn {
-            parse_function(tokens)?
+            Statement::Fn(parse_function(tokens)?)
         } else if *tokens.peek()? == Token::If {
             let cond = parse_conditional(tokens)?;
 
@@ -884,7 +894,7 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
             }
             tokens.consume(Token::RCurly)?;
 
-            Statement::Struct(ident, members, methods)
+            Statement::Struct(Struct {ident, members, methods})
         } else if *tokens.peek()? == Token::Return {
             tokens.advance()?;
             if *tokens.peek()? == Token::Semicolon {
@@ -2167,12 +2177,12 @@ pub fn u8s_to_u16(val: [u8; 2]) -> u16 {
     ((val[0] as u16) << 8) + val[1] as u16
 }
 
-pub fn compile_function_body(params: &Vec<Vec<u8>>, body: &Block) -> Result<Vec<(u8, Span)>, String> {
+pub fn compile_function_body(params: &Vec<(Vec<u8>, Option<ExprNode>)>, body: &Block) -> Result<Vec<(u8, Span)>, String> {
     let mut asm = Vec::new();
     asm.push((ByteCode::AssertLen as u8, Span {start:0, end:1}));
     asm.push((params.len() as u8, Span {start:0, end:1}));
     asm.push((ByteCode::Splat as u8, Span {start:0, end:1}));
-    for param in params.iter().rev() {
+    for (param, _default) in params.iter().rev() {
         asm.push((ByteCode::VariableDeclaration as u8, Span {start:0, end:1}));
         asm.push((param.len().try_into().expect("Param len should into u8"), Span {start:0, end:1}));
         for b in param {
@@ -2265,7 +2275,7 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
 
             Ok(expr_asm)
         },
-        Statement::Fn(ident, params, body) => {
+        Statement::Fn(Fn{ident, args: params, kw_only_args: _kw_params, body: body}) => {
             // This will be replaced with a relative jump to after the function
             // declaration
             let mut asm = vec![
@@ -2295,7 +2305,7 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
 
             Ok(asm)
         },
-        Statement::Struct(ident, members, methods) => {
+        Statement::Struct(Struct{ident, members, methods}) => {
             let mut asm = vec![
                 (ByteCode::CreateStruct as u8, Span {start: 0, end: 1}),
                 (0, Span {start: 0, end: 1}),
@@ -2313,12 +2323,7 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
 
             let mut method_defs = Vec::new();
             for method in methods {
-                match method {
-                    Statement::Fn(ident, params, body) => {
-                        method_defs.push((ident, compile_function_body(params, body)?));
-                    },
-                    other => return Err(format!("Unexpected statement as struct method {:?}", other)),
-                }
+                method_defs.push((&method.ident, compile_function_body(&method.args, &method.body)?));
             }
 
             let mut jump_asm_idx = Vec::new();
