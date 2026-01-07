@@ -60,6 +60,7 @@ pub enum BinaryOp {
     GTE(Box<ExprNode>, Box<ExprNode>),
     LT(Box<ExprNode>, Box<ExprNode>),
     LTE(Box<ExprNode>, Box<ExprNode>),
+    In(Box<ExprNode>, Box<ExprNode>),
 }
 
 #[derive(Debug)]
@@ -559,6 +560,13 @@ pub fn parse_comparison(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                 tokens.advance()?;
                 expr = Node {
                     data: Expression::BinaryOp(BinaryOp::LTE(Box::new(expr), Box::new(parse_expression(tokens)?))),
+                    span: span,
+                };
+            },
+            Token::In => {
+                tokens.advance()?;
+                expr = Node {
+                    data: Expression::BinaryOp(BinaryOp::In(Box::new(expr), Box::new(parse_expression(tokens)?))),
                     span: span,
                 };
             },
@@ -1111,6 +1119,8 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
                     tokens.push(Token::Break);
                 } else if ident == b"continue" {
                     tokens.push(Token::Continue);
+                } else if ident == b"in" {
+                    tokens.push(Token::In);
                 } else if ident == b"struct" {
                     tokens.push(Token::Struct);
                 } else if ident == b"return" {
@@ -1535,6 +1545,7 @@ pub enum ShimValue {
     // object type that all non-value types share
     String(Word),
     List(Word),
+    Dict(Word),
     StructDef(Word),
     Struct(Word),
 }
@@ -1575,6 +1586,25 @@ struct StructDef {
 enum CallResult {
     ReturnValue(ShimValue),
     PC(u32),
+}
+
+fn shim_dict(interpreter: &mut Interpreter, args: &Vec<ShimValue>) -> Result<ShimValue, String> {
+    if args.len() != 0 {
+        return Err(format!("Can't provide args to dict()"));
+    }
+
+    let word_count = Word(
+        (std::mem::size_of::<Vec<(ShimValue, ShimValue)>>() as u32).into()
+    );
+    let position = interpreter.mem.alloc(word_count);
+    unsafe {
+        let ptr: *mut Vec<(ShimValue, ShimValue)> = std::mem::transmute(
+            &mut interpreter.mem.mem[usize::from(position.0)]
+        );
+        *ptr = Vec::new();
+    }
+
+    Ok(ShimValue::Dict(position))
 }
 
 fn shim_print(interpreter: &mut Interpreter, args: &Vec<ShimValue>) -> Result<ShimValue, String> {
@@ -1619,6 +1649,78 @@ fn shim_list_len(interpreter: &mut Interpreter, args: &Vec<ShimValue>) -> Result
     unsafe {
         Ok(ShimValue::Integer((*lst).len() as i32))
     }
+}
+
+fn shim_dict_index_set(interpreter: &mut Interpreter, args: &Vec<ShimValue>) -> Result<ShimValue, String> {
+    if args.len() != 3 {
+        return Err(format!("Expected 3 args for dict set"));
+    }
+
+    let mut dict: &mut Vec<(ShimValue, ShimValue)> = if let ShimValue::Dict(position) = args[0] {
+        unsafe {
+            let ptr: &mut Vec<(ShimValue, ShimValue)> = std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
+            ptr
+        }
+    } else {
+        return Err(format!("Can't set on non-dict {:?}", args[0]));
+    };
+
+    for (key, val) in dict.iter_mut() {
+        if key.equal_inner(interpreter, &args[1])? {
+            *val = args[2];
+            return Ok(ShimValue::None);
+        }
+    }
+
+    dict.push((args[1], args[2]));
+
+    Ok(ShimValue::None)
+}
+
+fn shim_dict_index_get(interpreter: &mut Interpreter, args: &Vec<ShimValue>) -> Result<ShimValue, String> {
+    if args.len() != 2 {
+        return Err(format!("Expected 2 args for dict get"));
+    }
+
+    let mut dict: &mut Vec<(ShimValue, ShimValue)> = if let ShimValue::Dict(position) = args[0] {
+        unsafe {
+            let ptr: &mut Vec<(ShimValue, ShimValue)> = std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
+            ptr
+        }
+    } else {
+        return Err(format!("Can't get non-dict {:?}", args[0]));
+    };
+
+    for (key, val) in dict.iter() {
+        if key.equal_inner(interpreter, &args[1])? {
+            return Ok(*val)
+        }
+    }
+
+    Err(format!("Key not found in dict {:?}", args[1]))
+}
+
+fn shim_dict_index_has(interpreter: &mut Interpreter, args: &Vec<ShimValue>) -> Result<ShimValue, String> {
+    if args.len() != 2 {
+        return Err(format!("Expected 2 args for dict has"));
+    }
+
+    let mut dict: &mut Vec<(ShimValue, ShimValue)> = if let ShimValue::Dict(position) = args[0] {
+        unsafe {
+            let ptr: &mut Vec<(ShimValue, ShimValue)> = std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
+            ptr
+        }
+    } else {
+        return Err(format!("Can't get non-dict {:?}", args[0]));
+    };
+
+    for (key, val) in dict.iter() {
+        if key.equal_inner(interpreter, &args[1])? {
+            return Ok(ShimValue::Bool(true));
+        }
+    }
+
+    return Ok(ShimValue::Bool(false));
 }
 
 fn shim_str_len(interpreter: &mut Interpreter, args: &Vec<ShimValue>) -> Result<ShimValue, String> {
@@ -1829,14 +1931,18 @@ impl ShimValue {
         numeric_op!(self - other)
     }
 
-    fn equal(&self, _interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
+    fn equal_inner(&self, _interpreter: &mut Interpreter, other: &Self) -> Result<bool, String> {
         match (self, other) {
-            (ShimValue::Bool(a), ShimValue::Bool(b)) => Ok(ShimValue::Bool(a == b)),
-            (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Bool(a == b)),
-            (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(a == b)),
-            (ShimValue::None, ShimValue::None) => Ok(ShimValue::Bool(true)),
-            _ => Ok(ShimValue::Bool(false)),
+            (ShimValue::Bool(a), ShimValue::Bool(b)) => Ok(a == b),
+            (ShimValue::Float(a), ShimValue::Float(b)) => Ok(a == b),
+            (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(a == b),
+            (ShimValue::None, ShimValue::None) => Ok(true),
+            _ => Ok(false),
         }
+    }
+
+    fn equal(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
+        Ok(ShimValue::Bool(self.equal_inner(interpreter, other)?))
     }
 
     fn not_equal(&self, _interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
@@ -1909,6 +2015,26 @@ impl ShimValue {
             (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(*a <= (*b as f32))),
             (ShimValue::None, ShimValue::None) => Ok(ShimValue::Bool(true)),
             (a, b) => Err(format!("Can't LTE {:?} and {:?}", a, b))
+        }
+    }
+
+    fn contains(&self, interpreter: &mut Interpreter, some_key: &Self) -> Result<ShimValue, String> {
+        match (self, some_key) {
+            (ShimValue::Dict(position), _) => {
+                let mut dict: &mut Vec<(ShimValue, ShimValue)> = unsafe {
+                    let ptr: &mut Vec<(ShimValue, ShimValue)> = std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
+                    ptr
+                };
+
+                for (key, val) in dict.iter() {
+                    if key.equal_inner(interpreter, some_key)? {
+                        return Ok(ShimValue::Bool(true));
+                    }
+                }
+
+                return Ok(ShimValue::Bool(false));
+            },
+            (a, b) => Err(format!("Can't `in` {:?} and {:?}", a, b))
         }
     }
 
@@ -2020,6 +2146,57 @@ impl ShimValue {
                     Err(format!("No ident {:?} on list", self))
                 }
             },
+            ShimValue::Dict(_) => {
+                // TODO: this would be more efficient memorywise if all the native
+                // list functions were already in memory. Then the bound native
+                // method wouldn't need to be pushed to memory every time a
+                // native method is called
+                if ident == b"set" {
+                    let position = interpreter.mem.alloc(Word(2.into()));
+                    unsafe {
+                        let obj_ptr: *mut ShimValue = std::mem::transmute(
+                            &mut interpreter.mem.mem[usize::from(position.0)]
+                        );
+                        *obj_ptr = *self;
+                        let fn_ptr: *mut NativeFn = std::mem::transmute(
+                            &mut interpreter.mem.mem[usize::from(position.0)+1]
+                        );
+                        *fn_ptr = shim_dict_index_set;
+
+                        Ok(ShimValue::BoundNativeMethod(position))
+                    }
+                } else if ident == b"get" {
+                    let position = interpreter.mem.alloc(Word(2.into()));
+                    unsafe {
+                        let obj_ptr: *mut ShimValue = std::mem::transmute(
+                            &mut interpreter.mem.mem[usize::from(position.0)]
+                        );
+                        *obj_ptr = *self;
+                        let fn_ptr: *mut NativeFn = std::mem::transmute(
+                            &mut interpreter.mem.mem[usize::from(position.0)+1]
+                        );
+                        *fn_ptr = shim_dict_index_get;
+
+                        Ok(ShimValue::BoundNativeMethod(position))
+                    }
+                } else if ident == b"has" {
+                    let position = interpreter.mem.alloc(Word(2.into()));
+                    unsafe {
+                        let obj_ptr: *mut ShimValue = std::mem::transmute(
+                            &mut interpreter.mem.mem[usize::from(position.0)]
+                        );
+                        *obj_ptr = *self;
+                        let fn_ptr: *mut NativeFn = std::mem::transmute(
+                            &mut interpreter.mem.mem[usize::from(position.0)+1]
+                        );
+                        *fn_ptr = shim_dict_index_has;
+
+                        Ok(ShimValue::BoundNativeMethod(position))
+                    }
+                } else {
+                    Err(format!("No ident {:?} on list", self))
+                }
+            },
             val => Err(format!("Ident {:?} not available on {:?}", ident, val))
         }
     }
@@ -2114,6 +2291,7 @@ enum ByteCode {
     GTE,
     LT,
     LTE,
+    In,
     Not,
     Negate,
     // And,
@@ -2693,6 +2871,7 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
                 BinaryOp::GTE(a, b) => (ByteCode::GTE, a, b),
                 BinaryOp::LT(a, b) => (ByteCode::LT, a, b),
                 BinaryOp::LTE(a, b) => (ByteCode::LTE, a, b),
+                BinaryOp::In(a, b) => (ByteCode::In, a, b),
             };
             let mut res = compile_expression(&a)?;
             res.extend(compile_expression(&b)?);
@@ -2761,6 +2940,48 @@ impl Interpreter {
         let builtins: &[(&[u8], Box<NativeFn>)] = &[
             (b"print", Box::new(shim_print)),
             (b"panic", Box::new(shim_panic)),
+            (b"dict", Box::new(shim_dict)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
         ];
 
         for (name, func) in builtins {
@@ -2867,6 +3088,11 @@ impl Interpreter {
                     let a = stack.pop().expect("Operand for ByteCode::LTE");
                     let b = stack.pop().expect("Operand for ByteCode::LTE");
                     stack.push(a.lte(self, &b)?);
+                },
+                val if val == ByteCode::In as u8 => {
+                    let a = stack.pop().expect("Operand for ByteCode::In");
+                    let b = stack.pop().expect("Operand for ByteCode::In");
+                    stack.push(a.contains(self, &b)?);
                 },
                 val if val == ByteCode::Not as u8 => {
                     let a = stack.pop().expect("Operand for ByteCode::Not");
