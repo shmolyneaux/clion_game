@@ -1630,6 +1630,21 @@ fn shim_str_len(interpreter: &mut Interpreter, args: &Vec<ShimValue>) -> Result<
     }
 }
 
+macro_rules! numeric_op {
+    ($lhs:tt $op:tt $rhs:expr) => {
+        match ($lhs, $rhs) {
+            (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Integer(*a $op *b)),
+            (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Float(*a $op *b)),
+            (ShimValue::Integer(a), ShimValue::Float(b)) => Ok(ShimValue::Float((*a as f32) $op *b)),
+            (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(ShimValue::Float(*a $op (*b as f32))),
+            (a, b) => Err(format!(
+                "Operation '{}' not supported between {:?} and {:?}", 
+                stringify!($op), a, b
+            )),
+        }
+    };
+}
+
 impl ShimValue {
     fn call(&self, interpreter: &mut Interpreter, stack: &mut Vec<ShimValue>) -> Result<CallResult, String> {
         let arg_pos: Word = match stack[stack.len()-1] {
@@ -1797,27 +1812,11 @@ impl ShimValue {
     }
 
     fn add(&self, other: &Self) -> Result<ShimValue, String> {
-        match (self, other) {
-            (ShimValue::Integer(a), ShimValue::Integer(b)) => {
-                Ok(ShimValue::Integer(a + b))
-            },
-            (ShimValue::Float(a), ShimValue::Float(b)) => {
-                Ok(ShimValue::Float(a + b))
-            },
-            (a, b) => Err(format!("Can't add {:?} and {:?}", a, b))
-        }
+        numeric_op!(self + other)
     }
 
     fn sub(&self, other: &Self) -> Result<ShimValue, String> {
-        match (self, other) {
-            (ShimValue::Integer(a), ShimValue::Integer(b)) => {
-                Ok(ShimValue::Integer(a - b))
-            },
-            (ShimValue::Float(a), ShimValue::Float(b)) => {
-                Ok(ShimValue::Float(a - b))
-            },
-            (a, b) => Err(format!("Can't sub {:?} and {:?}", a, b))
-        }
+        numeric_op!(self - other)
     }
 
     fn equal(&self, _interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
@@ -1841,17 +1840,16 @@ impl ShimValue {
     }
 
     fn mul(&self, _interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
-        match (self, other) {
-            (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Float(a * b)),
-            (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Integer(a * b)),
-            (a, b) => Err(format!("Can't Multiply {:?} and {:?}", a, b))
-        }
+        numeric_op!(self * other)
     }
 
     fn div(&self, _interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
+        // NOTE: All division is floating point division
         match (self, other) {
             (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Float(a / b)),
             (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Integer(a / b)),
+            (ShimValue::Integer(a), ShimValue::Float(b)) => Ok(ShimValue::Float((*a as f32) / *b)),
+            (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(ShimValue::Float(*a / (*b as f32))),
             (a, b) => Err(format!("Can't Divide {:?} and {:?}", a, b))
         }
     }
@@ -1861,6 +1859,8 @@ impl ShimValue {
             (ShimValue::Bool(a), ShimValue::Bool(b)) => Ok(ShimValue::Bool(*a == true && *b == false)),
             (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Bool(a > b)),
             (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(a > b)),
+            (ShimValue::Integer(a), ShimValue::Float(b)) => Ok(ShimValue::Bool((*a as f32) > *b)),
+            (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(*a > (*b as f32))),
             (ShimValue::None, ShimValue::None) => Ok(ShimValue::Bool(false)),
             (a, b) => Err(format!("Can't GT {:?} and {:?}", a, b))
         }
@@ -1871,6 +1871,8 @@ impl ShimValue {
             (ShimValue::Bool(a), ShimValue::Bool(b)) => Ok(ShimValue::Bool(a == b)),
             (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Bool(a >= b)),
             (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(a >= b)),
+            (ShimValue::Integer(a), ShimValue::Float(b)) => Ok(ShimValue::Bool((*a as f32) >= *b)),
+            (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(*a >= (*b as f32))),
             (ShimValue::None, ShimValue::None) => Ok(ShimValue::Bool(true)),
             (a, b) => Err(format!("Can't GTE {:?} and {:?}", a, b))
         }
@@ -1881,6 +1883,8 @@ impl ShimValue {
             (ShimValue::Bool(a), ShimValue::Bool(b)) => Ok(ShimValue::Bool(*a == false && *b == true)),
             (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Bool(a < b)),
             (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(a < b)),
+            (ShimValue::Integer(a), ShimValue::Float(b)) => Ok(ShimValue::Bool((*a as f32) < *b)),
+            (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(*a < (*b as f32))),
             (ShimValue::None, ShimValue::None) => Ok(ShimValue::Bool(false)),
             (a, b) => Err(format!("Can't LT {:?} and {:?}", a, b))
         }
@@ -1891,6 +1895,8 @@ impl ShimValue {
             (ShimValue::Bool(a), ShimValue::Bool(b)) => Ok(ShimValue::Bool(a == b)),
             (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Bool(a <= b)),
             (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(a <= b)),
+            (ShimValue::Integer(a), ShimValue::Float(b)) => Ok(ShimValue::Bool((*a as f32) <= *b)),
+            (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(*a <= (*b as f32))),
             (ShimValue::None, ShimValue::None) => Ok(ShimValue::Bool(true)),
             (a, b) => Err(format!("Can't LTE {:?} and {:?}", a, b))
         }
