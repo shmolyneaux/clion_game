@@ -91,8 +91,8 @@ pub enum Expression {
 #[derive(Debug)]
 struct Fn {
     ident: Vec<u8>,
-    args: Vec<(Vec<u8>, Option<ExprNode>)>,
-    kw_only_args: Vec<(Vec<u8>, Option<ExprNode>)>,
+    pos_args_required: Vec<Vec<u8>>,
+    pos_args_optional: Vec<(Vec<u8>, ExprNode)>,
     body: Block,
 }
 
@@ -744,17 +744,36 @@ pub fn parse_function(tokens: &mut TokenStream) -> Result<Fn, String> {
     tokens.consume(Token::LBracket)?;
 
     let mut params = Vec::new();
+    let mut optional_params = Vec::new();
     while !tokens.is_empty() {
-        match tokens.peek()? {
+        let ident = match tokens.peek()? {
             Token::Identifier(ident) => {
-                params.push((ident.clone(), None))
+                ident.clone()
             }
             Token::RBracket => break,
             token => return Err(
                 tokens.format_peek_err(&format!("Expected ident for fn params, found {:?}", token))
             )
-        }
+        };
         tokens.advance()?;
+
+        let expr = if *tokens.peek()? == Token::Equal {
+            tokens.advance()?;
+            Some(parse_expression(tokens)?)
+        } else {
+            if optional_params.len() > 0 {
+                return Err(
+                    tokens.format_peek_err(&format!("No required arguments after optional"))
+                )
+            }
+            None
+        };
+
+        if let Some(expr) = expr {
+            optional_params.push((ident, expr));
+        } else {
+            params.push(ident);
+        }
 
         if *tokens.peek()? != Token::Comma {
             break;
@@ -765,7 +784,7 @@ pub fn parse_function(tokens: &mut TokenStream) -> Result<Fn, String> {
 
     let mut body = parse_block(tokens)?;
 
-    Ok(Fn{ident: ident, args: params, kw_only_args: Vec::new(), body: body})
+    Ok(Fn{ident: ident, pos_args_required: params, pos_args_optional: optional_params, body: body})
 }
 
 pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
@@ -2370,8 +2389,7 @@ enum ByteCode {
     Pad7,
     Pad8,
     Pad9,
-    AssertLen = 128,
-    Splat,
+    UnpackArgs = 128,
     Pop,
     Add,
     Sub,
@@ -2448,12 +2466,30 @@ pub fn u8s_to_u16(val: [u8; 2]) -> u16 {
     ((val[0] as u16) << 8) + val[1] as u16
 }
 
-pub fn compile_function_body(params: &Vec<(Vec<u8>, Option<ExprNode>)>, body: &Block) -> Result<Vec<(u8, Span)>, String> {
+pub fn compile_function_body(func: &Fn) -> Result<Vec<(u8, Span)>, String> {
     let mut asm = Vec::new();
-    asm.push((ByteCode::AssertLen as u8, Span {start:0, end:1}));
-    asm.push((params.len() as u8, Span {start:0, end:1}));
-    asm.push((ByteCode::Splat as u8, Span {start:0, end:1}));
-    for (param, _default) in params.iter().rev() {
+    asm.push((ByteCode::UnpackArgs as u8, Span {start:0, end:1}));
+    asm.push((func.pos_args_required.len() as u8, Span {start:0, end:1}));
+    asm.push((func.pos_args_optional.len() as u8, Span {start:0, end:1}));
+
+    let offset_table_start = asm.len();
+
+    // Add jump offsets for each optional argument that potentially needs its
+    // default evaluated. The jump is the relative PC _after_ the expr
+    for (_param, expr) in func.pos_args_optional.iter() {
+        asm.push((0, expr.span));
+        asm.push((0, expr.span));
+    }
+
+    for (idx, (param, expr)) in func.pos_args_optional.iter().enumerate() {
+        asm.extend(compile_expression(expr)?);
+
+        let expr_offset = u16_to_u8s(asm.len() as u16);
+        asm[3 + 2*idx + 0].0 = expr_offset[0];
+        asm[3 + 2*idx + 1].0 = expr_offset[1];
+    }
+
+    for (param, _) in func.pos_args_optional.iter().rev() {
         asm.push((ByteCode::VariableDeclaration as u8, Span {start:0, end:1}));
         asm.push((param.len().try_into().expect("Param len should into u8"), Span {start:0, end:1}));
         for b in param {
@@ -2461,18 +2497,26 @@ pub fn compile_function_body(params: &Vec<(Vec<u8>, Option<ExprNode>)>, body: &B
         }
     }
 
-    for stmt in body.stmts.iter() {
+    for param in func.pos_args_required.iter().rev() {
+        asm.push((ByteCode::VariableDeclaration as u8, Span {start:0, end:1}));
+        asm.push((param.len().try_into().expect("Param len should into u8"), Span {start:0, end:1}));
+        for b in param {
+            asm.push((*b, Span {start:0, end:1}));
+        }
+    }
+
+    for stmt in func.body.stmts.iter() {
         asm.extend(compile_statement(&stmt)?);
     }
 
-    if let Some(expr) = &body.last_expr {
+    if let Some(expr) = &func.body.last_expr {
         let val: Option<&ExprNode> = Some(expr);
         asm.extend(
             compile_return(&val)?
         );
     } else {
-        let needs_implicit_return = if body.stmts.len() > 1 {
-            match body.stmts[body.stmts.len() - 1] {
+        let needs_implicit_return = if func.body.stmts.len() > 1 {
+            match func.body.stmts[func.body.stmts.len() - 1] {
                 Statement::Return(_) => false,
                 _ => true,
             }
@@ -2554,7 +2598,7 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
 
             Ok(expr_asm)
         },
-        Statement::Fn(Fn{ident, args: params, kw_only_args: _kw_params, body: body}) => {
+        Statement::Fn(func) => {
             // This will be replaced with a relative jump to after the function
             // declaration
             let mut asm = vec![
@@ -2562,7 +2606,7 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
                 (0, Span {start: 0, end: 1}),
                 (0, Span {start: 0, end: 1}),
             ];
-            asm.extend(compile_function_body(params, body)?);
+            asm.extend(compile_function_body(func)?);
 
             // Fix the jump offset at the function declaration now that we know
             // the size of the body
@@ -2577,8 +2621,8 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
             asm.push(((pc_offset & 0xff) as u8, Span {start:0, end:1}));
 
             asm.push((ByteCode::VariableDeclaration as u8, Span {start:0, end:1}));
-            asm.push((ident.len().try_into().expect("Ident len should into u8"), Span {start:0, end:1}));
-            for b in ident.into_iter() {
+            asm.push((func.ident.len().try_into().expect("Ident len should into u8"), Span {start:0, end:1}));
+            for b in func.ident.iter() {
                 asm.push((*b, Span {start:0, end:1}));
             }
 
@@ -2602,7 +2646,8 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
 
             let mut method_defs = Vec::new();
             for method in methods {
-                method_defs.push((&method.ident, compile_function_body(&method.args, &method.body)?));
+                method_defs.push(
+                    (&method.ident, compile_function_body(method)?));
             }
 
             let mut jump_asm_idx = Vec::new();
@@ -3242,36 +3287,46 @@ impl Interpreter {
                     pc = *start_pc;
                     continue;
                 },
-                val if val == ByteCode::AssertLen as u8 => {
-                    let len = bytes[pc+1] as usize;
+                val if val == ByteCode::UnpackArgs as u8 => {
+                    let required_arg_count = bytes[pc+1] as usize;
+                    let optional_arg_count = bytes[pc+2] as usize;
                     if stack.is_empty() {
                         return Err(format!("stack is empty!"));
                     }
-                    match stack[stack.len()-1] {
+                    let provided_arg_count = match stack[stack.len()-1] {
                         ShimValue::List(pos) => {
                             unsafe {
                                 let ptr: *mut Vec<ShimValue> = std::mem::transmute(&mut self.mem.mem[usize::from(pos.0)]);
-                                if (*ptr).len() != len {
+                                let len = (*ptr).len();
+                                if len < required_arg_count {
                                     return Err(
                                         format_script_err(
                                             program.spans[
                                                 stack_frame[stack_frame.len()-1].0
                                             ],
                                             &program.script,
-                                            &format!("Function expects {} arguments, but got {}", len, (*ptr).len())
+                                            &format!("Function expects at least {} arguments, but got {}", required_arg_count, len)
                                         )
                                     );
                                 }
+                                if len > required_arg_count + optional_arg_count {
+                                    return Err(
+                                        format_script_err(
+                                            program.spans[
+                                                stack_frame[stack_frame.len()-1].0
+                                            ],
+                                            &program.script,
+                                            &format!("Function expects no more than {} arguments, but got {}", required_arg_count + optional_arg_count, len)
+                                        )
+                                    );
+                                }
+
+                                len
                             }
                         },
                         other => return Err(format!("Can't assert len on non-list {:?}", other)),
-                    }
-                    pc += 1;
-                },
-                val if val == ByteCode::Splat as u8 => {
-                    if stack.is_empty() {
-                        return Err(format!("stack is empty!"));
-                    }
+                    };
+
                     match stack.pop() {
                         Some(ShimValue::List(pos)) => {
                             unsafe {
@@ -3282,6 +3337,23 @@ impl Interpreter {
                             }
                         },
                         other => return Err(format!("Can't assert len on non-list {:?}", other)),
+                    }
+
+                    let optional_args_evaluated = provided_arg_count - required_arg_count;
+
+                    if optional_args_evaluated == 0 {
+                        // Jump to just after the offset table
+                        pc += 3 + 2*optional_arg_count;
+                        continue;
+                    } else {
+                        let offset = u8s_to_u16(
+                            [
+                                bytes[pc+1 + 2*optional_args_evaluated + 0],
+                                bytes[pc+1 + 2*optional_args_evaluated + 1],
+                            ]
+                        ) as usize;
+                        pc += offset;
+                        continue;
                     }
                 },
                 val if val == ByteCode::LiteralShimValue as u8 => {
@@ -3613,10 +3685,8 @@ pub fn print_asm(bytes: &[u8]) {
             eprint!("JMPNZ");
         } else if *b == ByteCode::JmpUp as u8 {
             eprint!("JMPUP");
-        } else if *b == ByteCode::AssertLen as u8 {
-            eprint!("assert_len");
-        } else if *b == ByteCode::Splat as u8 {
-            eprint!("SPLAT");
+        } else if *b == ByteCode::UnpackArgs as u8 {
+            eprint!("unpack_args");
         } else if *b == ByteCode::CreateFn as u8 {
             eprint!("fn");
         } else if *b == ByteCode::CreateStruct as u8 {
