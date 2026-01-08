@@ -108,6 +108,7 @@ pub enum Statement {
     Let(Vec<u8>, ExprNode),
     Assignment(Vec<u8>, ExprNode),
     AttributeAssignment(ExprNode, Vec<u8>, ExprNode),
+    IndexAssignment(ExprNode, ExprNode, ExprNode),
     If(ExprNode, Block, Block),
     For(Vec<u8>, ExprNode, Block),
     While(ExprNode, Block),
@@ -948,6 +949,11 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
                             tokens.consume(Token::Semicolon)?;
                             Statement::AttributeAssignment(*expr, ident.clone(), expr_to_assign)
                         },
+                        Expression::Index(expr, index_expr) => {
+                            let expr_to_assign = parse_expression(tokens)?;
+                            tokens.consume(Token::Semicolon)?;
+                            Statement::IndexAssignment(*expr, *index_expr, expr_to_assign)
+                        },
                         expr_data => {
                             return Err(
                                 format_script_err(
@@ -1601,7 +1607,7 @@ fn shim_dict(interpreter: &mut Interpreter, args: &Vec<ShimValue>) -> Result<Shi
         let ptr: *mut Vec<(ShimValue, ShimValue)> = std::mem::transmute(
             &mut interpreter.mem.mem[usize::from(position.0)]
         );
-        *ptr = Vec::new();
+        ptr.write(Vec::new());
     }
 
     Ok(ShimValue::Dict(position))
@@ -1842,7 +1848,7 @@ impl ShimValue {
                     let word_count = Word(3.into());
                     let new_str = interpreter.mem.alloc(word_count);
                     let ptr: *mut Vec<u8> = std::mem::transmute(&mut interpreter.mem.mem[usize::from(new_str.0)]);
-                    *ptr = [b].to_vec();
+                    ptr.write([b].to_vec());
 
                     Ok(ShimValue::String(new_str))
                 }
@@ -1864,7 +1870,54 @@ impl ShimValue {
                     Ok((&(*ptr))[index as usize])
                 }
             },
+            (ShimValue::Dict(position), key) => {
+                let dict: &mut Vec<(ShimValue, ShimValue)> = unsafe {
+                    std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)])
+                };
+
+                for (key, val) in dict.iter() {
+                    if key.equal_inner(interpreter, &key)? {
+                        return Ok(*val)
+                    }
+                }
+
+                Err(format!("Key {:?} not found in dict", key))
+            },
             (a, b) => Err(format!("Can't index {:?} with {:?}", a, b)),
+        }
+    }
+
+    fn set_index(&self, interpreter: &mut Interpreter, index: &ShimValue, value: &ShimValue) -> Result<(), String> {
+        match (self, index) {
+            (ShimValue::List(position), ShimValue::Integer(index)) => {
+                let index = *index as usize;
+                let list: &mut Vec<ShimValue> = unsafe {
+                    std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)])
+                };
+
+                if list.len() <= index {
+                    return Err(format!("Index {} out of bounds for list", index));
+                }
+
+                list[index] = *value;
+                Ok(())
+            },
+            (ShimValue::Dict(position), key) => {
+                let dict: &mut Vec<(ShimValue, ShimValue)> = unsafe {
+                    std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)])
+                };
+
+                for (key, dval) in dict.iter_mut() {
+                    if key.equal_inner(interpreter, &key)? {
+                        *dval = *value;
+                        return Ok(());
+                    }
+                }
+
+                dict.push((*index, *value));
+                Ok(())
+            },
+            (a, b) => Err(format!("Can't set index {:?} with {:?}", a, b)),
         }
     }
 
@@ -1923,19 +1976,58 @@ impl ShimValue {
         }
     }
 
-    fn add(&self, other: &Self) -> Result<ShimValue, String> {
-        numeric_op!(self + other)
+    fn add(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
+        match (self, other) {
+            (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Integer(*a + *b)),
+            (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Float(*a + *b)),
+            (ShimValue::Integer(a), ShimValue::Float(b)) => Ok(ShimValue::Float((*a as f32) + *b)),
+            (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(ShimValue::Float(*a + (*b as f32))),
+            (ShimValue::String(a), ShimValue::String(b)) => {
+                let a: &mut Vec<u8> = unsafe {
+                    std::mem::transmute(&mut interpreter.mem.mem[usize::from(a.0)])
+                };
+                let b: &mut Vec<u8> = unsafe {
+                    std::mem::transmute(&mut interpreter.mem.mem[usize::from(b.0)])
+                };
+
+                let position = interpreter.mem.alloc(Word(3.into()));
+                unsafe {
+                    let c: *mut Vec<u8> = std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
+                    c.write(Vec::new());
+                    for val in a.iter() {
+                        (*c).push(*val);
+                    }
+                    for val in b.iter() {
+                        (*c).push(*val);
+                    }
+                };
+
+                Ok(ShimValue::String(position))
+            },
+            (a, b) => Err(format!(
+                "Operation '+' not supported between {:?} and {:?}", a, b
+            )),
+        }
     }
 
     fn sub(&self, other: &Self) -> Result<ShimValue, String> {
         numeric_op!(self - other)
     }
 
-    fn equal_inner(&self, _interpreter: &mut Interpreter, other: &Self) -> Result<bool, String> {
+    fn equal_inner(&self, interpreter: &mut Interpreter, other: &Self) -> Result<bool, String> {
         match (self, other) {
             (ShimValue::Bool(a), ShimValue::Bool(b)) => Ok(a == b),
             (ShimValue::Float(a), ShimValue::Float(b)) => Ok(a == b),
             (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(a == b),
+            (ShimValue::String(a), ShimValue::String(b)) => {
+                let a: &mut Vec<u8> = unsafe {
+                    std::mem::transmute(&mut interpreter.mem.mem[usize::from(a.0)])
+                };
+                let b: &mut Vec<u8> = unsafe {
+                    std::mem::transmute(&mut interpreter.mem.mem[usize::from(b.0)])
+                };
+                Ok(a == b)
+            },
             (ShimValue::None, ShimValue::None) => Ok(true),
             _ => Ok(false),
         }
@@ -2111,11 +2203,11 @@ impl ShimValue {
                         let obj_ptr: *mut ShimValue = std::mem::transmute(
                             &mut interpreter.mem.mem[usize::from(position.0)]
                         );
-                        *obj_ptr = *self;
+                        obj_ptr.write(*self);
                         let fn_ptr: *mut NativeFn = std::mem::transmute(
                             &mut interpreter.mem.mem[usize::from(position.0)+1]
                         );
-                        *fn_ptr = shim_str_len;
+                        fn_ptr.write(shim_str_len);
 
                         Ok(ShimValue::BoundNativeMethod(position))
                     }
@@ -2134,11 +2226,11 @@ impl ShimValue {
                         let obj_ptr: *mut ShimValue = std::mem::transmute(
                             &mut interpreter.mem.mem[usize::from(position.0)]
                         );
-                        *obj_ptr = *self;
+                        obj_ptr.write(*self);
                         let fn_ptr: *mut NativeFn = std::mem::transmute(
                             &mut interpreter.mem.mem[usize::from(position.0)+1]
                         );
-                        *fn_ptr = shim_list_len;
+                        fn_ptr.write(shim_list_len);
 
                         Ok(ShimValue::BoundNativeMethod(position))
                     }
@@ -2157,11 +2249,11 @@ impl ShimValue {
                         let obj_ptr: *mut ShimValue = std::mem::transmute(
                             &mut interpreter.mem.mem[usize::from(position.0)]
                         );
-                        *obj_ptr = *self;
+                        obj_ptr.write(*self);
                         let fn_ptr: *mut NativeFn = std::mem::transmute(
                             &mut interpreter.mem.mem[usize::from(position.0)+1]
                         );
-                        *fn_ptr = shim_dict_index_set;
+                        fn_ptr.write(shim_dict_index_set);
 
                         Ok(ShimValue::BoundNativeMethod(position))
                     }
@@ -2171,11 +2263,11 @@ impl ShimValue {
                         let obj_ptr: *mut ShimValue = std::mem::transmute(
                             &mut interpreter.mem.mem[usize::from(position.0)]
                         );
-                        *obj_ptr = *self;
+                        obj_ptr.write(*self);
                         let fn_ptr: *mut NativeFn = std::mem::transmute(
                             &mut interpreter.mem.mem[usize::from(position.0)+1]
                         );
-                        *fn_ptr = shim_dict_index_get;
+                        fn_ptr.write(shim_dict_index_get);
 
                         Ok(ShimValue::BoundNativeMethod(position))
                     }
@@ -2185,11 +2277,11 @@ impl ShimValue {
                         let obj_ptr: *mut ShimValue = std::mem::transmute(
                             &mut interpreter.mem.mem[usize::from(position.0)]
                         );
-                        *obj_ptr = *self;
+                        obj_ptr.write(*self);
                         let fn_ptr: *mut NativeFn = std::mem::transmute(
                             &mut interpreter.mem.mem[usize::from(position.0)+1]
                         );
-                        *fn_ptr = shim_dict_index_has;
+                        fn_ptr.write(shim_dict_index_has);
 
                         Ok(ShimValue::BoundNativeMethod(position))
                     }
@@ -2319,6 +2411,7 @@ enum ByteCode {
     Continue,
     Call,
     Index,
+    SetIndex,
     Return,
     Jmp,
     JmpUp,
@@ -2450,6 +2543,14 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
             for b in ident.into_iter() {
                 expr_asm.push((*b, expr.span));
             }
+
+            Ok(expr_asm)
+        },
+        Statement::IndexAssignment(obj_expr, index_expr, expr) => {
+            let mut expr_asm = compile_expression(obj_expr)?;
+            expr_asm.extend(compile_expression(index_expr)?);
+            expr_asm.extend(compile_expression(expr)?);
+            expr_asm.push((ByteCode::SetIndex as u8, expr.span));
 
             Ok(expr_asm)
         },
@@ -2990,7 +3091,7 @@ impl Interpreter {
                 let ptr: *mut NativeFn = std::mem::transmute(
                     &mut mmu.mem[usize::from(position.0)]
                 );
-                *ptr = **func;
+                ptr.write(**func);
             }
 
             env.insert_new(
@@ -3034,7 +3135,7 @@ impl Interpreter {
                     let b = stack.pop().expect("Operand for add");
                     let a = stack.pop().expect("Operand for add");
                     stack.push(
-                        a.add(&b)
+                        a.add(self, &b)
                             .map_err(
                                 |err_str| format_script_err(
                                     program.spans[pc],
@@ -3209,7 +3310,7 @@ impl Interpreter {
                     let position = self.mem.alloc(word_count);
                     unsafe {
                         let ptr: *mut Vec<u8> = std::mem::transmute(&mut self.mem.mem[usize::from(position.0)]);
-                        *ptr = contents.to_vec();
+                        ptr.write(contents.to_vec());
                     }
 
                     stack.push(ShimValue::String(position));
@@ -3287,6 +3388,13 @@ impl Interpreter {
                     let obj = stack.pop().expect("index obj");
 
                     stack.push(obj.index(self, &index)?);
+                },
+                val if val == ByteCode::SetIndex as u8 => {
+                    let val = stack.pop().expect("index assigned val");
+                    let index = stack.pop().expect("index index");
+                    let obj = stack.pop().expect("index obj");
+
+                    obj.set_index(self, &index, &val);
                 },
                 val if val == ByteCode::Call as u8 => {
                     // When Call appears the args should already be in a list at
@@ -3385,7 +3493,7 @@ impl Interpreter {
                         let ptr: *mut Vec<ShimValue> = std::mem::transmute(
                             &mut self.mem.mem[usize::from(position.0)]
                         );
-                        *ptr = Vec::new();
+                        ptr.write(Vec::new());
                         for item in stack.drain(stack.len()-len..) {
                             (*ptr).push(item);
                         }
@@ -3445,13 +3553,19 @@ impl Interpreter {
                         assert!(std::mem::size_of::<StructDef>() == 32);
                     };
                     let pos = self.mem.alloc(Word(4.into()));
-                    let def: &mut StructDef = unsafe { self.mem.get_mut(pos) };
 
-                    *def = StructDef {
-                        member_count: member_count,
-                        method_count: method_count,
-                        lookup: struct_table,
-                    };
+                    unsafe {
+                        let ptr: *mut StructDef = std::mem::transmute(
+                            &mut self.mem.mem[usize::from(pos.0)]
+                        );
+                        ptr.write(
+                            StructDef {
+                                member_count: member_count,
+                                method_count: method_count,
+                                lookup: struct_table,
+                            }
+                        );
+                    }
 
                     // Then push the struct definition to the stack
                     stack.push(ShimValue::StructDef(pos));
