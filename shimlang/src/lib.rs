@@ -1783,16 +1783,7 @@ macro_rules! numeric_op {
 }
 
 impl ShimValue {
-    fn call(&self, interpreter: &mut Interpreter, stack: &mut Vec<ShimValue>) -> Result<CallResult, String> {
-        let arg_pos: Word = match stack[stack.len()-1] {
-            ShimValue::List(arg_pos) => arg_pos,
-            args => return Err(format!("Can't call print with non-list args {:?}", args)),
-        };
-
-        let args: &mut Vec<ShimValue> = unsafe {
-            let ptr: *mut Vec<ShimValue> = std::mem::transmute(&mut interpreter.mem.mem[usize::from(arg_pos.0)]);
-            &mut *ptr
-        };
+    fn call(&self, interpreter: &mut Interpreter, args: &mut Vec<ShimValue>) -> Result<CallResult, String> {
         match self {
             ShimValue::None => Err(format!("Can't call None as a function")),
             ShimValue::Fn(pc) => {
@@ -1807,7 +1798,6 @@ impl ShimValue {
                 let obj: &ShimValue = unsafe { interpreter.mem.get(*pos) };
                 let native_fn: &NativeFn = unsafe { interpreter.mem.get(*pos + 1) };
 
-                stack.pop();
                 args.insert(0, *obj);
                 Ok(CallResult::ReturnValue(native_fn(interpreter, args)?))
             }
@@ -1838,7 +1828,6 @@ impl ShimValue {
                 Ok(CallResult::ReturnValue(ShimValue::Struct(new_pos)))
             }
             ShimValue::NativeFn(pos) => {
-                stack.pop();
                 let native_fn: &NativeFn = unsafe { interpreter.mem.get(*pos) };
                 Ok(CallResult::ReturnValue(native_fn(interpreter, args)?))
             }
@@ -2696,11 +2685,8 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
                    (b'r', expr.span),
                 ]);
 
-                // Create empty args and call
-                asm.push((ByteCode::CreateList as u8, expr.span));
-                asm.push((0, expr.span));
-                asm.push((0, expr.span));
                 asm.push((ByteCode::Call as u8, expr.span));
+                asm.push((0, expr.span));
 
                 asm.push((ByteCode::GetAttr as u8, expr.span));
                 asm.extend([
@@ -2723,10 +2709,8 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
 
             // Copy the .next bound method and call it
             asm.push((ByteCode::Copy as u8, expr.span));
-            asm.push((ByteCode::CreateList as u8, expr.span));
-            asm.push((0, expr.span));
-            asm.push((0, expr.span));
             asm.push((ByteCode::Call as u8, expr.span));
+            asm.push((0, expr.span));
 
             // Copy the result of .next() so we can later check if it's None
             asm.push((ByteCode::Copy as u8, expr.span));
@@ -3052,12 +3036,9 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
             for arg_expr in args.iter() {
                 res.extend(compile_expression(arg_expr)?);
             }
-            // And the args become a list to be passed to the callable
-            res.push((ByteCode::CreateList as u8, expr.span));
-            res.push((0, expr.span));
-            res.push((args.len() as u8, expr.span));
 
             res.push((ByteCode::Call as u8, expr.span));
+            res.push((args.len() as u8, expr.span));
             Ok(res)
         },
         Expression::Attribute(expr, ident) => {
@@ -3166,9 +3147,7 @@ impl Interpreter {
         // current function
         let mut loop_info: Vec<(usize, usize, usize)> = Vec::new();
 
-        // TODO: need stack depth to reset to on break
-        // TODO: need stack depth to reset to on continue
-        // TODO: need stack depth to reset to on return
+        let mut pending_args: Vec<ShimValue> = Vec::new();
 
         let bytes = &program.bytecode;
         while pc < bytes.len() {
@@ -3290,53 +3269,37 @@ impl Interpreter {
                 val if val == ByteCode::UnpackArgs as u8 => {
                     let required_arg_count = bytes[pc+1] as usize;
                     let optional_arg_count = bytes[pc+2] as usize;
-                    if stack.is_empty() {
-                        return Err(format!("stack is empty!"));
-                    }
-                    let provided_arg_count = match stack[stack.len()-1] {
-                        ShimValue::List(pos) => {
-                            unsafe {
-                                let ptr: *mut Vec<ShimValue> = std::mem::transmute(&mut self.mem.mem[usize::from(pos.0)]);
-                                let len = (*ptr).len();
-                                if len < required_arg_count {
-                                    return Err(
-                                        format_script_err(
-                                            program.spans[
-                                                stack_frame[stack_frame.len()-1].0
-                                            ],
-                                            &program.script,
-                                            &format!("Function expects at least {} arguments, but got {}", required_arg_count, len)
-                                        )
-                                    );
-                                }
-                                if len > required_arg_count + optional_arg_count {
-                                    return Err(
-                                        format_script_err(
-                                            program.spans[
-                                                stack_frame[stack_frame.len()-1].0
-                                            ],
-                                            &program.script,
-                                            &format!("Function expects no more than {} arguments, but got {}", required_arg_count + optional_arg_count, len)
-                                        )
-                                    );
-                                }
 
-                                len
-                            }
-                        },
-                        other => return Err(format!("Can't assert len on non-list {:?}", other)),
+                    let provided_arg_count = {
+                        let len = pending_args.len();
+                        if len < required_arg_count {
+                            return Err(
+                                format_script_err(
+                                    program.spans[
+                                        stack_frame[stack_frame.len()-1].0
+                                    ],
+                                    &program.script,
+                                    &format!("Function expects at least {} arguments, but got {}", required_arg_count, len)
+                                )
+                            );
+                        }
+                        if len > required_arg_count + optional_arg_count {
+                            return Err(
+                                format_script_err(
+                                    program.spans[
+                                        stack_frame[stack_frame.len()-1].0
+                                    ],
+                                    &program.script,
+                                    &format!("Function expects no more than {} arguments, but got {}", required_arg_count + optional_arg_count, len)
+                                )
+                            );
+                        }
+
+                        len
                     };
 
-                    match stack.pop() {
-                        Some(ShimValue::List(pos)) => {
-                            unsafe {
-                                let ptr: *mut Vec<ShimValue> = std::mem::transmute(&mut self.mem.mem[usize::from(pos.0)]);
-                                for item in (*ptr).iter() {
-                                    stack.push(*item);
-                                }
-                            }
-                        },
-                        other => return Err(format!("Can't assert len on non-list {:?}", other)),
+                    for item in pending_args.drain(0..) {
+                        stack.push(item);
                     }
 
                     let optional_args_evaluated = provided_arg_count - required_arg_count;
@@ -3469,13 +3432,15 @@ impl Interpreter {
                     obj.set_index(self, &index, &val);
                 },
                 val if val == ByteCode::Call as u8 => {
-                    // When Call appears the args should already be in a list at
-                    // the top of the stack, followed by the callable
+                    let arg_count = bytes[pc+1];
 
-                    // Remove the callable from the stack
-                    let callable = stack.swap_remove(stack.len() - 2);
+                    pending_args = stack.drain(
+                        (stack.len() - arg_count as usize)..stack.len()
+                    ).collect();
 
-                    match callable.call(self, &mut stack)
+                    let callable = stack.pop().expect("callable not on stack");
+
+                    match callable.call(self, &mut pending_args)
                         .map_err(
                             |err_str| format_script_err(
                                 program.spans[pc],
@@ -3488,7 +3453,7 @@ impl Interpreter {
                         CallResult::PC(new_pc) => {
                             stack_frame.push(
                                 (
-                                    pc+1,
+                                    pc+2,
                                     loop_info.clone(),
                                     self.env.env_chain.len(),
                                 )
@@ -3499,6 +3464,7 @@ impl Interpreter {
                             continue;
                         }
                     }
+                    pc += 1;
                 },
                 val if val == ByteCode::StartScope as u8 => {
                     self.env.push_scope();
