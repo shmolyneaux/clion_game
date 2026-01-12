@@ -29,6 +29,7 @@ pub struct Node<T> {
 
 // Now redefine your types using the wrapper
 pub type ExprNode = Node<Expression>;
+pub type Ident = Vec<u8>;
 
 #[derive(Debug)]
 pub enum Primary {
@@ -81,7 +82,7 @@ pub enum Expression {
     BooleanOp(BooleanOp),
     BinaryOp(BinaryOp),
     UnaryOp(UnaryOp),
-    Call(Box<ExprNode>, Vec<ExprNode>),
+    Call(Box<ExprNode>, Vec<ExprNode>, Vec<(Ident, ExprNode)>),
     Index(Box<ExprNode>, Box<ExprNode>),
     Attribute(Box<ExprNode>, Vec<u8>),
     Block(Block),
@@ -452,6 +453,55 @@ pub fn parse_arguments(tokens: &mut TokenStream, closing_token: Token) -> Result
     Ok(args)
 }
 
+pub fn parse_fn_arguments(tokens: &mut TokenStream, closing_token: Token) -> Result<
+    (Vec<ExprNode>, Vec<(Ident, ExprNode)>),
+    String
+> {
+    let mut args = Vec::new();
+    let mut kwargs = Vec::new();
+    if !tokens.is_empty() && *tokens.peek()? == closing_token {
+        tokens.advance()?;
+        return Ok((args, kwargs));
+    }
+    while !tokens.is_empty() {
+        let expr = parse_expression(tokens)?;
+
+        if *tokens.peek()? == Token::Equal {
+            if let Expression::Primary(Primary::Identifier(ident)) = expr.data {
+                tokens.advance()?;
+                kwargs.push((ident, parse_expression(tokens)?));
+            } else {
+                return Err(tokens.format_peek_err(&format!("Expected ident before `=` in fn args")));
+            }
+        } else {
+            if kwargs.len() > 0 {
+                return Err(tokens.format_peek_err(&format!("Positional arguments can't appear after keyword arguments")));
+            }
+            args.push(expr);
+        }
+
+        match tokens.peek()? {
+            token if *token == closing_token => {
+                tokens.advance()?;
+                break;
+            }
+            Token::Comma => {
+                tokens.advance()?;
+                if !tokens.is_empty() && *tokens.peek()? == closing_token {
+                    // Exit when there's a trailing comma
+                    tokens.advance()?;
+                    break;
+                }
+                continue;
+            }
+            token => return Err(
+                tokens.format_peek_err(&format!("Expected comma or closing bracket, found {:?}", token))
+            ),
+        }
+    }
+    Ok((args, kwargs))
+}
+
 pub fn parse_call(tokens: &mut TokenStream) -> Result<ExprNode, String> {
     let mut expr = parse_primary(tokens)?;
     while !tokens.is_empty() {
@@ -459,8 +509,9 @@ pub fn parse_call(tokens: &mut TokenStream) -> Result<ExprNode, String> {
         match *tokens.peek()? {
             Token::LBracket => {
                 tokens.advance()?;
+                let args = parse_fn_arguments(tokens, Token::RBracket)?;
                 expr = Node {
-                    data: Expression::Call(Box::new(expr), parse_arguments(tokens, Token::RBracket)?),
+                    data: Expression::Call(Box::new(expr), args.0, args.1),
                     span: span,
                 };
             },
@@ -1546,6 +1597,7 @@ pub struct Interpreter {
 
 #[derive(Copy, Clone, Debug)]
 pub enum ShimValue {
+    Uninitialized,
     Unit,
     None,
     Integer(i32),
@@ -1580,7 +1632,7 @@ const _: () = {
     assert!(std::mem::size_of::<ShimValue>() <= 8);
 };
 
-type NativeFn = fn(&mut Interpreter, &Vec<ShimValue>) -> Result<ShimValue, String>;
+type NativeFn = fn(&mut Interpreter, &ArgBundle) -> Result<ShimValue, String>;
 const _: () = {
     assert!(std::mem::size_of::<NativeFn>() == 8);
 };
@@ -1613,7 +1665,7 @@ enum CallResult {
     PC(u32),
 }
 
-fn shim_dict(interpreter: &mut Interpreter, args: &Vec<ShimValue>) -> Result<ShimValue, String> {
+fn shim_dict(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
     if args.len() != 0 {
         return Err(format!("Can't provide args to dict()"));
     }
@@ -1632,8 +1684,8 @@ fn shim_dict(interpreter: &mut Interpreter, args: &Vec<ShimValue>) -> Result<Shi
     Ok(ShimValue::Dict(position))
 }
 
-fn shim_print(interpreter: &mut Interpreter, args: &Vec<ShimValue>) -> Result<ShimValue, String> {
-    for (idx, arg) in args.iter().enumerate() {
+fn shim_print(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    for (idx, arg) in args.args.iter().enumerate() {
         if idx != 0 {
             print!(" ");
         }
@@ -1644,9 +1696,9 @@ fn shim_print(interpreter: &mut Interpreter, args: &Vec<ShimValue>) -> Result<Sh
     Ok(ShimValue::None)
 }
 
-fn shim_panic(interpreter: &mut Interpreter, args: &Vec<ShimValue>) -> Result<ShimValue, String> {
+fn shim_panic(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
     let mut out = String::new();
-    for (idx, arg) in args.iter().enumerate() {
+    for (idx, arg) in args.args.iter().enumerate() {
         if idx != 0 {
             out.push(' ');
         }
@@ -1657,18 +1709,18 @@ fn shim_panic(interpreter: &mut Interpreter, args: &Vec<ShimValue>) -> Result<Sh
     Err(out)
 }
 
-fn shim_list_len(interpreter: &mut Interpreter, args: &Vec<ShimValue>) -> Result<ShimValue, String> {
+fn shim_list_len(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
     if args.len() != 1 {
         return Err(format!("No args expected for list len"));
     }
 
-    let lst = if let ShimValue::List(position) = args[0] {
+    let lst = if let ShimValue::List(position) = args.args[0] {
         unsafe {
             let ptr: *mut Vec<ShimValue> = std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
             ptr
         }
     } else {
-        return Err(format!("Can't get list len on non-list {:?}", args[0]));
+        return Err(format!("Can't get list len on non-list {:?}", args.args[0]));
     };
 
     unsafe {
@@ -1676,71 +1728,71 @@ fn shim_list_len(interpreter: &mut Interpreter, args: &Vec<ShimValue>) -> Result
     }
 }
 
-fn shim_dict_index_set(interpreter: &mut Interpreter, args: &Vec<ShimValue>) -> Result<ShimValue, String> {
+fn shim_dict_index_set(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
     if args.len() != 3 {
         return Err(format!("Expected 3 args for dict set"));
     }
 
-    let mut dict: &mut Vec<(ShimValue, ShimValue)> = if let ShimValue::Dict(position) = args[0] {
+    let mut dict: &mut Vec<(ShimValue, ShimValue)> = if let ShimValue::Dict(position) = args.args[0] {
         unsafe {
             let ptr: &mut Vec<(ShimValue, ShimValue)> = std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
             ptr
         }
     } else {
-        return Err(format!("Can't set on non-dict {:?}", args[0]));
+        return Err(format!("Can't set on non-dict {:?}", args.args[0]));
     };
 
     for (key, val) in dict.iter_mut() {
-        if key.equal_inner(interpreter, &args[1])? {
-            *val = args[2];
+        if key.equal_inner(interpreter, &args.args[1])? {
+            *val = args.args[2];
             return Ok(ShimValue::None);
         }
     }
 
-    dict.push((args[1], args[2]));
+    dict.push((args.args[1], args.args[2]));
 
     Ok(ShimValue::None)
 }
 
-fn shim_dict_index_get(interpreter: &mut Interpreter, args: &Vec<ShimValue>) -> Result<ShimValue, String> {
+fn shim_dict_index_get(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
     if args.len() != 2 {
         return Err(format!("Expected 2 args for dict get"));
     }
 
-    let mut dict: &mut Vec<(ShimValue, ShimValue)> = if let ShimValue::Dict(position) = args[0] {
+    let mut dict: &mut Vec<(ShimValue, ShimValue)> = if let ShimValue::Dict(position) = args.args[0] {
         unsafe {
             let ptr: &mut Vec<(ShimValue, ShimValue)> = std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
             ptr
         }
     } else {
-        return Err(format!("Can't get non-dict {:?}", args[0]));
+        return Err(format!("Can't get non-dict {:?}", args.args[0]));
     };
 
     for (key, val) in dict.iter() {
-        if key.equal_inner(interpreter, &args[1])? {
+        if key.equal_inner(interpreter, &args.args[1])? {
             return Ok(*val)
         }
     }
 
-    Err(format!("Key not found in dict {:?}", args[1]))
+    Err(format!("Key not found in dict {:?}", args.args[1]))
 }
 
-fn shim_dict_index_has(interpreter: &mut Interpreter, args: &Vec<ShimValue>) -> Result<ShimValue, String> {
+fn shim_dict_index_has(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
     if args.len() != 2 {
         return Err(format!("Expected 2 args for dict has"));
     }
 
-    let mut dict: &mut Vec<(ShimValue, ShimValue)> = if let ShimValue::Dict(position) = args[0] {
+    let mut dict: &mut Vec<(ShimValue, ShimValue)> = if let ShimValue::Dict(position) = args.args[0] {
         unsafe {
             let ptr: &mut Vec<(ShimValue, ShimValue)> = std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
             ptr
         }
     } else {
-        return Err(format!("Can't get non-dict {:?}", args[0]));
+        return Err(format!("Can't get non-dict {:?}", args.args[0]));
     };
 
     for (key, val) in dict.iter() {
-        if key.equal_inner(interpreter, &args[1])? {
+        if key.equal_inner(interpreter, &args.args[1])? {
             return Ok(ShimValue::Bool(true));
         }
     }
@@ -1748,22 +1800,46 @@ fn shim_dict_index_has(interpreter: &mut Interpreter, args: &Vec<ShimValue>) -> 
     return Ok(ShimValue::Bool(false));
 }
 
-fn shim_str_len(interpreter: &mut Interpreter, args: &Vec<ShimValue>) -> Result<ShimValue, String> {
+fn shim_str_len(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
     if args.len() != 1 {
         return Err(format!("No args expected for str len"));
     }
 
-    let lst = if let ShimValue::String(position) = args[0] {
+    let lst = if let ShimValue::String(position) = args.args[0] {
         unsafe {
             let ptr: *mut Vec<u8> = std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
             ptr
         }
     } else {
-        return Err(format!("Can't get str len on non-str {:?}", args[0]));
+        return Err(format!("Can't get str len on non-str {:?}", args.args[0]));
     };
 
     unsafe {
         Ok(ShimValue::Integer((*lst).len() as i32))
+    }
+}
+
+#[derive(Debug)]
+struct ArgBundle {
+    args: Vec<ShimValue>,
+    kwargs: Vec<(Ident, ShimValue)>,
+}
+
+impl ArgBundle {
+    fn new() -> Self {
+        Self {
+            args: Vec::new(),
+            kwargs: Vec::new(),
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.args.len() + self.kwargs.len()
+    }
+
+    fn clear(&mut self) {
+        self.args.clear();
+        self.kwargs.clear();
     }
 }
 
@@ -1783,7 +1859,7 @@ macro_rules! numeric_op {
 }
 
 impl ShimValue {
-    fn call(&self, interpreter: &mut Interpreter, args: &mut Vec<ShimValue>) -> Result<CallResult, String> {
+    fn call(&self, interpreter: &mut Interpreter, args: &mut ArgBundle) -> Result<CallResult, String> {
         match self {
             ShimValue::None => Err(format!("Can't call None as a function")),
             ShimValue::Fn(pc) => {
@@ -1791,14 +1867,14 @@ impl ShimValue {
             }
             ShimValue::BoundMethod(pos, pc) => {
                 // push struct pos to start of arg list then return the pc of the method
-                args.insert(0, ShimValue::Struct(*pos));
+                args.args.insert(0, ShimValue::Struct(*pos));
                 Ok(CallResult::PC(*pc))
             }
             ShimValue::BoundNativeMethod(pos) => {
                 let obj: &ShimValue = unsafe { interpreter.mem.get(*pos) };
                 let native_fn: &NativeFn = unsafe { interpreter.mem.get(*pos + 1) };
 
-                args.insert(0, *obj);
+                args.args.insert(0, *obj);
                 Ok(CallResult::ReturnValue(native_fn(interpreter, args)?))
             }
             ShimValue::StructDef(struct_def_pos) => {
@@ -1821,7 +1897,7 @@ impl ShimValue {
                 interpreter.mem.mem[usize::from(new_pos.0)] = u64::from(struct_def_pos.0);
 
                 // The remaining words get copies of the arguments to the initializer
-                for (idx, arg) in args.into_iter().enumerate() {
+                for (idx, arg) in args.args.iter().enumerate() {
                     interpreter.mem.mem[usize::from(new_pos.0)+1+idx] = arg.to_u64();
                 }
 
@@ -2379,6 +2455,7 @@ enum ByteCode {
     Pad8,
     Pad9,
     UnpackArgs = 128,
+    AssignArg,
     Pop,
     Add,
     Sub,
@@ -2424,6 +2501,7 @@ enum ByteCode {
     JmpUp,
     JmpNZ,
     JmpZ,
+    JmpInitArg,
 }
 
 pub struct Program {
@@ -2455,43 +2533,39 @@ pub fn u8s_to_u16(val: [u8; 2]) -> u16 {
     ((val[0] as u16) << 8) + val[1] as u16
 }
 
-pub fn compile_function_body(func: &Fn) -> Result<Vec<(u8, Span)>, String> {
+pub fn compile_fn_body(func: &Fn) -> Result<Vec<(u8, Span)>, String> {
     let mut asm = Vec::new();
     asm.push((ByteCode::UnpackArgs as u8, Span {start:0, end:1}));
     asm.push((func.pos_args_required.len() as u8, Span {start:0, end:1}));
     asm.push((func.pos_args_optional.len() as u8, Span {start:0, end:1}));
 
-    let offset_table_start = asm.len();
+    for param in func.pos_args_required.iter() {
+        asm.push((param.len().try_into().expect("Param len should into u8"), Span {start:0, end:1}));
+        for b in param {
+            asm.push((*b, Span {start:0, end:1}));
+        }
+    }
 
-    // Add jump offsets for each optional argument that potentially needs its
-    // default evaluated. The jump is the relative PC _after_ the expr
-    for (_param, expr) in func.pos_args_optional.iter() {
-        asm.push((0, expr.span));
-        asm.push((0, expr.span));
+    for (param, _) in func.pos_args_optional.iter() {
+        asm.push((param.len().try_into().expect("Param len should into u8"), Span {start:0, end:1}));
+        for b in param {
+            asm.push((*b, Span {start:0, end:1}));
+        }
     }
 
     for (idx, (param, expr)) in func.pos_args_optional.iter().enumerate() {
+        let jmp_idx = asm.len();
+        asm.push((ByteCode::JmpInitArg as u8, expr.span));
+        asm.push((0, expr.span));
+        asm.push((0, expr.span));
+
         asm.extend(compile_expression(expr)?);
+        asm.push((ByteCode::AssignArg as u8, expr.span));
+        asm.push((idx as u8, expr.span));
 
-        let expr_offset = u16_to_u8s(asm.len() as u16);
-        asm[3 + 2*idx + 0].0 = expr_offset[0];
-        asm[3 + 2*idx + 1].0 = expr_offset[1];
-    }
-
-    for (param, _) in func.pos_args_optional.iter().rev() {
-        asm.push((ByteCode::VariableDeclaration as u8, Span {start:0, end:1}));
-        asm.push((param.len().try_into().expect("Param len should into u8"), Span {start:0, end:1}));
-        for b in param {
-            asm.push((*b, Span {start:0, end:1}));
-        }
-    }
-
-    for param in func.pos_args_required.iter().rev() {
-        asm.push((ByteCode::VariableDeclaration as u8, Span {start:0, end:1}));
-        asm.push((param.len().try_into().expect("Param len should into u8"), Span {start:0, end:1}));
-        for b in param {
-            asm.push((*b, Span {start:0, end:1}));
-        }
+        let expr_offset = u16_to_u8s(asm.len() as u16 - jmp_idx as u16);
+        asm[jmp_idx + 1].0 = expr_offset[0];
+        asm[jmp_idx + 2].0 = expr_offset[1];
     }
 
     for stmt in func.body.stmts.iter() {
@@ -2595,7 +2669,7 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
                 (0, Span {start: 0, end: 1}),
                 (0, Span {start: 0, end: 1}),
             ];
-            asm.extend(compile_function_body(func)?);
+            asm.extend(compile_fn_body(func)?);
 
             // Fix the jump offset at the function declaration now that we know
             // the size of the body
@@ -2636,7 +2710,7 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
             let mut method_defs = Vec::new();
             for method in methods {
                 method_defs.push(
-                    (&method.ident, compile_function_body(method)?));
+                    (&method.ident, compile_fn_body(method)?));
             }
 
             let mut jump_asm_idx = Vec::new();
@@ -2687,6 +2761,7 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
 
                 asm.push((ByteCode::Call as u8, expr.span));
                 asm.push((0, expr.span));
+                asm.push((0, expr.span));
 
                 asm.push((ByteCode::GetAttr as u8, expr.span));
                 asm.extend([
@@ -2710,6 +2785,7 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
             // Copy the .next bound method and call it
             asm.push((ByteCode::Copy as u8, expr.span));
             asm.push((ByteCode::Call as u8, expr.span));
+            asm.push((0, expr.span));
             asm.push((0, expr.span));
 
             // Copy the result of .next() so we can later check if it's None
@@ -3028,7 +3104,7 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
 
             Ok(asm)
         },
-        Expression::Call(expr, args) => {
+        Expression::Call(expr, args, kwargs) => {
             // First we evaluate the thing that needs to be called
             let mut res = compile_expression(&expr)?;
 
@@ -3037,8 +3113,19 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
                 res.extend(compile_expression(arg_expr)?);
             }
 
+            for (ident, kwarg_expr) in kwargs.iter() {
+                res.push((ByteCode::LiteralString as u8, kwarg_expr.span));
+                res.push((ident.len().try_into().expect("Ident should into u8"), kwarg_expr.span));
+                for b in ident.into_iter() {
+                    res.push((*b, kwarg_expr.span));
+                }
+
+                res.extend(compile_expression(kwarg_expr)?);
+            }
+
             res.push((ByteCode::Call as u8, expr.span));
             res.push((args.len() as u8, expr.span));
+            res.push((kwargs.len() as u8, expr.span));
             Ok(res)
         },
         Expression::Attribute(expr, ident) => {
@@ -3140,14 +3227,28 @@ impl Interpreter {
         // this stack, return values go on this stack etc.
         let mut stack: Vec<ShimValue> = Vec::new();
 
-        // This is the (PC, loop_info, scope_count) call stack
-        let mut stack_frame: Vec<(usize, Vec<(usize, usize, usize)>, usize)> = Vec::new();
+        // This is the (PC, loop_info, scope_count, fn_optional_param_names,
+        // fn_optional_param_name_idx) call stack
+        let mut stack_frame: Vec<(
+            // PC
+            usize,
+            // loop_info
+            Vec<(usize, usize, usize)>,
+            // scope_count
+            usize,
+            // fn_optional_param_names
+            Vec<Ident>,
+            // fn_optional_param_name_idx
+            usize,
+        )> = Vec::new();
 
         // This is the PC of the (start, end, scope_count) of the current loop for the
         // current function
         let mut loop_info: Vec<(usize, usize, usize)> = Vec::new();
 
-        let mut pending_args: Vec<ShimValue> = Vec::new();
+        let mut pending_args: ArgBundle = ArgBundle::new();
+        let mut fn_optional_param_name_idx = 0;
+        let mut fn_optional_param_names: Vec<Ident> = Vec::new();
 
         let bytes = &program.bytecode;
         while pc < bytes.len() {
@@ -3180,43 +3281,43 @@ impl Interpreter {
                     stack.push(a.equal(self, &b)?);
                 },
                 val if val == ByteCode::NotEqual as u8 => {
-                    let a = stack.pop().expect("Operand for ByteCode::NotEqual");
                     let b = stack.pop().expect("Operand for ByteCode::NotEqual");
+                    let a = stack.pop().expect("Operand for ByteCode::NotEqual");
                     stack.push(a.not_equal(self, &b)?);
                 },
                 val if val == ByteCode::Multiply as u8 => {
-                    let a = stack.pop().expect("Operand for ByteCode::Multiply");
                     let b = stack.pop().expect("Operand for ByteCode::Multiply");
+                    let a = stack.pop().expect("Operand for ByteCode::Multiply");
                     stack.push(a.mul(self, &b)?);
                 },
                 val if val == ByteCode::Divide as u8 => {
-                    let a = stack.pop().expect("Operand for ByteCode::Divide");
                     let b = stack.pop().expect("Operand for ByteCode::Divide");
+                    let a = stack.pop().expect("Operand for ByteCode::Divide");
                     stack.push(a.div(self, &b)?);
                 },
                 val if val == ByteCode::GT as u8 => {
-                    let a = stack.pop().expect("Operand for ByteCode::GT");
                     let b = stack.pop().expect("Operand for ByteCode::GT");
+                    let a = stack.pop().expect("Operand for ByteCode::GT");
                     stack.push(a.gt(self, &b)?);
                 },
                 val if val == ByteCode::GTE as u8 => {
-                    let a = stack.pop().expect("Operand for ByteCode::GTE");
                     let b = stack.pop().expect("Operand for ByteCode::GTE");
+                    let a = stack.pop().expect("Operand for ByteCode::GTE");
                     stack.push(a.gte(self, &b)?);
                 },
                 val if val == ByteCode::LT as u8 => {
-                    let a = stack.pop().expect("Operand for ByteCode::LT");
                     let b = stack.pop().expect("Operand for ByteCode::LT");
+                    let a = stack.pop().expect("Operand for ByteCode::LT");
                     stack.push(a.lt(self, &b)?);
                 },
                 val if val == ByteCode::LTE as u8 => {
-                    let a = stack.pop().expect("Operand for ByteCode::LTE");
                     let b = stack.pop().expect("Operand for ByteCode::LTE");
+                    let a = stack.pop().expect("Operand for ByteCode::LTE");
                     stack.push(a.lte(self, &b)?);
                 },
                 val if val == ByteCode::In as u8 => {
-                    let a = stack.pop().expect("Operand for ByteCode::In");
                     let b = stack.pop().expect("Operand for ByteCode::In");
+                    let a = stack.pop().expect("Operand for ByteCode::In");
                     stack.push(a.contains(self, &b)?);
                 },
                 val if val == ByteCode::Not as u8 => {
@@ -3270,54 +3371,91 @@ impl Interpreter {
                     let required_arg_count = bytes[pc+1] as usize;
                     let optional_arg_count = bytes[pc+2] as usize;
 
-                    let provided_arg_count = {
-                        let len = pending_args.len();
-                        if len < required_arg_count {
-                            return Err(
-                                format_script_err(
-                                    program.spans[
-                                        stack_frame[stack_frame.len()-1].0
-                                    ],
-                                    &program.script,
-                                    &format!("Function expects at least {} arguments, but got {}", required_arg_count, len)
-                                )
-                            );
-                        }
-                        if len > required_arg_count + optional_arg_count {
-                            return Err(
-                                format_script_err(
-                                    program.spans[
-                                        stack_frame[stack_frame.len()-1].0
-                                    ],
-                                    &program.script,
-                                    &format!("Function expects no more than {} arguments, but got {}", required_arg_count + optional_arg_count, len)
-                                )
-                            );
+                    let mut pos_arg_idx = 0;
+
+                    // TODO: these need to be part of the stack frame since a
+                    // default value can call into another function
+                    fn_optional_param_names.clear();
+                    fn_optional_param_name_idx = 0;
+
+                    // Assign each parameter in the function to something
+                    let mut idx = pc+3;
+                    for param_idx in 0..(required_arg_count+optional_arg_count) {
+                        let len = bytes[idx];
+                        let param_name = &bytes[idx+1..idx+1+len as usize];
+
+                        if param_idx >= required_arg_count {
+                            fn_optional_param_names.push(param_name.to_vec());
                         }
 
-                        len
-                    };
+                        // If the parameter was provided as a kwarg, set that now
+                        let mut set_arg = false;
+                        for (ident, val) in pending_args.kwargs.iter() {
+                            if ident == param_name {
+                                self.env.insert_new(param_name.to_vec(), *val);
+                                set_arg = true;
+                                break;
+                            }
+                        }
 
-                    for item in pending_args.drain(0..) {
-                        stack.push(item);
+                        // If it wasn't set as a kwarg, assign it the next positional arg
+                        if !set_arg {
+                            let val = if pos_arg_idx < pending_args.args.len() {
+                                pos_arg_idx += 1;
+                                pending_args.args[pos_arg_idx-1]
+                            } else {
+                                // We ran out of positional args
+
+                                // If we haven't finished assigning the required
+                                // arguments then the function wasn't provided
+                                // enough and we need to exit
+                                if param_idx < required_arg_count {
+                                    return Err(
+                                        format_script_err(
+                                            program.spans[
+                                                stack_frame[stack_frame.len()-1].0
+                                            ],
+                                            &program.script,
+                                            &format!("Not enough positional args")
+                                        )
+                                    );
+                                }
+
+                                ShimValue::Uninitialized
+                            };
+                            self.env.insert_new(param_name.to_vec(), val);
+                        }
+
+                        idx += 1 + len as usize;
                     }
+                    pc = idx;
+                    continue;
+                },
+                val if val == ByteCode::JmpInitArg as u8 => {
+                    let optional_param_name = &fn_optional_param_names[
+                        fn_optional_param_name_idx
+                    ];
+                    fn_optional_param_name_idx += 1;
 
-                    let optional_args_evaluated = provided_arg_count - required_arg_count;
-
-                    if optional_args_evaluated == 0 {
-                        // Jump to just after the offset table
-                        pc += 3 + 2*optional_arg_count;
-                        continue;
-                    } else {
-                        let offset = u8s_to_u16(
-                            [
-                                bytes[pc+1 + 2*optional_args_evaluated + 0],
-                                bytes[pc+1 + 2*optional_args_evaluated + 1],
-                            ]
-                        ) as usize;
-                        pc += offset;
-                        continue;
+                    match self.env.get(optional_param_name) {
+                        Some(ShimValue::Uninitialized) => (),
+                        Some(_) => {
+                            let new_pc = pc + (
+                                ((bytes[pc+1] as usize) << 8) +
+                                bytes[pc+2] as usize
+                            );
+                            pc = new_pc;
+                            continue
+                        },
+                        None => return Err(format!("Expected UnpackArgs to set indent that doesn't exist!")),
                     }
+                    pc += 2;
+                },
+                val if val == ByteCode::AssignArg as u8 => {
+                    let arg_num = bytes[pc+1] as usize;
+                    let optional_param_name = &fn_optional_param_names[arg_num];
+                    self.env.update(optional_param_name, stack.pop().unwrap())?;
+                    pc += 1;
                 },
                 val if val == ByteCode::LiteralShimValue as u8 => {
                     let bytes = [
@@ -3336,7 +3474,6 @@ impl Interpreter {
                 val if val == ByteCode::LiteralString as u8 => {
                     let str_len = bytes[pc+1] as usize;
                     let contents = &bytes[pc+2..pc+2+str_len as usize];
-
 
                     const _: () = {
                         assert!(std::mem::size_of::<Vec<u8>>() == 24);
@@ -3433,10 +3570,28 @@ impl Interpreter {
                 },
                 val if val == ByteCode::Call as u8 => {
                     let arg_count = bytes[pc+1];
+                    let kwarg_count = bytes[pc+2];
 
-                    pending_args = stack.drain(
-                        (stack.len() - arg_count as usize)..stack.len()
-                    ).collect();
+                    pending_args.clear();
+
+                    for _ in 0..kwarg_count {
+                        let val = stack.pop().unwrap();
+                        let ident = match stack.pop().unwrap() {
+                            ShimValue::String(position) => {
+                                unsafe {
+                                    let ptr: &mut Vec<u8> = std::mem::transmute(&mut self.mem.mem[usize::from(position.0)]);
+                                    ptr.clone()
+                                }
+                            },
+                            other => return Err(format!("Invalid kwarg ident {:?}", other)),
+                        };
+                        pending_args.kwargs.push((ident, val));
+                    }
+
+                    for _ in 0..arg_count {
+                        pending_args.args.push(stack.pop().unwrap());
+                    }
+                    pending_args.args.reverse();
 
                     let callable = stack.pop().expect("callable not on stack");
 
@@ -3453,9 +3608,11 @@ impl Interpreter {
                         CallResult::PC(new_pc) => {
                             stack_frame.push(
                                 (
-                                    pc+2,
+                                    pc+3,
                                     loop_info.clone(),
                                     self.env.env_chain.len(),
+                                    fn_optional_param_names.clone(),
+                                    fn_optional_param_name_idx,
                                 )
                             );
                             loop_info = Vec::new();
@@ -3464,7 +3621,7 @@ impl Interpreter {
                             continue;
                         }
                     }
-                    pc += 1;
+                    pc += 2;
                 },
                 val if val == ByteCode::StartScope as u8 => {
                     self.env.push_scope();
@@ -3476,7 +3633,7 @@ impl Interpreter {
                     // The value at the top of the stack is the return value of
                     // the function, so we just need to pop the PC
                     let scope_count;
-                    (pc, loop_info, scope_count) = stack_frame.pop().expect("stack frame to return to");
+                    (pc, loop_info, scope_count, fn_optional_param_names, fn_optional_param_name_idx) = stack_frame.pop().expect("stack frame to return to");
                     while self.env.env_chain.len() > scope_count {
                         self.env.pop_scope().unwrap();
                     }
@@ -3651,8 +3808,12 @@ pub fn print_asm(bytes: &[u8]) {
             eprint!("JMPNZ");
         } else if *b == ByteCode::JmpUp as u8 {
             eprint!("JMPUP");
+        } else if *b == ByteCode::JmpInitArg as u8 {
+            eprint!("JmpInitArg");
         } else if *b == ByteCode::UnpackArgs as u8 {
             eprint!("unpack_args");
+        } else if *b == ByteCode::AssignArg as u8 {
+            eprint!("assign arg");
         } else if *b == ByteCode::CreateFn as u8 {
             eprint!("fn");
         } else if *b == ByteCode::CreateStruct as u8 {

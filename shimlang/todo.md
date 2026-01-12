@@ -1,7 +1,19 @@
 - List methods
+    - append
+    - clear
+    - len
+    - extend
+    - index
+    - insert
+    - pop
+    - sort
+    - sorted
+    - reverse
+    - reversed
 - Dicts
+    - Pop
 - String methods
-- Keyword args, variable arguments
+- Variable arguments
 - Operator overloading
 - Type annotations
 - Runtime type checking
