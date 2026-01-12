@@ -1455,6 +1455,8 @@ pub struct MMU {
 
 use std::any::TypeId;
 
+type ShimDict = Vec<(ShimValue, ShimValue)>;
+
 impl MMU {
     fn with_capacity(word_count: Word) -> Self {
         let mem = vec![0; usize::from(word_count.0)];
@@ -1487,6 +1489,31 @@ impl MMU {
             let ptr: *mut T = std::mem::transmute(&mut self.mem[usize::from(word.0)]);
             &mut *ptr
         }
+    }
+
+    fn alloc_str(&mut self, contents: &[u8]) -> ShimValue {
+        const _: () = {
+            assert!(std::mem::size_of::<Vec<u8>>() == 24);
+        };
+        let word_count = Word(3.into());
+        let position = self.alloc(word_count);
+        unsafe {
+            let ptr: *mut Vec<u8> =
+                std::mem::transmute(&mut self.mem[usize::from(position.0)]);
+            ptr.write(contents.to_vec());
+        }
+        ShimValue::String(position)
+    }
+
+    fn alloc_dict(&mut self) -> ShimValue {
+        let word_count = Word((std::mem::size_of::<ShimDict>() as u32).into());
+        let position = self.alloc(word_count);
+        unsafe {
+            let ptr: *mut ShimDict =
+                std::mem::transmute(&mut self.mem[usize::from(position.0)]);
+            ptr.write(Vec::new());
+        }
+        ShimValue::Dict(position)
     }
 
     /**
@@ -1673,15 +1700,7 @@ fn shim_dict(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValu
         return Err(format!("Can't provide args to dict()"));
     }
 
-    let word_count = Word((std::mem::size_of::<Vec<(ShimValue, ShimValue)>>() as u32).into());
-    let position = interpreter.mem.alloc(word_count);
-    unsafe {
-        let ptr: *mut Vec<(ShimValue, ShimValue)> =
-            std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
-        ptr.write(Vec::new());
-    }
-
-    Ok(ShimValue::Dict(position))
+    Ok(interpreter.mem.alloc_dict())
 }
 
 fn shim_print(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
@@ -3492,18 +3511,7 @@ impl Interpreter {
                     let str_len = bytes[pc + 1] as usize;
                     let contents = &bytes[pc + 2..pc + 2 + str_len as usize];
 
-                    const _: () = {
-                        assert!(std::mem::size_of::<Vec<u8>>() == 24);
-                    };
-                    let word_count = Word(3.into());
-                    let position = self.mem.alloc(word_count);
-                    unsafe {
-                        let ptr: *mut Vec<u8> =
-                            std::mem::transmute(&mut self.mem.mem[usize::from(position.0)]);
-                        ptr.write(contents.to_vec());
-                    }
-
-                    stack.push(ShimValue::String(position));
+                    stack.push(self.mem.alloc_str(contents));
                     pc += 1 + str_len;
                 }
                 val if val == ByteCode::VariableDeclaration as u8 => {
