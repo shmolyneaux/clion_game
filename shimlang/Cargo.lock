@@ -147,7 +147,3 @@ dependencies = [
  "proc-macro2",
  "shadow_counted",
 ]
-
-[[patch.unused]]
-name = "glam"
-version = "0.30.4"

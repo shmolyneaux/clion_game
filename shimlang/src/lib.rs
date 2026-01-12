@@ -90,7 +90,7 @@ pub enum Expression {
 }
 
 #[derive(Debug)]
-struct Fn {
+pub struct Fn {
     ident: Vec<u8>,
     pos_args_required: Vec<Vec<u8>>,
     pos_args_optional: Vec<(Vec<u8>, ExprNode)>,
@@ -98,7 +98,7 @@ struct Fn {
 }
 
 #[derive(Debug)]
-struct Struct {
+pub struct Struct {
     ident: Vec<u8>,
     members: Vec<Vec<u8>>,
     methods: Vec<Fn>,
@@ -319,14 +319,6 @@ impl TokenStream {
         self.idx >= self.tokens.len()
     }
 
-    fn script_lines(&self) -> Vec<LineInfo> {
-        script_lines(&self.script)
-    }
-
-    fn idx_to_line_col(&self, _idx: u32) -> (u32, u32) {
-        todo!();
-    }
-
     fn format_peek_err(&self, msg: &str) -> String {
         let span = if !self.is_empty() {
             self.token_spans[self.idx]
@@ -339,16 +331,6 @@ impl TokenStream {
         format_script_err(
             span,
             &self.script,
-            msg
-        )
-    }
-
-    fn format_err(&self, msg: &str) -> String {
-        let script = unsafe { std::str::from_utf8_unchecked(&self.script) };
-
-        format!(
-            "Script:\n{}\n\nMessage:\n{}",
-            script,
             msg
         )
     }
@@ -727,7 +709,7 @@ pub fn parse_unary(tokens: &mut TokenStream) -> Result<ExprNode, String> {
 }
 
 
-struct Conditional {
+pub struct Conditional {
     conditional: ExprNode,
     if_body: Block,
     else_body: Block,
@@ -833,7 +815,7 @@ pub fn parse_function(tokens: &mut TokenStream) -> Result<Fn, String> {
     }
     tokens.consume(Token::RBracket)?;
 
-    let mut body = parse_block(tokens)?;
+    let body = parse_block(tokens)?;
 
     Ok(Fn{ident: ident, pos_args_required: params, pos_args_optional: optional_params, body: body})
 }
@@ -1303,9 +1285,10 @@ impl Default for Config {
     }
 }
 
+#[allow(non_camel_case_types)]
 #[derive(Hash, Eq, PartialOrd, Ord, Copy, Clone, Debug, PartialEq)]
 #[repr(packed)]
-struct u24([u8; 3]);
+pub struct u24([u8; 3]);
 
 impl From<u32> for u24 {
     fn from(val: u32) -> Self {
@@ -1468,9 +1451,11 @@ impl MMU {
         }
     }
 
+    /*
     fn compact_free_list() {
         todo!("compact_free_list not implemented");
     }
+    */
 
     unsafe fn get<T: 'static>(&self, word: Word) -> &T {
         if TypeId::of::<T>() == TypeId::of::<Word>() {
@@ -1523,11 +1508,13 @@ impl MMU {
         panic!("Could not allocate {:?} words from free list {:#?}", words, self.free_list);
     }
 
+    /*
     fn free(&mut self, _words: u32, _ptr: *const u64) {
     }
+    */
 }
 
-struct Environment {
+pub struct Environment {
     env_chain: Vec<HashMap<Vec<u8>, u64>>
 }
 
@@ -1655,7 +1642,6 @@ enum StructAttribute {
 #[derive(Debug)]
 struct StructDef {
     member_count: u8,
-    method_count: u8,
     lookup: Vec<(Vec<u8>, StructAttribute)>,
 }
 
@@ -1733,7 +1719,7 @@ fn shim_dict_index_set(interpreter: &mut Interpreter, args: &ArgBundle) -> Resul
         return Err(format!("Expected 3 args for dict set"));
     }
 
-    let mut dict: &mut Vec<(ShimValue, ShimValue)> = if let ShimValue::Dict(position) = args.args[0] {
+    let dict: &mut Vec<(ShimValue, ShimValue)> = if let ShimValue::Dict(position) = args.args[0] {
         unsafe {
             let ptr: &mut Vec<(ShimValue, ShimValue)> = std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
             ptr
@@ -1759,7 +1745,7 @@ fn shim_dict_index_get(interpreter: &mut Interpreter, args: &ArgBundle) -> Resul
         return Err(format!("Expected 2 args for dict get"));
     }
 
-    let mut dict: &mut Vec<(ShimValue, ShimValue)> = if let ShimValue::Dict(position) = args.args[0] {
+    let dict: &mut Vec<(ShimValue, ShimValue)> = if let ShimValue::Dict(position) = args.args[0] {
         unsafe {
             let ptr: &mut Vec<(ShimValue, ShimValue)> = std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
             ptr
@@ -1782,7 +1768,7 @@ fn shim_dict_index_has(interpreter: &mut Interpreter, args: &ArgBundle) -> Resul
         return Err(format!("Expected 2 args for dict has"));
     }
 
-    let mut dict: &mut Vec<(ShimValue, ShimValue)> = if let ShimValue::Dict(position) = args.args[0] {
+    let dict: &mut Vec<(ShimValue, ShimValue)> = if let ShimValue::Dict(position) = args.args[0] {
         unsafe {
             let ptr: &mut Vec<(ShimValue, ShimValue)> = std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
             ptr
@@ -1791,7 +1777,7 @@ fn shim_dict_index_has(interpreter: &mut Interpreter, args: &ArgBundle) -> Resul
         return Err(format!("Can't get non-dict {:?}", args.args[0]));
     };
 
-    for (key, val) in dict.iter() {
+    for (key, _val) in dict.iter() {
         if key.equal_inner(interpreter, &args.args[1])? {
             return Ok(ShimValue::Bool(true));
         }
@@ -1986,13 +1972,13 @@ impl ShimValue {
                 list[index] = *value;
                 Ok(())
             },
-            (ShimValue::Dict(position), key) => {
+            (ShimValue::Dict(position), index) => {
                 let dict: &mut Vec<(ShimValue, ShimValue)> = unsafe {
                     std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)])
                 };
 
                 for (key, dval) in dict.iter_mut() {
-                    if key.equal_inner(interpreter, &key)? {
+                    if key.equal_inner(interpreter, &index)? {
                         *dval = *value;
                         return Ok(());
                     }
@@ -2195,14 +2181,14 @@ impl ShimValue {
     }
 
     fn contains(&self, interpreter: &mut Interpreter, some_key: &Self) -> Result<ShimValue, String> {
-        match (self, some_key) {
-            (ShimValue::Dict(position), _) => {
-                let mut dict: &mut Vec<(ShimValue, ShimValue)> = unsafe {
+        match self {
+            ShimValue::Dict(position) => {
+                let dict: &mut Vec<(ShimValue, ShimValue)> = unsafe {
                     let ptr: &mut Vec<(ShimValue, ShimValue)> = std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
                     ptr
                 };
 
-                for (key, val) in dict.iter() {
+                for (key, _) in dict.iter() {
                     if key.equal_inner(interpreter, some_key)? {
                         return Ok(ShimValue::Bool(true));
                     }
@@ -2210,17 +2196,18 @@ impl ShimValue {
 
                 return Ok(ShimValue::Bool(false));
             },
-            (a, b) => Err(format!("Can't `in` {:?} and {:?}", a, b))
+            _ => Err(format!("Can't `in` {:?} and {:?}", self, some_key))
         }
     }
 
-    fn not(&self, _interpreter: &mut Interpreter) -> Result<ShimValue, String> {
+    fn not(&self, interpreter: &mut Interpreter) -> Result<ShimValue, String> {
         match self {
             ShimValue::Bool(a) => Ok(ShimValue::Bool(!a)),
             ShimValue::Float(a) => Ok(ShimValue::Bool(*a == 0.0)),
             ShimValue::Integer(a) => Ok(ShimValue::Bool(*a == 0)),
             ShimValue::None => Ok(ShimValue::Bool(true)),
-            other => Ok(ShimValue::Bool(false)),
+            ShimValue::List(_) => Ok(ShimValue::Bool(!self.is_truthy(interpreter)?)),
+            _ => Ok(ShimValue::Bool(false)),
         }
     }
 
@@ -2267,7 +2254,7 @@ impl ShimValue {
                     for (attr, loc) in def.lookup.iter() {
                         if ident == attr {
                             return match loc {
-                                StructAttribute::MemberInstanceOffset(offset) => {
+                                StructAttribute::MemberInstanceOffset(_) => {
                                     Err(format!("Can't access member {:?} on StructDef {:?}", ident, self))
                                 }
                                 StructAttribute::MethodDefPC(pc) => {
@@ -2511,7 +2498,7 @@ pub struct Program {
 }
 
 pub fn compile_ast(ast: &Ast) -> Result<Program, String> {
-    let mut program = compile_block(&ast.block, false)?;
+    let program = compile_block(&ast.block, false)?;
     let (bytecode, spans): (Vec<u8>, Vec<Span>) = program.into_iter().unzip();
     Ok(
         Program {
@@ -2553,7 +2540,7 @@ pub fn compile_fn_body(func: &Fn) -> Result<Vec<(u8, Span)>, String> {
         }
     }
 
-    for (idx, (param, expr)) in func.pos_args_optional.iter().enumerate() {
+    for (idx, (_param, expr)) in func.pos_args_optional.iter().enumerate() {
         let jmp_idx = asm.len();
         asm.push((ByteCode::JmpInitArg as u8, expr.span));
         asm.push((0, expr.span));
@@ -3566,7 +3553,7 @@ impl Interpreter {
                     let index = stack.pop().expect("index index");
                     let obj = stack.pop().expect("index obj");
 
-                    obj.set_index(self, &index, &val);
+                    obj.set_index(self, &index, &val)?;
                 },
                 val if val == ByteCode::Call as u8 => {
                     let arg_count = bytes[pc+1];
@@ -3727,7 +3714,7 @@ impl Interpreter {
                         idx = idx + 1 + ident_len as usize;
                     }
 
-                    for method_idx in 0..method_count {
+                    for _ in 0..method_count {
                         let method_pc = pc +
                             ((bytes[idx] as usize) << 8) +
                             bytes[idx+1] as usize;
@@ -3756,7 +3743,6 @@ impl Interpreter {
                         ptr.write(
                             StructDef {
                                 member_count: member_count,
-                                method_count: method_count,
                                 lookup: struct_table,
                             }
                         );
@@ -3792,6 +3778,8 @@ pub fn print_asm(bytes: &[u8]) {
             eprint!("JMP");
         } else if *b == ByteCode::VariableDeclaration as u8 {
             eprint!("let");
+        } else if *b == ByteCode::NoOp as u8 {
+            eprint!("no-op");
         } else if *b == ByteCode::Assignment as u8 {
             eprint!("assignment");
         } else if *b == ByteCode::Call as u8 {
@@ -3939,4 +3927,4 @@ mod tests {
  *
  *
  */
-const _todo: u8 = 42;
+const _TODO: u8 = 42;

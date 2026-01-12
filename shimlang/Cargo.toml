@@ -9,7 +9,6 @@ facet-reflect = { version = "0.27.14", optional = true }
 
 
 [patch.crates-io]
-glam = { path = "../glam-rs" }
 facet = { path = "../facet/facet" }
 facet-reflect = { path = "../facet/facet-reflect" }
 
