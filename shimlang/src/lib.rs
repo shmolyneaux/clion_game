@@ -2299,12 +2299,12 @@ impl ShimValue {
         }
     }
 
-    fn add(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
+    fn add(&self, interpreter: &mut Interpreter, other: &Self, pending_args: &mut ArgBundle) -> Result<CallResult, String> {
         match (self, other) {
-            (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Integer(*a + *b)),
-            (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Float(*a + *b)),
-            (ShimValue::Integer(a), ShimValue::Float(b)) => Ok(ShimValue::Float((*a as f32) + *b)),
-            (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(ShimValue::Float(*a + (*b as f32))),
+            (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(CallResult::ReturnValue(ShimValue::Integer(*a + *b))),
+            (ShimValue::Float(a), ShimValue::Float(b)) => Ok(CallResult::ReturnValue(ShimValue::Float(*a + *b))),
+            (ShimValue::Integer(a), ShimValue::Float(b)) => Ok(CallResult::ReturnValue(ShimValue::Float((*a as f32) + *b))),
+            (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(CallResult::ReturnValue(ShimValue::Float(*a + (*b as f32)))),
             (ShimValue::String(a), ShimValue::String(b)) => {
                 let a: &mut Vec<u8> =
                     unsafe { std::mem::transmute(&mut interpreter.mem.mem[usize::from(a.0)]) };
@@ -2324,8 +2324,13 @@ impl ShimValue {
                     }
                 };
 
-                Ok(ShimValue::String(position))
+                Ok(CallResult::ReturnValue(ShimValue::String(position)))
             }
+            (ShimValue::Struct(_), b) => {
+                pending_args.args.clear();
+                pending_args.args.push(*b);
+                self.get_attr(interpreter, b"add")?.call(interpreter, pending_args)
+            },
             (a, b) => Err(format!(
                 "Operation '+' not supported between {:?} and {:?}",
                 a, b
@@ -2549,7 +2554,7 @@ impl ShimValue {
             ShimValue::Native(_) => {
                 self.native(interpreter).unwrap().get_attr(self, interpreter, ident)
             }
-            val => Err(format!("Ident {:?} not available on {:?}", ident, val)),
+            val => Err(format!("Ident {:?} not available on {:?}", debug_u8s(ident), val)),
         }
     }
 
@@ -3462,9 +3467,25 @@ impl Interpreter {
                 val if val == ByteCode::Add as u8 => {
                     let b = stack.pop().expect("Operand for add");
                     let a = stack.pop().expect("Operand for add");
-                    stack.push(a.add(self, &b).map_err(|err_str| {
+
+                    match a.add(self, &b, &mut pending_args).map_err(|err_str| {
                         format_script_err(program.spans[pc], &program.script, &err_str)
-                    })?);
+                    })? {
+                        CallResult::ReturnValue(res) => stack.push(res),
+                        CallResult::PC(new_pc) => {
+                            stack_frame.push((
+                                pc + 1,
+                                loop_info.clone(),
+                                self.env.env_chain.len(),
+                                fn_optional_param_names.clone(),
+                                fn_optional_param_name_idx,
+                            ));
+                            loop_info = Vec::new();
+                            self.env.push_scope();
+                            pc = new_pc as usize;
+                            continue;
+                        }
+                    }
                 }
                 val if val == ByteCode::Sub as u8 => {
                     let b = stack.pop().expect("Operand for add");
@@ -3607,7 +3628,7 @@ impl Interpreter {
                                     return Err(format_script_err(
                                         program.spans[stack_frame[stack_frame.len() - 1].0 - 3],
                                         &program.script,
-                                        &format!("Not enough positional args"),
+                                        &format!("Not enough positional args, arg_count: {}, kwarg_count: {}", pending_args.args.len(), pending_args.kwargs.len()),
                                     ));
                                 }
 
@@ -3720,7 +3741,7 @@ impl Interpreter {
                         return Err(format_script_err(
                             program.spans[pc],
                             &program.script,
-                            &format!("Unknown identifier {:?}", ident),
+                            &format!("Unknown identifier {:?}", debug_u8s(ident)),
                         ));
                     }
                     pc += 1 + ident_len;
