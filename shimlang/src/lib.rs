@@ -222,6 +222,10 @@ fn script_lines(script: &[u8]) -> Vec<LineInfo> {
     line_info
 }
 
+fn debug_u8s(data: &[u8]) -> &str {
+    unsafe { std::str::from_utf8_unchecked(data) }
+}
+
 fn format_script_err(span: Span, script: &[u8], msg: &str) -> String {
     let script_lines = script_lines(script);
     let mut out = "".to_string();
@@ -3486,12 +3490,17 @@ impl Interpreter {
 
                         // If the parameter was provided as a kwarg, set that now
                         let mut set_arg = false;
-                        for (ident, val) in pending_args.kwargs.iter() {
+                        let mut found_idx = None;
+                        for (idx, (ident, val)) in pending_args.kwargs.iter().enumerate() {
                             if ident == param_name {
-                                self.env.insert_new(param_name.to_vec(), *val);
-                                set_arg = true;
+                                found_idx = Some(idx);
                                 break;
                             }
+                        }
+                        if let Some(idx) = found_idx {
+                            let (_ident, val) = pending_args.kwargs.remove(idx);
+                            self.env.insert_new(param_name.to_vec(), val);
+                            set_arg = true;
                         }
 
                         // If it wasn't set as a kwarg, assign it the next positional arg
@@ -3526,6 +3535,18 @@ impl Interpreter {
                             program.spans[stack_frame[stack_frame.len() - 1].0 - 3],
                             &program.script,
                             &format!("Too many positional args, {} remaining", remaining),
+                        ));
+                    }
+                    if !pending_args.kwargs.is_empty() {
+                        let mut msg = "Unused kwargs remaining:".to_string();
+                        for (ident, _) in pending_args.kwargs.iter() {
+                            msg.push(' ');
+                            msg.push_str(debug_u8s(ident));
+                        }
+                        return Err(format_script_err(
+                            program.spans[stack_frame[stack_frame.len() - 1].0 - 3],
+                            &program.script,
+                            &msg,
                         ));
                     }
                     pc = idx;
@@ -3672,6 +3693,7 @@ impl Interpreter {
                         pending_args.args.push(stack.pop().unwrap());
                     }
                     pending_args.args.reverse();
+                    pending_args.kwargs.reverse();
 
                     let callable = stack.pop().expect("callable not on stack");
 
