@@ -18,6 +18,17 @@ impl Span {
     }
 }
 
+impl Add<Span> for Span {
+    type Output = Span;
+
+    fn add(self, other: Self) -> Self {
+        Self {
+            start: self.start.min(other.start),
+            end: self.end.max(other.end),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Node<T> {
     pub data: T,
@@ -487,9 +498,12 @@ pub fn parse_call(tokens: &mut TokenStream) -> Result<ExprNode, String> {
             Token::LBracket => {
                 tokens.advance()?;
                 let args = parse_fn_arguments(tokens, Token::RBracket)?;
+                tokens.unadvance()?;
+                let end_span = tokens.peek_span()?;
+                tokens.advance()?;
                 expr = Node {
+                    span: expr.span + end_span,
                     data: Expression::Call(Box::new(expr), args.0, args.1),
-                    span: span,
                 };
             }
             Token::LSquare => {
@@ -1733,17 +1747,9 @@ fn shim_list_len(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shim
         return Err(format!("No args expected for list len"));
     }
 
-    let lst = if let ShimValue::List(position) = args.args[0] {
-        unsafe {
-            let ptr: *mut Vec<ShimValue> =
-                std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
-            ptr
-        }
-    } else {
-        return Err(format!("Can't get list len on non-list {:?}", args.args[0]));
-    };
+    let lst = args.args[0].list(interpreter)?;
 
-    unsafe { Ok(ShimValue::Integer((*lst).len() as i32)) }
+    Ok(ShimValue::Integer(lst.len() as i32))
 }
 
 fn shim_dict_index_set(
@@ -1943,60 +1949,115 @@ impl ShimValue {
         }
     }
 
-    fn index(&self, interpreter: &mut Interpreter, index: &ShimValue) -> Result<ShimValue, String> {
-        match (self, index) {
-            (ShimValue::String(position), ShimValue::Integer(index)) => unsafe {
-                let index = *index as isize;
-                let ptr: *mut Vec<u8> =
-                    std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
-
-                let len = (*ptr).len() as isize;
-                let index: isize = if index < -len || index >= len {
-                    return Err(format!("Index {} is out of bounds", index));
-                } else if index < 0 {
-                    len + index as isize
-                } else {
-                    index as isize
-                };
-
-                let b: u8 = (&(*ptr))[index as usize];
-
-                let word_count = Word(3.into());
-                let new_str = interpreter.mem.alloc(word_count);
-                let ptr: *mut Vec<u8> =
-                    std::mem::transmute(&mut interpreter.mem.mem[usize::from(new_str.0)]);
-                ptr.write([b].to_vec());
-
-                Ok(ShimValue::String(new_str))
-            },
-            (ShimValue::List(position), ShimValue::Integer(index)) => unsafe {
-                let index = *index as isize;
-                let ptr: *mut Vec<ShimValue> =
-                    std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
-
-                let len = (*ptr).len() as isize;
-                let index: isize = if index < -len || index >= len {
-                    return Err(format!("Index {} is out of bounds", index));
-                } else if index < 0 {
-                    len + index as isize
-                } else {
-                    index as isize
-                };
-
-                Ok((&(*ptr))[index as usize])
-            },
-            (ShimValue::Dict(position), key) => {
+    fn dict_mut(&self, interpreter: &mut Interpreter) -> Result<&mut Vec<(ShimValue, ShimValue)>, String> {
+        match self {
+            ShimValue::Dict(position) => {
                 let dict: &mut Vec<(ShimValue, ShimValue)> = unsafe {
                     std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)])
                 };
+                Ok(dict)
+            },
+            _ => {
+                Err(format!("Not a dict"))
+            }
+        }
+    }
+
+    fn list_mut(&self, interpreter: &mut Interpreter) -> Result<&mut Vec<ShimValue>, String> {
+        match self {
+            ShimValue::List(position) => {
+                unsafe {
+                    let ptr: *mut Vec<ShimValue> =
+                        std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
+                    Ok(&mut *ptr)
+                }
+            },
+            _ => {
+                Err(format!("Not a list"))
+            }
+        }
+    }
+
+    fn list(&self, interpreter: &Interpreter) -> Result<&[ShimValue], String> {
+        match self {
+            ShimValue::List(position) => {
+                unsafe {
+                    let ptr: *const Vec<ShimValue> =
+                        std::mem::transmute(&interpreter.mem.mem[usize::from(position.0)]);
+                    Ok(&*ptr)
+                }
+            },
+            _ => {
+                Err(format!("Not a list"))
+            }
+        }
+    }
+
+    fn expect_string(&self, interpreter: &Interpreter) -> &[u8] {
+        self.string(interpreter).unwrap()
+    }
+
+    fn string(&self, interpreter: &Interpreter) -> Result<&[u8], String> {
+        match self {
+            ShimValue::String(position) => {
+                unsafe {
+                    let ptr: *const Vec<u8> =
+                        std::mem::transmute(&interpreter.mem.mem[usize::from(position.0)]);
+                    Ok(&*ptr)
+                }
+            },
+            _ => {
+                Err(format!("Not a string"))
+            }
+        }
+    }
+
+    fn index(&self, interpreter: &mut Interpreter, index: &ShimValue) -> Result<ShimValue, String> {
+        match (self, index) {
+            (ShimValue::String(_), ShimValue::Integer(index)) => {
+                let index = *index as isize;
+
+                let val = self.string(interpreter)?;
+
+                let len = val.len() as isize;
+                let index: isize = if index < -len || index >= len {
+                    return Err(format!("Index {} is out of bounds", index));
+                } else if index < 0 {
+                    len + index as isize
+                } else {
+                    index as isize
+                };
+
+                let b: u8 = val[index as usize];
+
+                Ok(interpreter.mem.alloc_str(&[b]))
+            },
+            (ShimValue::List(_), ShimValue::Integer(index)) => {
+                let index = *index as isize;
+
+                let val = self.list_mut(interpreter)?;
+
+                let len = val.len() as isize;
+                let index: isize = if index < -len || index >= len {
+                    return Err(format!("Index {} is out of bounds", index));
+                } else if index < 0 {
+                    len + index as isize
+                } else {
+                    index as isize
+                };
+
+                Ok(val[index as usize])
+            },
+            (ShimValue::Dict(_), some_key) => {
+                let dict = self.dict_mut(interpreter)?;
 
                 for (key, val) in dict.iter() {
-                    if key.equal_inner(interpreter, &key)? {
+                    if some_key.equal_inner(interpreter, &key)? {
                         return Ok(*val);
                     }
                 }
 
-                Err(format!("Key {:?} not found in dict", key))
+                Err(format!("Key {:?} not found in dict", some_key))
             }
             (a, b) => Err(format!("Can't index {:?} with {:?}", a, b)),
         }
@@ -2047,10 +2108,8 @@ impl ShimValue {
             ShimValue::Float(f) => format_float(*f),
             ShimValue::Bool(false) => "false".to_string(),
             ShimValue::Bool(true) => "true".to_string(),
-            ShimValue::String(position) => unsafe {
-                let ptr: *mut Vec<u8> =
-                    std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
-                String::from_utf8((*ptr).clone()).expect("valid utf-8 string stored")
+            ShimValue::String(_) => {
+                String::from_utf8(self.string(interpreter).unwrap().to_vec()).expect("valid utf-8 string stored")
             },
             ShimValue::List(position) => {
                 let mut out = "[".to_string();
@@ -2080,15 +2139,11 @@ impl ShimValue {
             ShimValue::Float(f) => Ok(*f != 0.0),
             ShimValue::Bool(false) => Ok(false),
             ShimValue::Bool(true) => Ok(true),
-            ShimValue::String(position) => unsafe {
-                let ptr: *mut Vec<u8> =
-                    std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
-                Ok(!(*ptr).is_empty())
+            ShimValue::String(_) => {
+                Ok(!self.expect_string(interpreter).is_empty())
             },
-            ShimValue::List(position) => unsafe {
-                let ptr: *mut Vec<ShimValue> =
-                    std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
-                Ok((*ptr).len() != 0)
+            ShimValue::List(_) => {
+                Ok(!self.list(interpreter)?.is_empty())
             },
             _ => Ok(true),
         }
@@ -3018,6 +3073,7 @@ pub fn compile_if(
 }
 
 pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
+    let span = expr.span;
     match &expr.data {
         Expression::Primary(Primary::None) => {
             let val = ShimValue::None;
@@ -3181,9 +3237,9 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
                 res.extend(compile_expression(kwarg_expr)?);
             }
 
-            res.push((ByteCode::Call as u8, expr.span));
-            res.push((args.len() as u8, expr.span));
-            res.push((kwargs.len() as u8, expr.span));
+            res.push((ByteCode::Call as u8, span));
+            res.push((args.len() as u8, span));
+            res.push((kwargs.len() as u8, span));
             Ok(res)
         }
         Expression::Attribute(expr, ident) => {
@@ -3451,7 +3507,7 @@ impl Interpreter {
                                 // enough and we need to exit
                                 if param_idx < required_arg_count {
                                     return Err(format_script_err(
-                                        program.spans[stack_frame[stack_frame.len() - 1].0],
+                                        program.spans[stack_frame[stack_frame.len() - 1].0 - 3],
                                         &program.script,
                                         &format!("Not enough positional args"),
                                     ));
@@ -3463,6 +3519,14 @@ impl Interpreter {
                         }
 
                         idx += 1 + len as usize;
+                    }
+                    if pos_arg_idx != pending_args.args.len() {
+                        let remaining = pending_args.args.len() - pos_arg_idx;
+                        return Err(format_script_err(
+                            program.spans[stack_frame[stack_frame.len() - 1].0 - 3],
+                            &program.script,
+                            &format!("Too many positional args, {} remaining", remaining),
+                        ));
                     }
                     pc = idx;
                     continue;
