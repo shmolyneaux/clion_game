@@ -5,6 +5,7 @@ use facet::Facet;
 
 use std::ops::{Add, Sub};
 use std::ops::{AddAssign, SubAssign};
+use std::any::{Any, type_name, type_name_of_val};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Span {
@@ -1534,6 +1535,33 @@ impl MMU {
         ShimValue::Dict(position)
     }
 
+    fn alloc_native<T: ShimNative>(&mut self, val: T) -> ShimValue {
+        assert!(std::mem::size_of::<Box<dyn ShimNative>>() == 16);
+        let word_count = Word(2.into());
+        let position = self.alloc(word_count);
+        unsafe {
+            let ptr: *mut Box<dyn ShimNative> =
+                std::mem::transmute(&mut self.mem[usize::from(position.0)]);
+            ptr.write(Box::new(val));
+        }
+        ShimValue::Native(position)
+    }
+
+    fn alloc_bound_native_fn(&mut self, obj: &ShimValue, func: NativeFn) -> ShimValue {
+        let position = self.alloc(Word(2.into()));
+        unsafe {
+            let obj_ptr: *mut ShimValue =
+                std::mem::transmute(&mut self.mem[usize::from(position.0)]);
+            obj_ptr.write(*obj);
+            let fn_ptr: *mut NativeFn = std::mem::transmute(
+                &mut self.mem[usize::from(position.0) + 1],
+            );
+            fn_ptr.write(func);
+
+            ShimValue::BoundNativeMethod(position)
+        }
+    }
+
     /**
      * Returns the position in `self.mem` of the block allocted
      */
@@ -1674,6 +1702,63 @@ pub enum ShimValue {
     Dict(Word),
     StructDef(Word),
     Struct(Word),
+    Native(Word),
+}
+
+trait ShimNative: Any {
+    fn to_string(&self, _interpreter: &mut Interpreter) -> String {
+        format!("{}", type_name::<Self>())
+    }
+
+    fn get_attr(&self, _self_as_val: &ShimValue, _interpreter: &mut Interpreter, _ident: &[u8]) -> Result<ShimValue, String> {
+        Err(format!("Can't get_attr on {}", type_name::<Self>() ))
+    }
+
+    fn set_attr(
+        &self,
+        _interpreter: &mut Interpreter,
+        _ident: &[u8],
+        _val: ShimValue,
+    ) -> Result<(), String> {
+        Err(format!("Can't set_attr on {}", type_name::<Self>() ))
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any;
+}
+
+struct ListIterator {
+    lst: ShimValue,
+    idx: usize,
+}
+impl ShimNative for ListIterator {
+    fn get_attr(&self, self_as_val: &ShimValue, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
+        if ident == b"next" {
+            fn shim_list_iter_next(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+                if args.args.len() != 1 {
+                    return Err(format!("Can't provide positional args to ListIterator.next()"));
+                }
+
+                let itr: &mut ListIterator = args.args[0].as_native(interpreter)?;
+                let lst = itr.lst.list(interpreter)?;
+                if itr.idx >= lst.len() {
+                    Ok(ShimValue::None)
+                } else {
+                    let result = lst[itr.idx];
+                    itr.idx += 1;
+
+                    Ok(result)
+                }
+            }
+
+            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_list_iter_next))
+        } else {
+            Err(format!("Can't get_attr {} on {}", debug_u8s(ident), type_name::<Self>() ))
+        }
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any where Self: Sized {
+        self
+    }
 }
 
 use std::mem::size_of;
@@ -1714,11 +1799,18 @@ enum CallResult {
 }
 
 fn shim_dict(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
-    if args.len() != 0 {
-        return Err(format!("Can't provide args to dict()"));
+    if args.args.len() != 0 {
+        return Err(format!("Can't provide positional args to dict()"));
     }
 
-    Ok(interpreter.mem.alloc_dict())
+    let retval = interpreter.mem.alloc_dict();
+    let dict = retval.dict_mut(interpreter)?;
+
+    for (key, val) in args.kwargs.clone().into_iter() {
+        dict.push((interpreter.mem.alloc_str(&key), val));
+    }
+
+    Ok(retval)
 }
 
 fn shim_print(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
@@ -1754,6 +1846,16 @@ fn shim_list_len(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shim
     let lst = args.args[0].list(interpreter)?;
 
     Ok(ShimValue::Integer(lst.len() as i32))
+}
+
+fn shim_list_iter(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    if args.len() != 1 {
+        return Err(format!("No args expected for list iter"));
+    }
+
+    let slf = args.args[0];
+
+    Ok(interpreter.mem.alloc_native(ListIterator {lst: slf, idx: 0}))
 }
 
 fn shim_dict_index_set(
@@ -1840,6 +1942,17 @@ fn shim_dict_index_has(
     return Ok(ShimValue::Bool(false));
 }
 
+fn shim_dict_index_len(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
+    if args.args.len() != 1 {
+        return Err(format!("Expected 0 args for dict len"));
+    }
+
+    Ok(ShimValue::Integer(args.args[0].dict_mut(interpreter)?.len() as i32))
+}
+
 fn shim_str_len(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
     if args.len() != 1 {
         return Err(format!("No args expected for str len"));
@@ -1898,6 +2011,23 @@ macro_rules! numeric_op {
 }
 
 impl ShimValue {
+    fn as_native<T: ShimNative>(&self, interpreter: &mut Interpreter) -> Result<&mut T, String> {
+        match self {
+            ShimValue::Native(position) => unsafe {
+                let boxobj: &mut Box<dyn ShimNative> =
+                    std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
+
+                let mutboxobj = boxobj.as_any_mut();
+                let name = type_name_of_val(mutboxobj);
+                match mutboxobj.downcast_mut::<T>() {
+                    Some(obj) => Ok(obj),
+                    _ => Err(format!("Can't get {} as {}", name, type_name::<T>()))
+                }
+            },
+            _ => Err(format!("Can't try_into non-native {:?}", self))
+        }
+    }
+
     fn call(
         &self,
         interpreter: &mut Interpreter,
@@ -1993,6 +2123,19 @@ impl ShimValue {
             },
             _ => {
                 Err(format!("Not a list"))
+            }
+        }
+    }
+
+    fn native(&self, interpreter: &mut Interpreter) -> Result<&mut Box<dyn ShimNative>, String> {
+        match self {
+            ShimValue::Native(position) => unsafe {
+                let ptr: *mut Box<dyn ShimNative> =
+                    std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
+                Ok(&mut *ptr)
+            },
+            _ => {
+                Err(format!("Not a native"))
             }
         }
     }
@@ -2132,6 +2275,9 @@ impl ShimValue {
                 out.push_str("]");
 
                 out
+            },
+            ShimValue::Native(_) => {
+                self.native(interpreter).unwrap().to_string(interpreter)
             }
             value => format!("{:?}", value),
         }
@@ -2376,92 +2522,32 @@ impl ShimValue {
                 Err(format!("Ident {:?} not found for {:?}", ident, self))
             }
             ShimValue::String(_) => {
-                if ident == b"len" {
-                    let position = interpreter.mem.alloc(Word(2.into()));
-                    unsafe {
-                        let obj_ptr: *mut ShimValue =
-                            std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
-                        obj_ptr.write(*self);
-                        let fn_ptr: *mut NativeFn = std::mem::transmute(
-                            &mut interpreter.mem.mem[usize::from(position.0) + 1],
-                        );
-                        fn_ptr.write(shim_str_len);
-
-                        Ok(ShimValue::BoundNativeMethod(position))
-                    }
-                } else {
-                    Err(format!("No ident {:?} on list", self))
-                }
+                let func = match ident {
+                    b"len" => shim_str_len,
+                    _ => return Err(format!("No ident {:?} on str", debug_u8s(ident))),
+                };
+                Ok(interpreter.mem.alloc_bound_native_fn(self, func))
             }
             ShimValue::List(_) => {
-                // TODO: this would be more efficient memorywise if all the native
-                // list functions were already in memory. Then the bound native
-                // method wouldn't need to be pushed to memory every time a
-                // native method is called
-                if ident == b"len" {
-                    let position = interpreter.mem.alloc(Word(2.into()));
-                    unsafe {
-                        let obj_ptr: *mut ShimValue =
-                            std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
-                        obj_ptr.write(*self);
-                        let fn_ptr: *mut NativeFn = std::mem::transmute(
-                            &mut interpreter.mem.mem[usize::from(position.0) + 1],
-                        );
-                        fn_ptr.write(shim_list_len);
-
-                        Ok(ShimValue::BoundNativeMethod(position))
-                    }
-                } else {
-                    Err(format!("No ident {:?} on list", self))
-                }
+                let func = match ident {
+                    b"len" => shim_list_len,
+                    b"iter" => shim_list_iter,
+                    _ => return Err(format!("No ident {:?} on list", debug_u8s(ident))),
+                };
+                Ok(interpreter.mem.alloc_bound_native_fn(self, func))
             }
             ShimValue::Dict(_) => {
-                // TODO: this would be more efficient memorywise if all the native
-                // list functions were already in memory. Then the bound native
-                // method wouldn't need to be pushed to memory every time a
-                // native method is called
-                if ident == b"set" {
-                    let position = interpreter.mem.alloc(Word(2.into()));
-                    unsafe {
-                        let obj_ptr: *mut ShimValue =
-                            std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
-                        obj_ptr.write(*self);
-                        let fn_ptr: *mut NativeFn = std::mem::transmute(
-                            &mut interpreter.mem.mem[usize::from(position.0) + 1],
-                        );
-                        fn_ptr.write(shim_dict_index_set);
-
-                        Ok(ShimValue::BoundNativeMethod(position))
-                    }
-                } else if ident == b"get" {
-                    let position = interpreter.mem.alloc(Word(2.into()));
-                    unsafe {
-                        let obj_ptr: *mut ShimValue =
-                            std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
-                        obj_ptr.write(*self);
-                        let fn_ptr: *mut NativeFn = std::mem::transmute(
-                            &mut interpreter.mem.mem[usize::from(position.0) + 1],
-                        );
-                        fn_ptr.write(shim_dict_index_get);
-
-                        Ok(ShimValue::BoundNativeMethod(position))
-                    }
-                } else if ident == b"has" {
-                    let position = interpreter.mem.alloc(Word(2.into()));
-                    unsafe {
-                        let obj_ptr: *mut ShimValue =
-                            std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
-                        obj_ptr.write(*self);
-                        let fn_ptr: *mut NativeFn = std::mem::transmute(
-                            &mut interpreter.mem.mem[usize::from(position.0) + 1],
-                        );
-                        fn_ptr.write(shim_dict_index_has);
-
-                        Ok(ShimValue::BoundNativeMethod(position))
-                    }
-                } else {
-                    Err(format!("No ident {:?} on list", self))
-                }
+                let func = match ident {
+                    b"set" => shim_dict_index_set,
+                    b"get" => shim_dict_index_get,
+                    b"has" => shim_dict_index_has,
+                    b"len" => shim_dict_index_len,
+                    _ => return Err(format!("No ident {:?} on dict", debug_u8s(ident))),
+                };
+                Ok(interpreter.mem.alloc_bound_native_fn(self, func))
+            }
+            ShimValue::Native(_) => {
+                self.native(interpreter).unwrap().get_attr(self, interpreter, ident)
             }
             val => Err(format!("Ident {:?} not available on {:?}", ident, val)),
         }
@@ -2497,6 +2583,9 @@ impl ShimValue {
                     }
                 }
                 Err(format!("Ident {:?} not found for {:?}", ident, self))
+            }
+            ShimValue::Native(_) => {
+                self.native(interpreter).unwrap().set_attr(interpreter, ident, val)
             }
             val => Err(format!("Ident {:?} not available on {:?}", ident, val)),
         }
@@ -3491,7 +3580,7 @@ impl Interpreter {
                         // If the parameter was provided as a kwarg, set that now
                         let mut set_arg = false;
                         let mut found_idx = None;
-                        for (idx, (ident, val)) in pending_args.kwargs.iter().enumerate() {
+                        for (idx, (ident, _val)) in pending_args.kwargs.iter().enumerate() {
                             if ident == param_name {
                                 found_idx = Some(idx);
                                 break;
