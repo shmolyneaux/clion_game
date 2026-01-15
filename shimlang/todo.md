@@ -12,6 +12,7 @@
     - reversed
 - Dicts
     - Pop
+- kwargs and default values/expression for struct initialization
 - String methods
 - Variable arguments
 - Operator overloading
