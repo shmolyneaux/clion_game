@@ -3,6 +3,7 @@ use std::collections::HashMap;
 #[cfg(feature = "facet")]
 use facet::Facet;
 
+use std::ops::Range;
 use std::ops::{Add, Sub};
 use std::ops::{AddAssign, SubAssign};
 use std::any::{Any, type_name, type_name_of_val};
@@ -1327,6 +1328,12 @@ impl Default for Config {
 #[repr(packed)]
 pub struct u24([u8; 3]);
 
+impl From<Word> for usize {
+    fn from(val: Word) -> Self {
+        val.0.into()
+    }
+}
+
 impl From<u32> for u24 {
     fn from(val: u32) -> Self {
         let b = val.to_be_bytes();
@@ -1454,6 +1461,7 @@ impl FreeBlock {
 }
 
 #[cfg_attr(feature = "facet", derive(Facet))]
+#[derive(Debug)]
 pub struct MMU {
     // This is the raw memory managed by the MMU
     #[cfg(feature = "dev")]
@@ -1604,6 +1612,7 @@ impl MMU {
     */
 }
 
+#[derive(Debug)]
 pub struct Environment {
     env_chain: Vec<HashMap<Vec<u8>, u64>>,
 }
@@ -2700,7 +2709,8 @@ pub struct Program {
 }
 
 pub fn compile_ast(ast: &Ast) -> Result<Program, String> {
-    let program = compile_block(&ast.block, false)?;
+    let mut program = Vec::new();
+    compile_block_inner(&ast.block, false, &mut program)?;
     let (bytecode, spans): (Vec<u8>, Vec<Span>) = program.into_iter().unzip();
     Ok(Program {
         bytecode: bytecode,
@@ -3116,10 +3126,7 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
     }
 }
 
-pub fn compile_block(block: &Block, is_expr: bool) -> Result<Vec<(u8, Span)>, String> {
-    let mut asm = Vec::new();
-
-    asm.push((ByteCode::StartScope as u8, Span { start: 0, end: 1 }));
+pub fn compile_block_inner(block: &Block, is_expr: bool, asm: &mut Vec<(u8, Span)>) -> Result<(), String> {
     for stmt in block.stmts.iter() {
         asm.extend(compile_statement(&stmt)?);
     }
@@ -3131,6 +3138,15 @@ pub fn compile_block(block: &Block, is_expr: bool) -> Result<Vec<(u8, Span)>, St
     if !is_expr {
         asm.push((ByteCode::Pop as u8, Span::start()));
     }
+
+    Ok(())
+}
+
+pub fn compile_block(block: &Block, is_expr: bool) -> Result<Vec<(u8, Span)>, String> {
+    let mut asm = Vec::new();
+
+    asm.push((ByteCode::StartScope as u8, Span { start: 0, end: 1 }));
+    compile_block_inner(block, is_expr, &mut asm)?;
     asm.push((ByteCode::EndScope as u8, Span { start: 0, end: 1 }));
 
     Ok(asm)
@@ -3359,7 +3375,132 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
     }
 }
 
+pub struct Bitmask {
+    data: Vec<u64>,
+    size: usize,
+}
+
+impl Bitmask {
+    pub fn new(num_bits: usize) -> Self {
+        // Round up if we don't have a number of bits that's cleanly divisible by 64
+        let blocks = num_bits.div_ceil(64);
+
+        Bitmask {
+            data: vec![0; blocks],
+            size: num_bits,
+        }
+    }
+
+    pub fn set(&mut self, index: usize) {
+        let (block_idx, bit_offset) = self.pos(index);
+        self.data[block_idx] |= 1 << bit_offset;
+    }
+
+    pub fn get(&self, index: usize) -> bool {
+        let (block_idx, bit_offset) = self.pos(index);
+        (self.data[block_idx] & (1 << bit_offset)) != 0
+    }
+
+    pub fn clear(&mut self) {
+        self.data.fill(0);
+    }
+
+    pub fn find_zeros(&self) -> Vec<Range<usize>> {
+        let mut ranges = Vec::new();
+        let mut start_of_run: Option<usize> = None;
+
+        for i in 0..self.size {
+            let is_zero = !self.get(i);
+
+            if is_zero {
+                if start_of_run == None {
+                    start_of_run = Some(i);
+                }
+            } else {
+                if let Some(start) = start_of_run {
+                    ranges.push(start..i);
+                    start_of_run = None;
+                }
+            }
+        }
+
+        if let Some(start) = start_of_run {
+            ranges.push(start..self.size);
+        }
+
+        ranges
+    }
+
+    fn pos(&self, index: usize) -> (usize, usize) {
+        (index / 64, index % 64)
+    }
+}
+
 impl Interpreter {
+    pub fn print_mem(&self) {
+        let mut count = 0;
+        let mut idx = 0;
+        for block in self.mem.free_list.iter() {
+            while idx < block.pos.into() {
+                println!("{:06x}: {:016x}", idx, self.mem.mem[idx]);
+                idx += 1;
+                count += 1
+            }
+
+            if count > 100 {
+                break;
+            }
+        }
+    }
+
+    pub fn print_env(&self) {
+        for (idx, scope) in self.env.env_chain.iter().enumerate() {
+            println!("Scope {idx}");
+            for (ident, bytes) in scope.iter() {
+                let val = unsafe { ShimValue::from_u64(*bytes) };
+                println!("{:>12}: {:?}", debug_u8s(ident), val);
+                match val {
+                    ShimValue::Struct(pos) => {
+                        unsafe {
+                            let def_pos: u64 = *self.mem.get(pos);
+                            let def_pos: Word = Word((def_pos as u32).into());
+                            let def: &StructDef = self.mem.get(def_pos);
+                            for (attr, loc) in def.lookup.iter() {
+                                match loc {
+                                    StructAttribute::MemberInstanceOffset(offset) => {
+                                        let val: ShimValue = *self.mem.get(pos + *offset as u32 + 1);
+                                        println!("                - {} = {:?}", debug_u8s(&attr), val);
+                                    },
+                                    StructAttribute::MethodDefPC(_) => (),
+                                };
+                            }
+                        }
+                    },
+                    ShimValue::StructDef(pos) => {
+                        unsafe {
+                            let def: &StructDef = self.mem.get(pos);
+                            for (attr, loc) in def.lookup.iter() {
+                                match loc {
+                                    StructAttribute::MemberInstanceOffset(_) => {
+                                        println!("                - {}", debug_u8s(&attr));
+                                    },
+                                    StructAttribute::MethodDefPC(_) => {
+                                        println!("                - {}()", debug_u8s(&attr));
+                                    }
+                                };
+                            }
+                        }
+                    },
+                    _ => (),
+                }
+            }
+            println!();
+        }
+    }
+
+    pub fn gc(&mut self) {
+    }
+
     pub fn create(config: &Config) -> Self {
         let mut mmu = MMU::with_capacity(Word((config.memory_space_bytes / 8).into()));
         let mut env = Environment::new();

@@ -22,6 +22,7 @@ impl Default for Command {
 #[derive(Debug, Default)]
 struct Args {
     path: Option<String>,
+    gc: bool,
     command: Command,
 }
 
@@ -41,6 +42,8 @@ fn parse_args() -> Result<Args, String> {
             } else {
                 args.path = Some(arg.clone());
             }
+        } else if arg == "--gc" {
+            args.gc = true;
         } else if arg == "--parse" {
             if args.command != Command::default() {
                 return Err(format!("Attempted to set command multiple times! {}", arg));
@@ -96,6 +99,10 @@ fn run() -> Result<(), String> {
                         return Err((format!("")).into());
                     }
                 };
+
+                if args.gc {
+                    interpreter.gc();
+                }
             }
             Command::Parse => {
                 match shimlang::ast_from_text(&contents) {
