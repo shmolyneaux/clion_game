@@ -3,10 +3,12 @@ use std::collections::HashMap;
 #[cfg(feature = "facet")]
 use facet::Facet;
 
+use std::collections::HashSet;
 use std::ops::Range;
 use std::ops::{Add, Sub};
 use std::ops::{AddAssign, SubAssign};
 use std::any::{Any, type_name, type_name_of_val};
+use std::mem::size_of;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Span {
@@ -1054,6 +1056,10 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
             }
         } else {
             let expr = parse_expression(tokens)?;
+            if tokens.is_empty() {
+                last_expr = Some(Box::new(expr));
+                break;
+            }
 
             match tokens.peek()? {
                 Token::RCurly => {
@@ -1272,6 +1278,7 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
             b'(' => tokens.push(Token::LBracket),
             b')' => tokens.push(Token::RBracket),
             b'+' => tokens.push(Token::Plus),
+            b'*' => tokens.push(Token::Star),
             b'-' => tokens.push(Token::Minus),
             b'=' => match text[1] {
                 b'=' => {
@@ -1345,10 +1352,23 @@ impl Default for Config {
 #[derive(Hash, Eq, PartialOrd, Ord, Copy, Clone, Debug, PartialEq)]
 #[repr(packed)]
 pub struct u24([u8; 3]);
+const MAX_U24: u32 = 0xFFFFFF;
 
 impl From<Word> for usize {
     fn from(val: Word) -> Self {
         val.0.into()
+    }
+}
+
+impl From<usize> for u24 {
+    fn from(val: usize) -> Self {
+        (val as u32).into()
+    }
+}
+
+impl From<i32> for u24 {
+    fn from(val: i32) -> Self {
+        (val as u32).into()
     }
 }
 
@@ -1458,6 +1478,12 @@ impl SubAssign<Word> for Word {
     }
 }
 
+impl From<usize> for Word {
+    fn from(val: usize) -> Word {
+        Word(val.into())
+    }
+}
+
 #[cfg_attr(feature = "facet", derive(Facet))]
 #[derive(Debug)]
 pub struct FreeBlock {
@@ -1502,6 +1528,23 @@ use std::any::TypeId;
 
 type ShimDict = Vec<(ShimValue, ShimValue)>;
 
+macro_rules! alloc {
+    ($mmu:expr, $count:expr, $msg:expr) => {
+        {
+            #[cfg(debug_assertions)]
+            {
+                //$mmu.alloc_debug($count, $msg)
+                $mmu.alloc_no_debug($count)
+            }
+
+            #[cfg(not(debug_assertions))]
+            {
+                $mmu.alloc_no_debug($count)
+            }
+        }
+    };
+}
+
 impl MMU {
     fn with_capacity(word_count: Word) -> Self {
         let mem = vec![0; usize::from(word_count.0)];
@@ -1541,7 +1584,7 @@ impl MMU {
             assert!(std::mem::size_of::<Vec<u8>>() == 24);
         };
         let word_count = Word(3.into());
-        let position = self.alloc(word_count);
+        let position = alloc!(self, word_count, &format!("str `{}`", debug_u8s(contents)));
         unsafe {
             let ptr: *mut Vec<u8> =
                 std::mem::transmute(&mut self.mem[usize::from(position.0)]);
@@ -1552,7 +1595,7 @@ impl MMU {
 
     fn alloc_dict(&mut self) -> ShimValue {
         let word_count = Word((std::mem::size_of::<ShimDict>() as u32).into());
-        let position = self.alloc(word_count);
+        let position = alloc!(self, word_count, "Dict");
         unsafe {
             let ptr: *mut ShimDict =
                 std::mem::transmute(&mut self.mem[usize::from(position.0)]);
@@ -1564,7 +1607,7 @@ impl MMU {
     fn alloc_native<T: ShimNative>(&mut self, val: T) -> ShimValue {
         assert!(std::mem::size_of::<Box<dyn ShimNative>>() == 16);
         let word_count = Word(2.into());
-        let position = self.alloc(word_count);
+        let position = alloc!(self, word_count, "Native");
         unsafe {
             let ptr: *mut Box<dyn ShimNative> =
                 std::mem::transmute(&mut self.mem[usize::from(position.0)]);
@@ -1574,7 +1617,7 @@ impl MMU {
     }
 
     fn alloc_bound_native_fn(&mut self, obj: &ShimValue, func: NativeFn) -> ShimValue {
-        let position = self.alloc(Word(2.into()));
+        let position = alloc!(self, Word(2.into()), "Bound Native Fn");
         unsafe {
             let obj_ptr: *mut ShimValue =
                 std::mem::transmute(&mut self.mem[usize::from(position.0)]);
@@ -1588,10 +1631,13 @@ impl MMU {
         }
     }
 
-    /**
-     * Returns the position in `self.mem` of the block allocted
-     */
-    fn alloc(&mut self, words: Word) -> Word {
+    fn alloc_debug(&mut self, words: Word, msg: &str) -> Word {
+        let result = self.alloc_no_debug(words);
+        println!("Alloc {} {}: {}", usize::from(words.0), msg, usize::from(result));
+        result
+    }
+
+    fn alloc_no_debug(&mut self, words: Word) -> Word {
         for block in self.free_list.iter_mut() {
             if block.size >= words {
                 let returned_pos: Word = block.pos;
@@ -1624,10 +1670,16 @@ impl MMU {
         );
     }
 
-    /*
-    fn free(&mut self, _words: u32, _ptr: *const u64) {
+    /**
+     * Returns the position in `self.mem` of the block allocted
+     */
+    fn alloc(&mut self, words: Word) -> Word {
+        self.alloc_debug(words, "Unspecified alloc")
     }
-    */
+
+    fn free(&mut self, words: Word, ptr: Word) {
+        // TODO
+    }
 }
 
 #[derive(Debug)]
@@ -1699,6 +1751,7 @@ pub struct Interpreter {
     pub env: Environment,
 }
 
+// TODO: If we do NaN-boxing we could have f64 (rather than f32) for "free"
 #[derive(Copy, Clone, Debug)]
 pub enum ShimValue {
     Uninitialized,
@@ -1731,6 +1784,9 @@ pub enum ShimValue {
     Struct(Word),
     Native(Word),
 }
+const _: () = {
+    assert!(std::mem::size_of::<ShimValue>() == 8);
+};
 
 trait ShimNative: Any {
     fn to_string(&self, _interpreter: &mut Interpreter) -> String {
@@ -1751,6 +1807,7 @@ trait ShimNative: Any {
     }
 
     fn as_any_mut(&mut self) -> &mut dyn Any;
+    fn gc_vals(&self) -> Vec<ShimValue>;
 }
 
 struct ListIterator {
@@ -1770,7 +1827,7 @@ impl ShimNative for ListIterator {
                 if itr.idx >= lst.len() {
                     Ok(ShimValue::None)
                 } else {
-                    let result = lst[itr.idx];
+                    let result = lst.get(&mut interpreter.mem, itr.idx as isize)?;
                     itr.idx += 1;
 
                     Ok(result)
@@ -1786,12 +1843,11 @@ impl ShimNative for ListIterator {
     fn as_any_mut(&mut self) -> &mut dyn Any where Self: Sized {
         self
     }
-}
 
-use std::mem::size_of;
-const _: () = {
-    assert!(std::mem::size_of::<ShimValue>() <= 8);
-};
+    fn gc_vals(&self) -> Vec<ShimValue> {
+        vec![self.lst]
+    }
+}
 
 type NativeFn = fn(&mut Interpreter, &ArgBundle) -> Result<ShimValue, String>;
 const _: () = {
@@ -1819,6 +1875,179 @@ struct StructDef {
     lookup: Vec<(Vec<u8>, StructAttribute)>,
 }
 
+const fn generate_size_table() -> [u32; 256] {
+    let mut table = [0; 256];
+
+    let mut i = 0;
+
+    while i < 256 {
+        table[i] = match i {
+            0 => 0,
+            1 => 4,
+            2 => 16,
+            3 => 32,
+            // Multiply 1.5 the previous
+            4 => 48,
+            5 => 72,
+            6 => 108,
+            7 => 162,
+            8 => 243,
+            9 => 364,
+            10 => 546,
+            11 => 819,
+            12 => 1228,
+            13 => 1842,
+            // Multiply x1.2 the previous
+            14 => 2210,
+            15 => 2652,
+            16 => 3182,
+            17 => 3818,
+            18 => 4581,
+            19 => 5497,
+            20 => 6596,
+            21 => 7915,
+            22 => 9498,
+            23 => 11397,
+            24 => 13676,
+            25 => 16411,
+            26 => 19693,
+            27 => 23631,
+            28 => 28357,
+            29 => 34028,
+            30 => 40833,
+            31 => 48999,
+            32 => 58798,
+            33 => 70557,
+            34 => 84668,
+            35 => 101601,
+            36 => 121921,
+            37 => 146305,
+            38 => 175566,
+            39 => 210679,
+            40 => 252814,
+            41 => 303376,
+            42 => 364051,
+            43 => 436861,
+            44 => 524233,
+            45 => 629079,
+            46 => 754894,
+            47 => 905872,
+            48 => 1087046,
+            49 => 1304455,
+            50 => 1565346,
+            51 => 1878415,
+            52 => 2254098,
+            53 => 2704917,
+            54 => 3245900,
+            55 => 3895080,
+            56 => 4674096,
+            57 => 5608915,
+            58 => 6730698,
+            59 => 8076837,
+            60 => 9692204,
+            61 => 11630644,
+            62 => 13956772,
+            63 => 16748126,
+            _ => MAX_U24,
+        };
+        i += 1;
+    }
+    table
+}
+
+static LIST_CAPACITY_LUT: [u32; 256] = generate_size_table();
+
+struct ShimList {
+    // The memory is limited to u24, so we know there can't be more than this
+    // number of values
+    len: u24,
+    // We don't really need any more than 64 distinct capacities
+    capacity_lut: u8,
+    // Add 1 byte of padding so that ShimList is 8 bytes
+    _pad: u8,
+    // Memory position of the list data
+    data: u24,
+}
+
+impl ShimList {
+    fn new() -> Self {
+        Self {
+            len: 0.into(),
+            capacity_lut: 0,
+            _pad: 0,
+            data: 0.into(),
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.len.into()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    fn capacity(&self) -> usize {
+        LIST_CAPACITY_LUT[self.capacity_lut as usize] as usize
+    }
+
+    fn wrap_idx(&self, idx: isize) -> Result<usize, String> {
+        if idx >= self.len() as isize {
+            return Err(format!("Index {idx} is out of bounds"));
+        }
+
+        Ok(
+            if idx < 0 {
+                let updated_idx = self.len() as isize + idx;
+                if updated_idx < 0 {
+                    return Err(format!("Index {idx} is out of bounds"));
+                } else {
+                    updated_idx as usize
+                }
+            } else {
+                idx as usize
+            }
+        )
+    }
+
+    fn get(&self, mem: &MMU, idx: isize) -> Result<ShimValue, String> {
+        let idx = self.wrap_idx(idx)?;
+        unsafe { Ok(ShimValue::from_u64(mem.mem[usize::from(self.data) + idx])) }
+    }
+
+    fn set(&self, mem: &mut MMU, idx: isize, value: ShimValue) -> Result<(), String> {
+        let idx = self.wrap_idx(idx)?;
+        unsafe {
+            mem.mem[usize::from(self.data) + idx] = value.to_u64();
+        }
+        Ok(())
+    }
+
+    fn push(&mut self, mem: &mut MMU, val: ShimValue) {
+        if self.len() == self.capacity() {
+            let old_capacity = self.capacity();
+            self.capacity_lut += 1;
+            let new_capacity = self.capacity();
+
+            let old_data = usize::from(self.data);
+            let word_count: Word = new_capacity.into();
+            self.data = alloc!(mem, word_count, "List data").0;
+
+            let new_data = usize::from(self.data);
+
+            for idx in 0..self.len() {
+                mem.mem[new_data+idx] = mem.mem[old_data+idx];
+            }
+
+            mem.free(Word(old_capacity.into()), old_data.into());
+        }
+
+        mem.mem[usize::from(self.data)+self.len()] = val.to_u64();
+        self.len = (usize::from(self.len) + 1).into();
+    }
+}
+const _: () = { assert!(std::mem::size_of::<ShimList>() == 8); };
+
 impl StructDef {
     fn find(&self, ident: &[u8]) -> Option<StructAttribute> {
         for (attr, loc) in self.lookup.iter() {
@@ -1827,6 +2056,15 @@ impl StructDef {
             }
         }
         None
+    }
+
+    fn mem_size(&self) -> usize {
+        // TODO: if the StructDef changes it might be effectively non const sized
+        // in interpreter memory
+        const _: () = {
+            assert!(std::mem::size_of::<StructDef>() == 32);
+        };
+        std::mem::size_of::<StructDef>() / 8
     }
 }
 
@@ -2124,7 +2362,11 @@ impl ShimValue {
 
                 // Allocate space for each member, plus the header
                 let word_count = Word((struct_def.member_count as u32 + 1).into());
-                let new_pos = interpreter.mem.alloc(word_count);
+                let new_pos = alloc!(
+                    interpreter.mem,
+                    word_count,
+                    "Struct instantiation"
+                );
 
                 // The first word points to the StructDef
                 interpreter.mem.mem[usize::from(new_pos.0)] = u64::from(struct_def_pos.0);
@@ -2161,13 +2403,11 @@ impl ShimValue {
         }
     }
 
-    fn list_mut(&self, interpreter: &mut Interpreter) -> Result<&mut Vec<ShimValue>, String> {
+    fn list_mut(&self, interpreter: &mut Interpreter) -> Result<&mut ShimList, String> {
         match self {
             ShimValue::List(position) => {
                 unsafe {
-                    let ptr: *mut Vec<ShimValue> =
-                        std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
-                    Ok(&mut *ptr)
+                    Ok(std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]))
                 }
             },
             _ => {
@@ -2176,13 +2416,11 @@ impl ShimValue {
         }
     }
 
-    fn list(&self, interpreter: &Interpreter) -> Result<&[ShimValue], String> {
+    fn list(&self, interpreter: &Interpreter) -> Result<&ShimList, String> {
         match self {
             ShimValue::List(position) => {
                 unsafe {
-                    let ptr: *const Vec<ShimValue> =
-                        std::mem::transmute(&interpreter.mem.mem[usize::from(position.0)]);
-                    Ok(&*ptr)
+                    Ok(std::mem::transmute(&interpreter.mem.mem[usize::from(position.0)]))
                 }
             },
             _ => {
@@ -2243,21 +2481,12 @@ impl ShimValue {
 
                 Ok(interpreter.mem.alloc_str(&[b]))
             },
-            (ShimValue::List(_), ShimValue::Integer(index)) => {
-                let index = *index as isize;
-
-                let val = self.list_mut(interpreter)?;
-
-                let len = val.len() as isize;
-                let index: isize = if index < -len || index >= len {
-                    return Err(format!("Index {} is out of bounds", index));
-                } else if index < 0 {
-                    len + index as isize
-                } else {
-                    index as isize
-                };
-
-                Ok(val[index as usize])
+            (ShimValue::List(position), ShimValue::Integer(idx)) => {
+                unsafe {
+                    let lst: &ShimList =
+                        std::mem::transmute(&interpreter.mem.mem[usize::from(position.0)]);
+                    lst.get(&interpreter.mem, *idx as isize)
+                }
             },
             (ShimValue::Dict(_), some_key) => {
                 let dict = self.dict_mut(interpreter)?;
@@ -2283,15 +2512,10 @@ impl ShimValue {
         match (self, index) {
             (ShimValue::List(position), ShimValue::Integer(index)) => {
                 let index = *index as usize;
-                let list: &mut Vec<ShimValue> = unsafe {
+                let list: &mut ShimList = unsafe {
                     std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)])
                 };
-
-                if list.len() <= index {
-                    return Err(format!("Index {} out of bounds for list", index));
-                }
-
-                list[index] = *value;
+                list.set(&mut interpreter.mem, index as isize, *value)?;
                 Ok(())
             }
             (ShimValue::Dict(position), index) => {
@@ -2325,13 +2549,14 @@ impl ShimValue {
             ShimValue::List(position) => {
                 let mut out = "[".to_string();
                 unsafe {
-                    let ptr: *mut Vec<ShimValue> =
-                        std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
-                    for (idx, item) in (*ptr).iter().enumerate() {
+                    let lst: &ShimList = std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
+
+                    for idx in 0..lst.len() {
                         if idx != 0 {
                             out.push_str(",");
                             out.push_str(" ");
                         }
+                        let item = lst.get(&interpreter.mem, idx as isize).unwrap();
                         out.push_str(&item.to_string(interpreter));
                     }
                 }
@@ -2375,7 +2600,7 @@ impl ShimValue {
                 let b: &mut Vec<u8> =
                     unsafe { std::mem::transmute(&mut interpreter.mem.mem[usize::from(b.0)]) };
 
-                let position = interpreter.mem.alloc(Word(3.into()));
+                let position = alloc!(interpreter.mem, Word(3.into()), "String addition result");
                 unsafe {
                     let c: *mut Vec<u8> =
                         std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
@@ -3507,7 +3732,7 @@ impl Bitmask {
         self.data[block_idx] |= 1 << bit_offset;
     }
 
-    pub fn get(&self, index: usize) -> bool {
+    pub fn is_set(&self, index: usize) -> bool {
         let (block_idx, bit_offset) = self.pos(index);
         (self.data[block_idx] & (1 << bit_offset)) != 0
     }
@@ -3521,7 +3746,7 @@ impl Bitmask {
         let mut start_of_run: Option<usize> = None;
 
         for i in 0..self.size {
-            let is_zero = !self.get(i);
+            let is_zero = !self.is_set(i);
 
             if is_zero {
                 if start_of_run == None {
@@ -3547,13 +3772,128 @@ impl Bitmask {
     }
 }
 
+struct GC<'a> {
+    mem: &'a mut MMU,
+    mask: Bitmask,
+}
+
+impl<'a> GC<'a> {
+    fn new(mem: &'a mut MMU) -> Self {
+        let mask = Bitmask::new(mem.mem.len());
+        Self {
+            mem,
+            mask,
+        }
+    }
+
+    fn mark(&mut self, mut vals: Vec<ShimValue>) {
+        unsafe {
+            while !vals.is_empty() {
+                match vals.pop().unwrap() {
+                    ShimValue::Integer(_) | ShimValue::Float(_) | ShimValue::Bool(_) | ShimValue::Unit | ShimValue::None | ShimValue::Fn(_) | ShimValue::Uninitialized => (),
+                    ShimValue::List(pos) => {
+                        let pos: usize = pos.into();
+                        let lst: &ShimList = self.mem.get(pos.into());
+                        for idx in 0..lst.len() {
+                            vals.push(lst.get(self.mem, idx as isize).unwrap());
+                        }
+
+                        let contents_pos = usize::from(lst.data);
+                        for idx in contents_pos..(contents_pos + lst.capacity()) {
+                            self.mask.set(idx);
+                        }
+                    },
+                    ShimValue::String(pos) => {
+                        let pos: usize = pos.into();
+                        let s: &Vec<u8> = self.mem.get(pos.into());
+                        for idx in pos..(pos + (std::mem::size_of::<Vec<u8>>()/8)) {
+                            self.mask.set(idx);
+                        }
+                    },
+                    ShimValue::Dict(pos) => {
+                        let pos: usize = pos.into();
+                        let dict: &ShimDict = std::mem::transmute(&self.mem.mem[pos]);
+                        for (key, val) in dict.iter() {
+                            vals.push(*key);
+                            vals.push(*val);
+                        }
+                        for idx in pos..(pos + (std::mem::size_of::<ShimDict>()/8)) {
+                            self.mask.set(idx);
+                        }
+                    },
+                    ShimValue::StructDef(pos) => {
+                        let pos: usize = pos.into();
+                        if self.mask.is_set(pos) {
+                            continue;
+                        }
+                        let def: &StructDef = self.mem.get(pos.into());
+                        for idx in pos..(pos + def.mem_size()) {
+                            self.mask.set(idx);
+                        }
+                    },
+                    ShimValue::Struct(pos) => {
+                        let pos: usize = pos.into();
+                        if self.mask.is_set(pos) {
+                            continue;
+                        }
+                        let def_pos: usize = self.mem.mem[pos] as usize;
+                        let def: &StructDef = self.mem.get(def_pos.into());
+
+                        for idx in pos..(pos + def.member_count as usize + 1) {
+                            self.mask.set(idx);
+                            // Push the members
+                            if idx != pos {
+                                vals.push(
+                                    ShimValue::from_u64(self.mem.mem[idx])
+                                );
+                            }
+                        }
+                        vals.push(ShimValue::StructDef(def_pos.into()));
+                    },
+                    ShimValue::NativeFn(pos) => {
+                        let pos: usize = pos.into();
+                        self.mask.set(pos);
+                    },
+                    ShimValue::Native(pos) => {
+                        let pos: usize = pos.into();
+                        assert!(std::mem::size_of::<Box<dyn ShimNative>>() == 16);
+                        self.mask.set(pos);
+                        self.mask.set(pos+1);
+
+                        let ptr: &Box<dyn ShimNative> = std::mem::transmute(&self.mem.mem[pos]);
+
+                        vals.extend(ptr.gc_vals());
+                    },
+                    ShimValue::BoundMethod(pos, _pc) => {
+                        let val = ShimValue::Struct(pos);
+                        vals.push(val);
+                    },
+                    ShimValue::BoundNativeMethod(pos) => {
+                        let pos: usize = pos.into();
+                        // Native ShimValue
+                        self.mask.set(pos);
+                        // Pointer to the fn
+                        self.mask.set(pos+1);
+
+                        // Any values that the obj holds
+                        let ptr: &Box<dyn ShimNative> = std::mem::transmute(&self.mem.mem[pos]);
+                        vals.extend(ptr.gc_vals());
+                        vals.push(ShimValue::Native(pos.into()));
+                    },
+                }
+            }
+        }
+        println!("Zeros: {:?}", self.mask.find_zeros());
+    }
+}
+
 impl Interpreter {
     pub fn print_mem(&self) {
         let mut count = 0;
         let mut idx = 0;
         for block in self.mem.free_list.iter() {
             while idx < block.pos.into() {
-                println!("{:06x}: {:016x}", idx, self.mem.mem[idx]);
+                println!("{:06}: {:016x}", idx, self.mem.mem[idx]);
                 idx += 1;
                 count += 1
             }
@@ -3610,6 +3950,16 @@ impl Interpreter {
     }
 
     pub fn gc(&mut self) {
+        self.print_mem();
+        self.print_env();
+        let mut gc = GC::new(&mut self.mem);
+        let mut roots: Vec<ShimValue> = Vec::new();
+        for (idx, scope) in self.env.env_chain.iter().enumerate() {
+            for (ident, bytes) in scope.iter() {
+                roots.push(unsafe { ShimValue::from_u64(*bytes) });
+            }
+        }
+        gc.mark(roots);
     }
 
     pub fn create(config: &Config) -> Self {
@@ -3664,7 +4014,7 @@ impl Interpreter {
         ];
 
         for (name, func) in builtins {
-            let position = mmu.alloc(Word(1.into()));
+            let position = alloc!(mmu, Word(1.into()), &format!("builtin func {}", debug_u8s(name)));
             unsafe {
                 let ptr: *mut NativeFn = std::mem::transmute(&mut mmu.mem[usize::from(position.0)]);
                 ptr.write(**func);
@@ -4146,14 +4496,18 @@ impl Interpreter {
                 val if val == ByteCode::CreateList as u8 => {
                     let len = ((bytes[pc + 1] as usize) << 8) + bytes[pc + 2] as usize;
 
-                    let word_count = Word(3.into());
-                    let position = self.mem.alloc(word_count);
+                    let word_count = Word(1.into());
+                    let position = alloc!(
+                        self.mem,
+                        word_count,
+                        &format!("ByteCode::CreateList PC {pc}")
+                    );
                     unsafe {
-                        let ptr: *mut Vec<ShimValue> =
-                            std::mem::transmute(&mut self.mem.mem[usize::from(position.0)]);
-                        ptr.write(Vec::new());
+                        let ptr: *mut ShimList =
+                            std::mem::transmute(&self.mem.mem[usize::from(position.0)]);
+                        ptr.write(ShimList::new());
                         for item in stack.drain(stack.len() - len..) {
-                            (*ptr).push(item);
+                            (*ptr).push(&mut self.mem, item);
                         }
                     }
                     stack.push(ShimValue::List(position));
@@ -4202,7 +4556,11 @@ impl Interpreter {
                     const _: () = {
                         assert!(std::mem::size_of::<StructDef>() == 32);
                     };
-                    let pos = self.mem.alloc(Word(4.into()));
+                    let pos = alloc!(
+                        self.mem,
+                        Word(4.into()),
+                        &format!("ByteCode::CreateStruct def PC {pc}")
+                    );
 
                     unsafe {
                         let ptr: *mut StructDef =

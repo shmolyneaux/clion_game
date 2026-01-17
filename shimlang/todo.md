@@ -12,14 +12,17 @@
     - reversed
 - Dicts
     - Pop
-- kwargs and default values/expression for struct initialization
 - String methods
-- Variable arguments
+- `*args`, and `**kwargs`
+- Format strings
+- Integer division
+- Closures
 - Operator overloading
 - Type annotations
 - Runtime type checking
 - Static type checking
-- Removing use of `Vec` in values stored in MMU
+- Remove use of `Vec` for dicts
+- Remove use of Box for native values
 - Ref-counting in MMU
 - Debugger
 - Memory viewer

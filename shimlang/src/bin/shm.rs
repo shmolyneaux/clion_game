@@ -21,8 +21,9 @@ impl Default for Command {
 
 #[derive(Debug, Default)]
 struct Args {
-    path: Option<String>,
+    pos: Option<String>,
     gc: bool,
+    script_on_command_line: bool,
     command: Command,
 }
 
@@ -34,16 +35,18 @@ fn parse_args() -> Result<Args, String> {
         if idx == 0 {
             continue;
         } else if !arg.starts_with('-') {
-            if let Some(existing_positional_arg) = args.path {
+            if let Some(existing_positional_arg) = args.pos {
                 return Err(format!(
                     "Found multiple positional arguments {} and {}",
                     existing_positional_arg, arg
                 ));
             } else {
-                args.path = Some(arg.clone());
+                args.pos = Some(arg.clone());
             }
         } else if arg == "--gc" {
             args.gc = true;
+        } else if arg == "-c" {
+            args.script_on_command_line = true;
         } else if arg == "--parse" {
             if args.command != Command::default() {
                 return Err(format!("Attempted to set command multiple times! {}", arg));
@@ -70,11 +73,16 @@ fn parse_args() -> Result<Args, String> {
 fn run() -> Result<(), String> {
     let args = parse_args()?;
 
-    if let Some(script_path) = args.path {
-        let mut file = File::open(&script_path).map_err(|e| format!("{:?}", e))?;
-        let mut contents = Vec::new();
-        file.read_to_end(&mut contents)
-            .map_err(|e| format!("{:?}", e))?;
+    if let Some(pos) = args.pos {
+        let contents = if !args.script_on_command_line {
+            let mut file = File::open(&pos).map_err(|e| format!("{:?}", e))?;
+            let mut contents = Vec::new();
+            file.read_to_end(&mut contents)
+                .map_err(|e| format!("{:?}", e))?;
+            contents
+        } else {
+            pos.into_bytes()
+        };
 
         match std::str::from_utf8(&contents) {
             Ok(_) => (),
