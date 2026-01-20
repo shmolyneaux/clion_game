@@ -1502,6 +1502,10 @@ impl FreeBlock {
     fn new(pos: Word, size: Word) -> Self {
         Self { pos, size }
     }
+
+    fn end(&self) -> Word {
+        self.pos + self.size
+    }
 }
 
 #[cfg_attr(feature = "facet", derive(Facet))]
@@ -1638,11 +1642,16 @@ impl MMU {
     }
 
     fn alloc_no_debug(&mut self, words: Word) -> Word {
-        for block in self.free_list.iter_mut() {
-            if block.size >= words {
-                let returned_pos: Word = block.pos;
-                block.pos += words;
-                block.size -= words;
+        for idx in 0..self.free_list.len() {
+            if self.free_list[idx].size >= words {
+                let returned_pos: Word = self.free_list[idx].pos;
+
+                if self.free_list[idx].size == words {
+                    self.free_list.remove(idx);
+                } else {
+                    self.free_list[idx].pos += words;
+                    self.free_list[idx].size -= words;
+                }
 
                 // Compaction is handled when it's convenient.
                 // Some people might tend towards using a linked list to have
@@ -1660,8 +1669,6 @@ impl MMU {
                 // but we can keep things simple for now.
 
                 return returned_pos;
-            } else {
-                eprintln!("{:?} not larger than {:?}", block.size, words);
             }
         }
         panic!(
@@ -1673,12 +1680,68 @@ impl MMU {
     /**
      * Returns the position in `self.mem` of the block allocted
      */
-    fn alloc(&mut self, words: Word) -> Word {
-        self.alloc_debug(words, "Unspecified alloc")
+    fn alloc(&mut self, size: Word) -> Word {
+        self.alloc_debug(size, "Unspecified alloc")
     }
 
-    fn free(&mut self, words: Word, ptr: Word) {
-        // TODO
+    fn free(&mut self, pos: Word, size: Word) {
+        // This is the idx of the frst free block containing addresses greater than the
+        // position we need to free
+        let idx = {
+            let mut ret = None;
+            for idx in 0..self.free_list.len() {
+                if pos < self.free_list[idx].end() {
+                    ret = Some(idx);
+                    break;
+                }
+            }
+                // Technically we could get here if there was no free block at the end
+                // of the memory, but we basically don't expect that to happen, so it's
+                // not worth addressing.
+            ret.expect("Could not find free list position to insert free mem")
+        };
+
+        // The data we're freeing is in one of the four categories:
+        //   1. needs to be joined to the end of the previous idx
+        //   2. joins the previous idx and this idx
+        //   3. sits between the previous idx and this idx
+        //   4. needs to be joined to the start of this idx
+        if idx != 0 {
+            if pos == self.free_list[idx-1].end() {
+                // Case 1 or 2
+                // Since the position matches the end of the previous
+                // block we need to join with it
+                if pos + size < self.free_list[idx].pos {
+                    // Case 1
+                    // It's not long enough to reach the idx block, just
+                    // add the sizes
+                    self.free_list[idx-1].size += size;
+                    return;
+                } else if pos + size == self.free_list[idx].pos {
+                    // Case 2
+                    self.free_list[idx-1].size = (
+                        self.free_list[idx].end() -
+                        self.free_list[idx-1].pos
+                    );
+                    self.free_list.remove(idx);
+                    return;
+                } else {
+                    panic!("Mis-sized free does not fit in gap!");
+                }
+            }
+        }
+        if pos + size < self.free_list[idx].pos {
+            // Case 3
+            self.free_list.insert(idx, FreeBlock::new(pos, size));
+            return;
+        } else if pos + size == self.free_list[idx].pos {
+            // Case 4
+            self.free_list[idx].pos = pos;
+            self.free_list[idx].size += size;
+            return;
+        } else {
+            panic!("Mis-sized free does overlaps with idx block!");
+        }
     }
 }
 
@@ -2039,7 +2102,7 @@ impl ShimList {
                 mem.mem[new_data+idx] = mem.mem[old_data+idx];
             }
 
-            mem.free(Word(old_capacity.into()), old_data.into());
+            mem.free(old_data.into(), Word(old_capacity.into()));
         }
 
         mem.mem[usize::from(self.data)+self.len()] = val.to_u64();
@@ -3779,7 +3842,8 @@ struct GC<'a> {
 
 impl<'a> GC<'a> {
     fn new(mem: &'a mut MMU) -> Self {
-        let mask = Bitmask::new(mem.mem.len());
+        let last_block_start = mem.free_list[mem.free_list.len()-1].pos;
+        let mask = Bitmask::new(last_block_start.into());
         Self {
             mem,
             mask,
@@ -3883,7 +3947,12 @@ impl<'a> GC<'a> {
                 }
             }
         }
-        println!("Zeros: {:?}", self.mask.find_zeros());
+    }
+
+    fn sweep(&mut self) {
+        for block in self.mask.find_zeros() {
+            self.mem.free(block.start.into(), (block.end-block.start).into());
+        }
     }
 }
 
@@ -3960,6 +4029,7 @@ impl Interpreter {
             }
         }
         gc.mark(roots);
+        gc.sweep();
     }
 
     pub fn create(config: &Config) -> Self {
