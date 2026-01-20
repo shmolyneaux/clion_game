@@ -2228,9 +2228,9 @@ fn shim_dict_index_set(
         return Err(format!("Expected 3 args for dict set"));
     }
 
-    let dict: &mut Vec<(ShimValue, ShimValue)> = if let ShimValue::Dict(position) = args.args[0] {
+    let dict: &mut ShimDict = if let ShimValue::Dict(position) = args.args[0] {
         unsafe {
-            let ptr: &mut Vec<(ShimValue, ShimValue)> =
+            let ptr: &mut ShimDict =
                 std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
             ptr
         }
@@ -2258,9 +2258,9 @@ fn shim_dict_index_get(
         return Err(format!("Expected 2 args for dict get"));
     }
 
-    let dict: &mut Vec<(ShimValue, ShimValue)> = if let ShimValue::Dict(position) = args.args[0] {
+    let dict: &mut ShimDict = if let ShimValue::Dict(position) = args.args[0] {
         unsafe {
-            let ptr: &mut Vec<(ShimValue, ShimValue)> =
+            let ptr: &mut ShimDict =
                 std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
             ptr
         }
@@ -2285,9 +2285,9 @@ fn shim_dict_index_has(
         return Err(format!("Expected 2 args for dict has"));
     }
 
-    let dict: &mut Vec<(ShimValue, ShimValue)> = if let ShimValue::Dict(position) = args.args[0] {
+    let dict: &mut ShimDict = if let ShimValue::Dict(position) = args.args[0] {
         unsafe {
-            let ptr: &mut Vec<(ShimValue, ShimValue)> =
+            let ptr: &mut ShimDict =
                 std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
             ptr
         }
@@ -2452,10 +2452,10 @@ impl ShimValue {
         }
     }
 
-    fn dict_mut(&self, interpreter: &mut Interpreter) -> Result<&mut Vec<(ShimValue, ShimValue)>, String> {
+    fn dict_mut(&self, interpreter: &mut Interpreter) -> Result<&mut ShimDict, String> {
         match self {
             ShimValue::Dict(position) => {
-                let dict: &mut Vec<(ShimValue, ShimValue)> = unsafe {
+                let dict: &mut ShimDict = unsafe {
                     std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)])
                 };
                 Ok(dict)
@@ -2582,7 +2582,7 @@ impl ShimValue {
                 Ok(())
             }
             (ShimValue::Dict(position), index) => {
-                let dict: &mut Vec<(ShimValue, ShimValue)> = unsafe {
+                let dict: &mut ShimDict = unsafe {
                     std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)])
                 };
 
@@ -2799,8 +2799,8 @@ impl ShimValue {
     ) -> Result<ShimValue, String> {
         match self {
             ShimValue::Dict(position) => {
-                let dict: &mut Vec<(ShimValue, ShimValue)> = unsafe {
-                    let ptr: &mut Vec<(ShimValue, ShimValue)> =
+                let dict: &mut ShimDict = unsafe {
+                    let ptr: &mut ShimDict =
                         std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
                     ptr
                 };
