@@ -306,7 +306,7 @@ impl TokenStream {
             self.idx += 1;
             Ok(result)
         } else {
-            Err("End of token stream".to_string())
+            Err(self.format_peek_err("End of token stream"))
         }
     }
 
@@ -1219,6 +1219,39 @@ pub fn lex_number(text: &mut &[u8]) -> Result<Token, String> {
     Ok(token)
 }
 
+pub fn lex_multiline_comment_end_idx(text: &[u8]) -> Result<usize, String> {
+    if text.len() < 4 {
+        return Err(format!("Text not long enough to finish multiline comment"));
+    }
+
+    if text[..2] != *b"/*" {
+        return Err(format!("Multiline comment does not start with `/*`"));
+    }
+
+    let mut depth = 1;
+    let mut idx = 2;
+
+    while text.len() - idx > (depth*2) {
+        if text[idx] == b'/' && text[idx+1] == b'*' {
+            depth += 1;
+            idx += 2;
+            continue
+        }
+
+        if text[idx] == b'*' && text[idx+1] == b'/' {
+            depth -= 1;
+            idx += 2;
+
+            if depth == 0 {
+                return Ok(idx);
+            }
+            continue
+        }
+        idx += 1;
+    }
+    Err(format!("Not enough text remaining to close multiline comment"))
+}
+
 pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
     let starting_len = text.len();
     let starting_text = text;
@@ -1279,6 +1312,26 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
             b')' => tokens.push(Token::RBracket),
             b'+' => tokens.push(Token::Plus),
             b'*' => tokens.push(Token::Star),
+            b'/' => match text[1] {
+                b'/' => {
+                    while true {
+                        text = &text[1..];
+                        if text.is_empty() {
+                            break;
+                        }
+                        match text[0] {
+                            b'\n' => break,
+                            _ => (),
+                        }
+                    }
+                    // NOTE: no token to push since this is a comment
+                },
+                b'*' => {
+                    let idx = lex_multiline_comment_end_idx(&text)?;
+                    text = &text[(idx-1)..];
+                }
+                _ => tokens.push(Token::Slash),
+            },
             b'-' => tokens.push(Token::Minus),
             b'=' => match text[1] {
                 b'=' => {

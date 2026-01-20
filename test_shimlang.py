@@ -92,10 +92,6 @@ for command in (
         pad = "-" * (60 - len(str(script)))
         print(f"{script} {pad} ", end="")
 
-        if script.read_text().strip() == "":
-            print(f"{YELLOW}SKIPPED{RESET} (empty script)")
-            continue
-
         stdout_file = script.with_suffix(".stdout")
         stderr_file = script.with_suffix(".stderr")
 
