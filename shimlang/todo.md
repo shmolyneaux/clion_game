@@ -12,8 +12,14 @@
     - reversed
 - Dicts
     - Pop
+- Custom hashing?
+    - Fairly big bump in complexity, with potentially limited usefullness for a game
+    - Need to be able to call the `hash` method on a struct from the `get` method of the dict
+    - Currently scripts can call into native code, but native code can't call into scripts,
+      which seems like a prereq
 - String methods
 - `*args`, and `**kwargs`
+- Numeric literals with underscores
 - Format strings
 - Integer division
 - Closures
@@ -21,8 +27,10 @@
 - Type annotations
 - Runtime type checking
 - Static type checking
+- Remove use of `Vec` for strings
 - Remove use of `Vec` for dicts
 - Remove use of Box for native values
+    - It can be the type id (which gives us the size), followed by that number of bytes
 - Ref-counting in MMU
 - Debugger
 - Memory viewer

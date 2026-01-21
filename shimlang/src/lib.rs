@@ -2073,6 +2073,38 @@ const fn generate_size_table() -> [u32; 256] {
 
 static LIST_CAPACITY_LUT: [u32; 256] = generate_size_table();
 
+struct NewShimDict {
+    // These could be u24, but are u32 to keep things simple
+    size: u32,
+    usable: u32,
+    entry_count: u32,
+
+    // Memory position of the dict data
+    indices: u24,
+    entries: u24,
+}
+
+impl NewShimDict {
+    fn new() -> Self {
+        Self {
+            size: 0,
+            usable: 0,
+            entry_count: 0,
+            indices: 0.into(),
+            entries: 0.into(),
+        }
+    }
+
+    fn get(&self, _interpreter: &mut Interpreter, key: ShimValue) -> Result<ShimValue, String> {
+        Err(format!("Get on NewShimDict not implemented"))
+    }
+
+    fn set(&self, _interpreter: &mut Interpreter, key: ShimValue, val: ShimValue) -> Result<(), String> {
+        let hash: u32 = key.hash(interpreter)?;
+        Ok(())
+    }
+}
+
 struct ShimList {
     // The memory is limited to u24, so we know there can't be more than this
     // number of values
@@ -2410,6 +2442,20 @@ impl ArgBundle {
     }
 }
 
+const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
+const FNV_PRIME: u64 = 0x100000001b3;
+
+pub fn fnv1a_hash(key: &[u8]) -> u64 {
+    let mut hash = FNV_OFFSET_BASIS;
+
+    for &byte in key {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+
+    hash
+}
+
 macro_rules! numeric_op {
     ($lhs:tt $op:tt $rhs:expr) => {
         match ($lhs, $rhs) {
@@ -2426,6 +2472,23 @@ macro_rules! numeric_op {
 }
 
 impl ShimValue {
+    fn hash(&self, interpreter: &mut Interpreter) -> Result<u32, String> {
+        match self {
+            ShimValue::Integer(i) => fnv1a_hash(&i.to_be_bytes()),
+            ShimValue::Float(f) => fnv1a_hash(&f.to_be_bytes()),
+            ShimValue::String(_) => {
+                self.string(interpreter).unwrap().to_vec()
+            },
+            // We might want to salt these to reduce collisions with other type,
+            // but I expect there is a fairly trivial difference in performance
+            // and would imply heterogenous dicts.
+            ShimValue::Bool(None) => fnv1a_hash(&[0x00]),
+            ShimValue::Bool(false) => fnv1a_hash(&[0x00]),
+            ShimValue::Bool(true) => fnv1a_hash(&[0x01]),
+            _ => Err(format!("Can't hash {:?}", self))
+        }
+    }
+
     fn as_native<T: ShimNative>(&self, interpreter: &mut Interpreter) -> Result<&mut T, String> {
         match self {
             ShimValue::Native(position) => unsafe {
