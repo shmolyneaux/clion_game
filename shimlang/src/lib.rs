@@ -2075,8 +2075,13 @@ static LIST_CAPACITY_LUT: [u32; 256] = generate_size_table();
 
 struct NewShimDict {
     // These could be u24, but are u32 to keep things simple
-    size: u32,
+
+    // Size of the index array, always a power of 2
+    size: u8,
+
+    // Number of slots available
     usable: u32,
+    // Number of valid entries + tombstoned entries
     entry_count: u32,
 
     // Memory position of the dict data
@@ -2099,8 +2104,37 @@ impl NewShimDict {
         Err(format!("Get on NewShimDict not implemented"))
     }
 
-    fn set(&self, _interpreter: &mut Interpreter, key: ShimValue, val: ShimValue) -> Result<(), String> {
+    fn set(&mut self, interpreter: &mut Interpreter, key: ShimValue, val: ShimValue) -> Result<(), String> {
+        if self.size == 0 {
+            self.size = 3;
+            let index_size = 1 << self.size;
+            let word_count = Word(index_size.div_ceil(8).into());
+            self.indices = alloc!(interpreter.mem, word_count, "Dict index array").0;
+
+            // (hash: 32, key: ShimValue, val: ShimValue) = 3 words
+            let word_count = index_size * 3;
+            self.entries = alloc!(interpreter.mem, word_count, "Dict entry array").0;
+        } else {
+            return Err(format!("TODO: Can't resize larger than 8"));
+        }
+
         let hash: u32 = key.hash(interpreter)?;
+        let mask = (1 << self.size) - 1;
+
+        let mut idx = hash & mask;
+
+        if self.size < 9 {
+            let indices: &[u8] = inter;
+            for _ in 0..(1 << self.size) {
+
+                idx = (idx + 1) & mask;
+            }
+        } else {
+            return Err(format!("TODO: Can't probe larger than 256"));
+        }
+
+
+
         Ok(())
     }
 }
@@ -2473,11 +2507,11 @@ macro_rules! numeric_op {
 
 impl ShimValue {
     fn hash(&self, interpreter: &mut Interpreter) -> Result<u32, String> {
-        match self {
+        let hashcode: u64 = match self {
             ShimValue::Integer(i) => fnv1a_hash(&i.to_be_bytes()),
             ShimValue::Float(f) => fnv1a_hash(&f.to_be_bytes()),
             ShimValue::String(_) => {
-                self.string(interpreter).unwrap().to_vec()
+                fnv1a_hash(&self.string(interpreter).unwrap().to_vec())
             },
             // We might want to salt these to reduce collisions with other type,
             // but I expect there is a fairly trivial difference in performance
@@ -2486,7 +2520,9 @@ impl ShimValue {
             ShimValue::Bool(false) => fnv1a_hash(&[0x00]),
             ShimValue::Bool(true) => fnv1a_hash(&[0x01]),
             _ => Err(format!("Can't hash {:?}", self))
-        }
+        };
+
+        Ok(hashcode as u32)
     }
 
     fn as_native<T: ShimNative>(&self, interpreter: &mut Interpreter) -> Result<&mut T, String> {
