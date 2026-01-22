@@ -1255,9 +1255,12 @@ pub fn lex_multiline_comment_end_idx(text: &[u8]) -> Result<usize, String> {
 pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
     let starting_len = text.len();
     let starting_text = text;
+    let original_text = text;
     let mut text = text;
     let mut spans = Vec::new();
     let mut tokens = Vec::new();
+
+    let mut braces = Vec::new();
 
     while !text.is_empty() {
         let c = text[0];
@@ -1305,11 +1308,109 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
             }
             b'0'..=b'9' => tokens.push(lex_number(&mut text)?),
             b'"' => tokens.push(Token::String(lex_string(&mut text)?)),
-            b'{' => tokens.push(Token::LCurly),
-            b'}' => tokens.push(Token::RCurly),
+            b'{' => {
+                tokens.push(Token::LCurly);
+                braces.push('{');
+            },
+            b'[' => {
+                tokens.push(Token::LSquare);
+                braces.push('[');
+            },
+            b'(' => {
+                tokens.push(Token::LBracket);
+                braces.push('(');
+            },
+            b'}' => {
+                match braces.pop() {
+                    Some(b) if b == '{' => (),
+                    Some(b) => {
+                        return Err(
+                            format_script_err(
+                                Span {
+                                    start: (original_text.len() - text.len()) as u32,
+                                    end: (original_text.len() - text.len() + 1) as u32,
+                                },
+                                original_text,
+                                &format!("Brace {b} does not match {}", c as char),
+                            )
+                        );
+                    },
+                    None => {
+                        return Err(
+                            format_script_err(
+                                Span {
+                                    start: (original_text.len() - text.len()) as u32,
+                                    end: (original_text.len() - text.len() + 1) as u32,
+                                },
+                                original_text,
+                                &format!("No braces remaining on stack!"),
+                            )
+                        );
+                    }
+                }
+                tokens.push(Token::RCurly)
+            },
+            b']' => {
+                match braces.pop() {
+                    Some(b) if b == '[' => (),
+                    Some(b) => {
+                        return Err(
+                            format_script_err(
+                                Span {
+                                    start: (original_text.len() - text.len()) as u32,
+                                    end: (original_text.len() - text.len() + 1) as u32,
+                                },
+                                original_text,
+                                &format!("Brace {b} does not match {}", c as char),
+                            )
+                        );
+                    },
+                    None => {
+                        return Err(
+                            format_script_err(
+                                Span {
+                                    start: (original_text.len() - text.len()) as u32,
+                                    end: (original_text.len() - text.len() + 1) as u32,
+                                },
+                                original_text,
+                                &format!("No braces remaining on stack!"),
+                            )
+                        );
+                    }
+                }
+                tokens.push(Token::RSquare);
+            },
+            b')' => {
+                match braces.pop() {
+                    Some(b) if b == '(' => (),
+                    Some(b) => {
+                        return Err(
+                            format_script_err(
+                                Span {
+                                    start: (original_text.len() - text.len()) as u32,
+                                    end: (original_text.len() - text.len() + 1) as u32,
+                                },
+                                original_text,
+                                &format!("Brace {b} does not match {}", c as char),
+                            )
+                        );
+                    },
+                    None => {
+                        return Err(
+                            format_script_err(
+                                Span {
+                                    start: (original_text.len() - text.len()) as u32,
+                                    end: (original_text.len() - text.len() + 1) as u32,
+                                },
+                                original_text,
+                                &format!("No braces remaining on stack!"),
+                            )
+                        );
+                    }
+                }
+                tokens.push(Token::RBracket);
+            },
             b',' => tokens.push(Token::Comma),
-            b'(' => tokens.push(Token::LBracket),
-            b')' => tokens.push(Token::RBracket),
             b'+' => tokens.push(Token::Plus),
             b'*' => tokens.push(Token::Star),
             b'/' => match text[1] {
@@ -1357,8 +1458,6 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
             b';' => tokens.push(Token::Semicolon),
             b'\n' => (),
             b'\r' => (),
-            b'[' => tokens.push(Token::LSquare),
-            b']' => tokens.push(Token::RSquare),
             b':' => tokens.push(Token::Colon),
             b'!' => tokens.push(Token::Bang),
             b'.' => tokens.push(Token::Dot),
@@ -2107,12 +2206,12 @@ impl NewShimDict {
     fn set(&mut self, interpreter: &mut Interpreter, key: ShimValue, val: ShimValue) -> Result<(), String> {
         if self.size == 0 {
             self.size = 3;
-            let index_size = 1 << self.size;
+            let index_size: usize = 1 << self.size;
             let word_count = Word(index_size.div_ceil(8).into());
             self.indices = alloc!(interpreter.mem, word_count, "Dict index array").0;
 
             // (hash: 32, key: ShimValue, val: ShimValue) = 3 words
-            let word_count = index_size * 3;
+            let word_count = Word((index_size * 3).into());
             self.entries = alloc!(interpreter.mem, word_count, "Dict entry array").0;
         } else {
             return Err(format!("TODO: Can't resize larger than 8"));
@@ -2124,7 +2223,7 @@ impl NewShimDict {
         let mut idx = hash & mask;
 
         if self.size < 9 {
-            let indices: &[u8] = inter;
+            let indices: &[u8] = todo!();
             for _ in 0..(1 << self.size) {
 
                 idx = (idx + 1) & mask;
@@ -2516,10 +2615,10 @@ impl ShimValue {
             // We might want to salt these to reduce collisions with other type,
             // but I expect there is a fairly trivial difference in performance
             // and would imply heterogenous dicts.
-            ShimValue::Bool(None) => fnv1a_hash(&[0x00]),
+            ShimValue::None => fnv1a_hash(&[0x00]),
             ShimValue::Bool(false) => fnv1a_hash(&[0x00]),
             ShimValue::Bool(true) => fnv1a_hash(&[0x01]),
-            _ => Err(format!("Can't hash {:?}", self))
+            _ => return Err(format!("Can't hash {:?}", self))
         };
 
         Ok(hashcode as u32)
