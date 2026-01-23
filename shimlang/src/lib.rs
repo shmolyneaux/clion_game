@@ -39,6 +39,15 @@ pub struct Node<T> {
     pub span: Span,
 }
 
+impl<T> Node<T> {
+    fn lazy(val: T) -> Self {
+        Self {
+            data: val,
+            span: Span::start(),
+        }
+    }
+}
+
 // Now redefine your types using the wrapper
 pub type ExprNode = Node<Expression>;
 pub type Ident = Vec<u8>;
@@ -94,6 +103,7 @@ pub enum Expression {
     BooleanOp(BooleanOp),
     BinaryOp(BinaryOp),
     UnaryOp(UnaryOp),
+    Stringify(Box<ExprNode>),
     Call(Box<ExprNode>, Vec<ExprNode>, Vec<(Ident, ExprNode)>),
     Index(Box<ExprNode>, Box<ExprNode>),
     Attribute(Box<ExprNode>, Vec<u8>),
@@ -185,6 +195,19 @@ pub enum Token {
     Bool(bool),
     Identifier(Vec<u8>),
     String(Vec<u8>),
+    StringInterpolationStart,
+    StringInterpolationEnd,
+}
+
+impl Token {
+    fn to_string(&self) -> String {
+        match self {
+            Token::LSquare => "[".to_string(),
+            Token::LCurly => "{".to_string(),
+            Token::LBracket => "(".to_string(),
+            _ => format!("{self:?}")
+        }
+    }
 }
 
 pub struct TokenStream {
@@ -372,7 +395,53 @@ pub fn parse_primary(tokens: &mut TokenStream) -> Result<ExprNode, String> {
         Token::None => Expression::Primary(Primary::None),
         Token::Integer(i) => Expression::Primary(Primary::Integer(i)),
         Token::Float(f) => Expression::Primary(Primary::Float(f)),
-        Token::String(s) => Expression::Primary(Primary::String(s)),
+        Token::String(s) => {
+            let mut expr = Expression::Primary(Primary::String(s));
+
+            while !tokens.is_empty() {
+                match *tokens.peek()? {
+                    Token::StringInterpolationStart => {
+                        tokens.advance()?;
+                        let interp_expr = parse_expression(tokens)?;
+                        tokens.consume(Token::StringInterpolationEnd)?;
+
+                        let token = tokens.pop()?;
+                        match token {
+                            Token::String(s) => {
+                                expr = Expression::BinaryOp(
+                                    BinaryOp::Add(
+                                        Box::new(
+                                            Node::lazy(expr)
+                                        ),
+                                        Box::new(
+                                            Node::lazy(
+                                                Expression::Stringify(Box::new(interp_expr))
+                                            )
+                                        ),
+                                    )
+                                );
+                                expr = Expression::BinaryOp(
+                                    BinaryOp::Add(
+                                        Box::new(Node::lazy(expr)),
+                                        Box::new(Node::lazy(Expression::Primary(Primary::String(s)))),
+                                    )
+                                );
+                            },
+                            token => {
+                                tokens.unadvance()?;
+                                return Err(tokens.format_peek_err(&format!(
+                                    "Unexpected `{:?}` after string interpolation",
+                                    token
+                                )));
+                            }
+                        }
+                    },
+                    _ => break,
+                }
+            }
+
+            expr
+        },
         Token::Bool(b) => Expression::Primary(Primary::Bool(b)),
         Token::Identifier(s) => Expression::Primary(Primary::Identifier(s)),
         Token::LCurly => {
@@ -1133,8 +1202,13 @@ pub fn lex_identifier(text: &mut &[u8]) -> Result<Vec<u8>, String> {
     Ok(text.to_vec())
 }
 
-pub fn lex_string(text: &mut &[u8]) -> Result<Vec<u8>, String> {
-    let enclosing_char = text[0];
+enum StringLexResult {
+    Literal(Vec<u8>),
+    Interpolation(Vec<u8>),
+}
+
+pub fn lex_string(text: &mut &[u8]) -> Result<StringLexResult, String> {
+    let enclosing_char = b'"';
     *text = &text[1..];
     let mut out: Vec<u8> = Vec::new();
     let mut escape_next = false;
@@ -1146,6 +1220,10 @@ pub fn lex_string(text: &mut &[u8]) -> Result<Vec<u8>, String> {
                 b'\'' => out.push(b'\''),
                 b'\\' => out.push(b'\\'),
                 b'"' => out.push(b'"'),
+                b'(' => {
+                    *text = &text[idx..];
+                    return Ok(StringLexResult::Interpolation(out));
+                },
                 b => return Err(format!("Could not escape {:?}", printable_byte(*b))),
             }
             escape_next = false;
@@ -1153,7 +1231,7 @@ pub fn lex_string(text: &mut &[u8]) -> Result<Vec<u8>, String> {
         }
         if *c == enclosing_char {
             *text = &text[idx..];
-            return Ok(out);
+            return Ok(StringLexResult::Literal(out));
         }
         match c {
             b'\\' => {
@@ -1260,7 +1338,7 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
     let mut spans = Vec::new();
     let mut tokens = Vec::new();
 
-    let mut braces = Vec::new();
+    let mut braces: Vec<Token> = Vec::new();
 
     while !text.is_empty() {
         let c = text[0];
@@ -1307,22 +1385,31 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
                 }
             }
             b'0'..=b'9' => tokens.push(lex_number(&mut text)?),
-            b'"' => tokens.push(Token::String(lex_string(&mut text)?)),
+            b'"' => {
+                match lex_string(&mut text)? {
+                    StringLexResult::Literal(s) => tokens.push(Token::String(s)),
+                    StringLexResult::Interpolation(s) => {
+                        tokens.push(Token::String(s));
+                        tokens.push(Token::StringInterpolationStart);
+                        braces.push(Token::StringInterpolationStart);
+                    },
+                }
+            },
             b'{' => {
                 tokens.push(Token::LCurly);
-                braces.push('{');
+                braces.push(Token::LCurly);
             },
             b'[' => {
                 tokens.push(Token::LSquare);
-                braces.push('[');
+                braces.push(Token::LSquare);
             },
             b'(' => {
                 tokens.push(Token::LBracket);
-                braces.push('(');
+                braces.push(Token::LBracket);
             },
             b'}' => {
                 match braces.pop() {
-                    Some(b) if b == '{' => (),
+                    Some(Token::LCurly) => (),
                     Some(b) => {
                         return Err(
                             format_script_err(
@@ -1331,7 +1418,7 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
                                     end: (original_text.len() - text.len() + 1) as u32,
                                 },
                                 original_text,
-                                &format!("Brace {b} does not match {}", c as char),
+                                &format!("Brace {} does not match {}", b.to_string(), c as char),
                             )
                         );
                     },
@@ -1352,7 +1439,7 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
             },
             b']' => {
                 match braces.pop() {
-                    Some(b) if b == '[' => (),
+                    Some(Token::LSquare) => (),
                     Some(b) => {
                         return Err(
                             format_script_err(
@@ -1361,7 +1448,7 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
                                     end: (original_text.len() - text.len() + 1) as u32,
                                 },
                                 original_text,
-                                &format!("Brace {b} does not match {}", c as char),
+                                &format!("Brace {} does not match {}", b.to_string(), c as char),
                             )
                         );
                     },
@@ -1382,7 +1469,18 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
             },
             b')' => {
                 match braces.pop() {
-                    Some(b) if b == '(' => (),
+                    Some(Token::LBracket) => tokens.push(Token::RBracket),
+                    Some(Token::StringInterpolationStart) => {
+                        tokens.push(Token::StringInterpolationEnd);
+                        match lex_string(&mut text)? {
+                            StringLexResult::Literal(s) => tokens.push(Token::String(s)),
+                            StringLexResult::Interpolation(s) => {
+                                tokens.push(Token::String(s));
+                                tokens.push(Token::StringInterpolationStart);
+                                braces.push(Token::StringInterpolationStart);
+                            },
+                        }
+                    },
                     Some(b) => {
                         return Err(
                             format_script_err(
@@ -1391,7 +1489,7 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
                                     end: (original_text.len() - text.len() + 1) as u32,
                                 },
                                 original_text,
-                                &format!("Brace {b} does not match {}", c as char),
+                                &format!("Brace {} does not match {}", b.to_string(), c as char),
                             )
                         );
                     },
@@ -1408,7 +1506,6 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
                         );
                     }
                 }
-                tokens.push(Token::RBracket);
             },
             b',' => tokens.push(Token::Comma),
             b'+' => tokens.push(Token::Plus),
@@ -1466,13 +1563,17 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
         }
         text = &text[1..];
         let token_end_len = text.len();
-        if tokens.len() > spans.len() {
+        while tokens.len() > spans.len() {
             spans.push(Span {
                 start: (starting_len - token_start_len) as u32,
                 end: (starting_len - token_end_len) as u32,
             });
         }
     }
+    assert_eq!(
+        tokens.len(),
+        spans.len(),
+    );
     Ok(TokenStream {
         idx: 0,
         tokens: tokens,
@@ -2851,6 +2952,11 @@ impl ShimValue {
         }
     }
 
+    fn to_shimvalue_string(&self, interpreter: &mut Interpreter) -> ShimValue {
+        let s = self.to_string(interpreter);
+        interpreter.mem.alloc_str(&s.into_bytes())
+    }
+
     fn to_string(&self, interpreter: &mut Interpreter) -> String {
         match self {
             ShimValue::Integer(i) => i.to_string(),
@@ -3283,6 +3389,7 @@ enum ByteCode {
     EndScope,
     LoopStart,
     LoopEnd,
+    Stringify,
     Break,
     Continue,
     Call,
@@ -3972,6 +4079,11 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
             res.push((opcode as u8, expr.span));
             Ok(res)
         }
+        Expression::Stringify(expr) => {
+            let mut asm = compile_expression(&expr)?;
+            asm.push((ByteCode::Stringify as u8, expr.span));
+            Ok(asm)
+        }
         Expression::Index(obj_expr, index_expr) => {
             let mut asm = compile_expression(&obj_expr)?;
             asm.extend(compile_expression(index_expr)?);
@@ -4467,6 +4579,10 @@ impl Interpreter {
                 val if val == ByteCode::Negate as u8 => {
                     let a = stack.pop().expect("Operand for ByteCode::Negate");
                     stack.push(a.neg(self)?);
+                }
+                val if val == ByteCode::Stringify as u8 => {
+                    let a = stack.pop().expect("Operand for ByteCode::Stringify");
+                    stack.push(a.to_shimvalue_string(self));
                 }
                 val if val == ByteCode::LiteralNone as u8 => {
                     stack.push(ShimValue::None);
