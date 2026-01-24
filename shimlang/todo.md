@@ -22,20 +22,19 @@
 - Numeric literals with underscores
 - Format strings
 - Integer division
-- Closures
 - Operator overloading
 - Type annotations
 - Runtime type checking
 - Static type checking
+- Add value type for strings less than 7 bytes
 - Remove use of `Vec` for strings
 - Remove use of `Vec` for dicts
 - Remove use of Box for native values
     - It can be the type id (which gives us the size), followed by that number of bytes
-- Ref-counting in MMU
 - Debugger
 - Memory viewer
 - Assemby viewer
 - Stack viewer
 - Spans for statements
-- Garbage collection
 - Adding ident cache to Fn bytecode
+- Closures

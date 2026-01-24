@@ -89,7 +89,7 @@ for command in (
         if cli_scripts and script.resolve() not in cli_scripts:
             continue
 
-        pad = "-" * (60 - len(str(script)))
+        pad = "-" * (64 - len(str(script)))
         print(f"{script} {pad} ", end="")
 
         stdout_file = script.with_suffix(".stdout")

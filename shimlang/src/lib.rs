@@ -1587,16 +1587,17 @@ pub fn ast_from_text(text: &[u8]) -> Result<Ast, String> {
     parse_ast(&mut tokens)
 }
 
+#[derive(Debug)]
 pub struct Config {
     // There are max 2^24 addressable values, each 8 bytes large
-    // This value can be up to 2^32.
+    // This value can be up to 2^27-1.
     memory_space_bytes: u32,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Config {
-            memory_space_bytes: 2u32.pow(22), // 4 MB
+            memory_space_bytes: MAX_U24 * 8,
         }
     }
 }
@@ -1925,8 +1926,8 @@ impl MMU {
             }
         }
         panic!(
-            "Could not allocate {:?} words from free list {:#?}",
-            words, self.free_list
+            "Could not allocate {:?} words from free list {:#?} (total: {})",
+            words, self.free_list, self.mem.len()
         );
     }
 
