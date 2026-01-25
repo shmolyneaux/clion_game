@@ -2397,6 +2397,24 @@ impl NewShimDict {
                 let word_count = Word((index_size * 3).into());
                 self.entries = alloc!(interpreter.mem, word_count, "Dict entry array").0;
                 self.usable = 8;
+
+                // TODO: This should be equivalent to the entries being zero'd,
+                // but this just makes it explicit
+                let entries: &mut [DictEntry] = unsafe {
+                    let u64_slice = &mut interpreter.mem.mem[
+                        usize::from(self.entries)..
+                        usize::from(self.entries)+3*(self.entry_count as usize)
+                    ];
+                    std::slice::from_raw_parts_mut(
+                        u64_slice.as_mut_ptr() as *mut DictEntry,
+                        u64_slice.len() / 3,
+                    )
+                };
+                for entry in entries.iter_mut() {
+                    entry.hash = 0;
+                    entry.key = ShimValue::Uninitialized;
+                    entry.value = ShimValue::Uninitialized;
+                }
             } else {
                 return Err(format!("TODO: Can't resize larger than 8"));
             }
@@ -2464,20 +2482,9 @@ impl NewShimDict {
     }
 
     fn get_entry(&self, interpreter: &Interpreter, idx: usize) -> &DictEntry {
-        //unsafe{std::mem::transmute(&interpreter.mem.mem[
-        //    usize::from(self.entries)+3*idx
-        //])}
-        let entries: &[DictEntry] = unsafe {
-            let u64_slice = &interpreter.mem.mem[
-                usize::from(self.entries)..
-                usize::from(self.entries)+3*(self.entry_count as usize)
-            ];
-            std::slice::from_raw_parts(
-                u64_slice.as_ptr() as *const DictEntry,
-                u64_slice.len() / 3,
-            )
-        };
-        &entries[idx]
+        unsafe{std::mem::transmute(&interpreter.mem.mem[
+            usize::from(self.entries)+3*idx
+        ])}
     }
 
     fn get_entry_mut(&mut self, interpreter: &mut Interpreter, idx: usize) -> &mut DictEntry {
@@ -2853,6 +2860,14 @@ macro_rules! numeric_op {
 }
 
 impl ShimValue {
+    fn is_uninitialized(&self) -> bool {
+        if let ShimValue::Uninitialized = self {
+            true
+        } else {
+            false
+        }
+    }
+
     fn hash(&self, interpreter: &mut Interpreter) -> Result<u32, String> {
         let hashcode: u64 = match self {
             ShimValue::Integer(i) => fnv1a_hash(&i.to_be_bytes()),
@@ -4370,8 +4385,42 @@ impl<'a> GC<'a> {
                     ShimValue::Dict(pos) => {
                         let pos: usize = pos.into();
                         let dict: &NewShimDict = std::mem::transmute(&self.mem.mem[pos]);
-                        todo!("Mark indices and entries array for GC");
+                        let entries: &[DictEntry] = unsafe {
+                            let u64_slice = &self.mem.mem[
+                                usize::from(dict.entries)..
+                                usize::from(dict.entries)+3*(dict.entry_count as usize)
+                            ];
+                            std::slice::from_raw_parts(
+                                u64_slice.as_ptr() as *const DictEntry,
+                                u64_slice.len() / 3,
+                            )
+                        };
+
+                        // Push the keys/vals
+                        let count: usize = dict.entry_count as usize;
+                        for entry in &entries[..count] {
+                            if entry.key.is_uninitialized() {
+                                vals.push(entry.key);
+                                vals.push(entry.value);
+                            }
+                        }
+
+                        // Mark the sapce for the dict struct
                         for idx in pos..(pos + (std::mem::size_of::<NewShimDict>()/8)) {
+                            self.mask.set(idx);
+                        }
+
+                        let size = 1 << dict.size_pow;
+
+                        // Mark the indices array
+                        let indices_pos: usize = dict.indices.into();
+                        for idx in indices_pos..(indices_pos + size) {
+                            self.mask.set(idx);
+                        }
+
+                        // Mark the entries array
+                        let entries_pos: usize = dict.entries.into();
+                        for idx in entries_pos..(entries_pos + size*3) {
                             self.mask.set(idx);
                         }
                     },
