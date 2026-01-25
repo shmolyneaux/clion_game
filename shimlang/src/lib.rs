@@ -3,7 +3,6 @@ use std::collections::HashMap;
 #[cfg(feature = "facet")]
 use facet::Facet;
 
-use std::collections::HashSet;
 use std::ops::Range;
 use std::ops::{Add, Sub};
 use std::ops::{AddAssign, SubAssign};
@@ -1512,7 +1511,7 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
             b'*' => tokens.push(Token::Star),
             b'/' => match text[1] {
                 b'/' => {
-                    while true {
+                    loop {
                         text = &text[1..];
                         if text.is_empty() {
                             break;
@@ -1784,8 +1783,6 @@ pub struct MMU {
 
 use std::any::TypeId;
 
-type ShimDict = Vec<(ShimValue, ShimValue)>;
-
 macro_rules! alloc {
     ($mmu:expr, $count:expr, $msg:expr) => {
         {
@@ -1852,12 +1849,12 @@ impl MMU {
     }
 
     fn alloc_dict(&mut self) -> ShimValue {
-        let word_count = Word((std::mem::size_of::<ShimDict>() as u32).into());
+        let word_count = Word((std::mem::size_of::<NewShimDict>() as u32/8).into());
         let position = alloc!(self, word_count, "Dict");
         unsafe {
-            let ptr: *mut ShimDict =
+            let ptr: *mut NewShimDict =
                 std::mem::transmute(&mut self.mem[usize::from(position.0)]);
-            ptr.write(Vec::new());
+            ptr.write(NewShimDict::new());
         }
         ShimValue::Dict(position)
     }
@@ -1973,10 +1970,7 @@ impl MMU {
                     return;
                 } else if pos + size == self.free_list[idx].pos {
                     // Case 2
-                    self.free_list[idx-1].size = (
-                        self.free_list[idx].end() -
-                        self.free_list[idx-1].pos
-                    );
+                    self.free_list[idx-1].size = self.free_list[idx].end() - self.free_list[idx-1].pos;
                     self.free_list.remove(idx);
                     return;
                 } else {
@@ -2274,14 +2268,22 @@ const fn generate_size_table() -> [u32; 256] {
 
 static LIST_CAPACITY_LUT: [u32; 256] = generate_size_table();
 
+#[derive(Debug, Clone, Copy)]
+struct DictEntry {
+    hash: u64,
+    key: ShimValue,
+    value: ShimValue,
+}
+
 struct NewShimDict {
     // These could be u24, but are u32 to keep things simple
 
     // Size of the index array, always a power of 2
-    size: u8,
+    size_pow: u8,
 
-    // Number of slots available
+    // Number of slots available in the entries array
     usable: u32,
+
     // Number of valid entries + tombstoned entries
     entry_count: u32,
 
@@ -2293,7 +2295,7 @@ struct NewShimDict {
 impl NewShimDict {
     fn new() -> Self {
         Self {
-            size: 0,
+            size_pow: 0,
             usable: 0,
             entry_count: 0,
             indices: 0.into(),
@@ -2301,42 +2303,198 @@ impl NewShimDict {
         }
     }
 
-    fn get(&self, _interpreter: &mut Interpreter, key: ShimValue) -> Result<ShimValue, String> {
-        Err(format!("Get on NewShimDict not implemented"))
+    fn len(&self) -> usize {
+        // TODO: this should not include tombstones
+        self.entry_count as usize
     }
 
-    fn set(&mut self, interpreter: &mut Interpreter, key: ShimValue, val: ShimValue) -> Result<(), String> {
-        if self.size == 0 {
-            self.size = 3;
-            let index_size: usize = 1 << self.size;
-            let word_count = Word(index_size.div_ceil(8).into());
-            self.indices = alloc!(interpreter.mem, word_count, "Dict index array").0;
-
-            // (hash: 32, key: ShimValue, val: ShimValue) = 3 words
-            let word_count = Word((index_size * 3).into());
-            self.entries = alloc!(interpreter.mem, word_count, "Dict entry array").0;
-        } else {
-            return Err(format!("TODO: Can't resize larger than 8"));
-        }
+    fn get(&self, interpreter: &mut Interpreter, key: ShimValue) -> Result<ShimValue, String> {
+        let size = 1 << self.size_pow;
 
         let hash: u32 = key.hash(interpreter)?;
-        let mask = (1 << self.size) - 1;
+        let mask = size - 1;
 
         let mut idx = hash & mask;
 
-        if self.size < 9 {
-            let indices: &[u8] = todo!();
-            for _ in 0..(1 << self.size) {
-
+        if self.size_pow < 9 {
+            let hash: u8 = hash as u8;
+            let indices: &mut [u8] = unsafe {
+                let u64_slice = &mut interpreter.mem.mem[
+                    usize::from(self.indices)..
+                    usize::from(self.indices)+(size as usize/8)
+                ];
+                std::slice::from_raw_parts_mut(
+                    u64_slice.as_mut_ptr() as *mut u8,
+                    u64_slice.len() * 8,
+                )
+            };
+            // Linear probe for now
+            for _ in 0..size {
+                // Index has never been set (-1)
+                if indices[idx as usize] == u8::MAX {
+                    return Err(format!("Key {key:?} not in dict"));
+                } else if indices[idx as usize] == u8::MAX - 1 {
+                    // Skip over this
+                } else {
+                    // Hash matches, let's check the entry and see if the key matches
+                    let entry_idx = indices[idx as usize];
+                    let entry = self.get_entry(interpreter, entry_idx as usize);
+                    if key.equal_inner(interpreter, &entry.key)? {
+                        return Ok(entry.value);
+                    } else {
+                        //eprintln!("{:?} doesn't match {:?}", key, entry.key);
+                        //self.print_entries(interpreter);
+                    }
+                    // Otherwise continue probing
+                }
                 idx = (idx + 1) & mask;
             }
         } else {
             return Err(format!("TODO: Can't probe larger than 256"));
         }
 
+        Err(format!("Probing failed"))
+    }
 
+    fn print_entries(&self, interpreter: &Interpreter) {
+        eprintln!("Entries");
+        let entries: &[DictEntry] = unsafe {
+            let u64_slice = &interpreter.mem.mem[
+                usize::from(self.entries)..
+                usize::from(self.entries)+3*(self.entry_count as usize)
+            ];
+            std::slice::from_raw_parts(
+                u64_slice.as_ptr() as *const DictEntry,
+                u64_slice.len() / 3,
+            )
+        };
+        dbg!(entries);
+    }
+
+    fn set(&mut self, interpreter: &mut Interpreter, key: ShimValue, val: ShimValue) -> Result<(), String> {
+        if self.usable == 0 {
+            if self.size_pow == 0 {
+                self.size_pow = 3;
+                let size = 1 << self.size_pow;
+                let index_size: usize = 1 << self.size_pow;
+                let word_count = Word(index_size.div_ceil(8).into());
+                self.indices = alloc!(interpreter.mem, word_count, "Dict index array").0;
+                let indices: &mut [u8] = unsafe {
+                    let u64_slice = &mut interpreter.mem.mem[
+                        usize::from(self.indices)..
+                        usize::from(self.indices)+(size as usize/8)
+                    ];
+                    std::slice::from_raw_parts_mut(
+                        u64_slice.as_mut_ptr() as *mut u8,
+                        u64_slice.len() * 8,
+                    )
+                };
+                for x in indices.iter_mut() {
+                    *x = u8::MAX;
+                }
+
+                // (hash: 32, key: ShimValue, val: ShimValue) = 3 words
+                let word_count = Word((index_size * 3).into());
+                self.entries = alloc!(interpreter.mem, word_count, "Dict entry array").0;
+                self.usable = 8;
+            } else {
+                return Err(format!("TODO: Can't resize larger than 8"));
+            }
+        }
+
+        let size = 1 << self.size_pow;
+
+        let longhash: u32 = key.hash(interpreter)?;
+        let mask = size - 1;
+
+        let mut idx = longhash & mask;
+
+        let mut freeslot = None;
+        if self.size_pow < 9 {
+            let hash: u8 = longhash as u8;
+
+            let indices: &mut [u8] = unsafe {
+                let u64_slice = &mut interpreter.mem.mem[
+                    usize::from(self.indices)..
+                    usize::from(self.indices)+(size as usize/8)
+                ];
+                std::slice::from_raw_parts_mut(
+                    u64_slice.as_mut_ptr() as *mut u8,
+                    u64_slice.len() * 8,
+                )
+            };
+
+            // Linear probe for now
+            for _ in 0..size {
+                if indices[idx as usize] == u8::MAX {
+                    // Index has never been set (-1)
+                    if freeslot == None {
+                        freeslot = Some(idx);
+                    }
+                    break
+                } else if indices[idx as usize] == u8::MAX - 1 {
+                    // Tombstone
+                    if freeslot == None {
+                        freeslot = Some(idx);
+                    }
+                } else {
+                    // Hash matches, let's check the entry and see if the key matches
+                    let entry_idx = indices[idx as usize];
+                    let entry = self.get_entry_mut(interpreter, entry_idx as usize);
+                    if key.equal_inner(interpreter, &entry.key)? {
+                        entry.key = key;
+                        entry.value = val;
+                        return Ok(());
+                    }
+                    // Otherwise continue probing
+                }
+                idx = (idx + 1) & mask;
+            }
+            if let Some(idx) = freeslot {
+                let entry_idx = self.set_entry(interpreter, longhash as u32, key, val);
+                indices[idx as usize] = entry_idx as u8;
+            } else {
+                return Err(format!("Could not find free slot"));
+            }
+        } else {
+            return Err(format!("TODO: Can't probe larger than 256"));
+        }
 
         Ok(())
+    }
+
+    fn get_entry(&self, interpreter: &Interpreter, idx: usize) -> &DictEntry {
+        //unsafe{std::mem::transmute(&interpreter.mem.mem[
+        //    usize::from(self.entries)+3*idx
+        //])}
+        let entries: &[DictEntry] = unsafe {
+            let u64_slice = &interpreter.mem.mem[
+                usize::from(self.entries)..
+                usize::from(self.entries)+3*(self.entry_count as usize)
+            ];
+            std::slice::from_raw_parts(
+                u64_slice.as_ptr() as *const DictEntry,
+                u64_slice.len() / 3,
+            )
+        };
+        &entries[idx]
+    }
+
+    fn get_entry_mut(&mut self, interpreter: &mut Interpreter, idx: usize) -> &mut DictEntry {
+        unsafe{std::mem::transmute(&mut interpreter.mem.mem[
+            usize::from(self.entries)+3*idx
+        ])}
+    }
+
+    fn set_entry(&mut self, interpreter: &mut Interpreter, hash: u32, key: ShimValue, val: ShimValue) -> usize {
+        let mut entry = self.get_entry_mut(interpreter, self.entry_count as usize);
+        entry.hash = hash as u64;
+        entry.key = key;
+        entry.value = val;
+
+        let entry_idx = self.entry_count;
+        self.entry_count += 1;
+        entry_idx as usize
     }
 }
 
@@ -2466,7 +2624,8 @@ fn shim_dict(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValu
     let dict = retval.dict_mut(interpreter)?;
 
     for (key, val) in args.kwargs.clone().into_iter() {
-        dict.push((interpreter.mem.alloc_str(&key), val));
+        let key = interpreter.mem.alloc_str(&key);
+        dict.set(interpreter, key, val)?;
     }
 
     Ok(retval)
@@ -2548,9 +2707,9 @@ fn shim_dict_index_set(
         return Err(format!("Expected 3 args for dict set"));
     }
 
-    let dict: &mut ShimDict = if let ShimValue::Dict(position) = args.args[0] {
+    let dict: &mut NewShimDict = if let ShimValue::Dict(position) = args.args[0] {
         unsafe {
-            let ptr: &mut ShimDict =
+            let ptr: &mut NewShimDict =
                 std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
             ptr
         }
@@ -2558,14 +2717,9 @@ fn shim_dict_index_set(
         return Err(format!("Can't set on non-dict {:?}", args.args[0]));
     };
 
-    for (key, val) in dict.iter_mut() {
-        if key.equal_inner(interpreter, &args.args[1])? {
-            *val = args.args[2];
-            return Ok(ShimValue::None);
-        }
-    }
-
-    dict.push((args.args[1], args.args[2]));
+    let key = args.args[1];
+    let val = args.args[2];
+    dict.set(interpreter, key, val)?;
 
     Ok(ShimValue::None)
 }
@@ -2578,9 +2732,9 @@ fn shim_dict_index_get(
         return Err(format!("Expected 2 args for dict get"));
     }
 
-    let dict: &mut ShimDict = if let ShimValue::Dict(position) = args.args[0] {
+    let dict: &mut NewShimDict = if let ShimValue::Dict(position) = args.args[0] {
         unsafe {
-            let ptr: &mut ShimDict =
+            let ptr: &mut NewShimDict =
                 std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
             ptr
         }
@@ -2588,13 +2742,7 @@ fn shim_dict_index_get(
         return Err(format!("Can't get non-dict {:?}", args.args[0]));
     };
 
-    for (key, val) in dict.iter() {
-        if key.equal_inner(interpreter, &args.args[1])? {
-            return Ok(*val);
-        }
-    }
-
-    Err(format!("Key not found in dict {:?}", args.args[1]))
+    dict.get(interpreter, args.args[1])
 }
 
 fn shim_dict_index_has(
@@ -2605,9 +2753,9 @@ fn shim_dict_index_has(
         return Err(format!("Expected 2 args for dict has"));
     }
 
-    let dict: &mut ShimDict = if let ShimValue::Dict(position) = args.args[0] {
+    let dict: &mut NewShimDict = if let ShimValue::Dict(position) = args.args[0] {
         unsafe {
-            let ptr: &mut ShimDict =
+            let ptr: &mut NewShimDict =
                 std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
             ptr
         }
@@ -2615,13 +2763,11 @@ fn shim_dict_index_has(
         return Err(format!("Can't get non-dict {:?}", args.args[0]));
     };
 
-    for (key, _val) in dict.iter() {
-        if key.equal_inner(interpreter, &args.args[1])? {
-            return Ok(ShimValue::Bool(true));
-        }
+    if let Ok(_) = dict.get(interpreter, args.args[1]) {
+        return Ok(ShimValue::Bool(true));
+    } else {
+        return Ok(ShimValue::Bool(false));
     }
-
-    return Ok(ShimValue::Bool(false));
 }
 
 fn shim_dict_index_len(
@@ -2805,10 +2951,10 @@ impl ShimValue {
         }
     }
 
-    fn dict_mut(&self, interpreter: &mut Interpreter) -> Result<&mut ShimDict, String> {
+    fn dict_mut(&self, interpreter: &mut Interpreter) -> Result<&mut NewShimDict, String> {
         match self {
             ShimValue::Dict(position) => {
-                let dict: &mut ShimDict = unsafe {
+                let dict: &mut NewShimDict = unsafe {
                     std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)])
                 };
                 Ok(dict)
@@ -2907,13 +3053,7 @@ impl ShimValue {
             (ShimValue::Dict(_), some_key) => {
                 let dict = self.dict_mut(interpreter)?;
 
-                for (key, val) in dict.iter() {
-                    if some_key.equal_inner(interpreter, &key)? {
-                        return Ok(*val);
-                    }
-                }
-
-                Err(format!("Key {:?} not found in dict", some_key))
+                dict.get(interpreter, *some_key)
             }
             (a, b) => Err(format!("Can't index {:?} with {:?}", a, b)),
         }
@@ -2935,19 +3075,11 @@ impl ShimValue {
                 Ok(())
             }
             (ShimValue::Dict(position), index) => {
-                let dict: &mut ShimDict = unsafe {
+                let dict: &mut NewShimDict = unsafe {
                     std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)])
                 };
 
-                for (key, dval) in dict.iter_mut() {
-                    if key.equal_inner(interpreter, &index)? {
-                        *dval = *value;
-                        return Ok(());
-                    }
-                }
-
-                dict.push((*index, *value));
-                Ok(())
+                dict.set(interpreter, *index, *value)
             }
             (a, b) => Err(format!("Can't set index {:?} with {:?}", a, b)),
         }
@@ -3157,19 +3289,17 @@ impl ShimValue {
     ) -> Result<ShimValue, String> {
         match self {
             ShimValue::Dict(position) => {
-                let dict: &mut ShimDict = unsafe {
-                    let ptr: &mut ShimDict =
+                let dict: &mut NewShimDict = unsafe {
+                    let ptr: &mut NewShimDict =
                         std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
                     ptr
                 };
 
-                for (key, _) in dict.iter() {
-                    if key.equal_inner(interpreter, some_key)? {
-                        return Ok(ShimValue::Bool(true));
-                    }
+                if let Ok(_) = dict.get(interpreter, *some_key) {
+                    return Ok(ShimValue::Bool(true));
+                } else {
+                    return Ok(ShimValue::Bool(false));
                 }
-
-                return Ok(ShimValue::Bool(false));
             }
             _ => Err(format!("Can't `in` {:?} and {:?}", self, some_key)),
         }
@@ -4233,19 +4363,15 @@ impl<'a> GC<'a> {
                     },
                     ShimValue::String(pos) => {
                         let pos: usize = pos.into();
-                        let s: &Vec<u8> = self.mem.get(pos.into());
                         for idx in pos..(pos + (std::mem::size_of::<Vec<u8>>()/8)) {
                             self.mask.set(idx);
                         }
                     },
                     ShimValue::Dict(pos) => {
                         let pos: usize = pos.into();
-                        let dict: &ShimDict = std::mem::transmute(&self.mem.mem[pos]);
-                        for (key, val) in dict.iter() {
-                            vals.push(*key);
-                            vals.push(*val);
-                        }
-                        for idx in pos..(pos + (std::mem::size_of::<ShimDict>()/8)) {
+                        let dict: &NewShimDict = std::mem::transmute(&self.mem.mem[pos]);
+                        todo!("Mark indices and entries array for GC");
+                        for idx in pos..(pos + (std::mem::size_of::<NewShimDict>()/8)) {
                             self.mask.set(idx);
                         }
                     },
