@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import itertools
 import os
 import subprocess
@@ -14,12 +15,7 @@ MAGENTA = "\033[35m"
 CYAN = "\033[36m"
 RESET = "\033[0m"
 
-test_path = Path(__file__).parent / "shimlang"
-
 cli_scripts = [Path(p).resolve() for p in sys.argv[1:]]
-
-os.chdir(test_path)
-
 
 start_time = time()
 result = subprocess.run("cargo build --bin shm", shell=True)
@@ -122,18 +118,28 @@ for command in (
             raise Exception("Unknown command")
 
         proc_stdout = proc.stdout
+
+        # Remove `dbg!` lines
         proc_stderr = proc.stderr
+        cleaned_stderr = ""
+        for line in proc.stderr.splitlines():
+            if line.startswith("[src/lib.rs"):
+                continue
+            cleaned_stderr += f"\n{line}"
 
         if command != "errors" and proc.returncode:
             msg = "FAILED (non-zero exit code)"
             print(f"{RED}{msg}{RESET}")
+            print("")
+            print("STDOUT:")
+            print(proc_stdout)
             print("")
             print("STDERR:")
             print(proc_stderr)
             print("")
             failures.append(f"{script} ... {msg}")
 
-        elif proc_stderr.strip() != expected_stderr.strip():
+        elif cleaned_stderr.strip() != expected_stderr.strip():
             msg = "FAILED (stderr mismatch)"
             print(f"{RED}{msg}{RESET}")
             print("")

@@ -108,11 +108,12 @@ pub enum Expression {
     Attribute(Box<ExprNode>, Vec<u8>),
     Block(Block),
     If(Box<ExprNode>, Block, Block),
+    Fn(Fn),
 }
 
 #[derive(Debug)]
 pub struct Fn {
-    ident: Vec<u8>,
+    ident: Option<Vec<u8>>,
     pos_args_required: Vec<Vec<u8>>,
     pos_args_optional: Vec<(Vec<u8>, ExprNode)>,
     body: Block,
@@ -878,6 +879,13 @@ pub fn parse_expression(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                 data: Expression::If(Box::new(cond.conditional), cond.if_body, cond.else_body),
                 span: Span::start(),
             })
+        },
+        Token::Fn => {
+            let f = parse_function(tokens)?;
+            Ok(ExprNode {
+                data: Expression::Fn(f),
+                span: Span::start(),
+            })
         }
         _ => parse_logical_or(tokens),
     }
@@ -893,8 +901,13 @@ pub fn parse_ast(tokens: &mut TokenStream) -> Result<Ast, String> {
 
 pub fn parse_function(tokens: &mut TokenStream) -> Result<Fn, String> {
     tokens.consume(Token::Fn)?;
-    let ident = match tokens.pop()? {
-        Token::Identifier(ident) => ident.clone(),
+    let ident = match tokens.peek()? {
+        Token::Identifier(ident) => {
+            let ident = ident.clone();
+            tokens.advance()?;
+            Some(ident)
+        },
+        Token::LBracket => None,
         token => {
             return Err(
                 tokens.format_peek_err(&format!("Expected ident after fn, found {:?}", token))
@@ -3939,6 +3952,72 @@ pub fn compile_fn_body_inner(
     Ok(asm)
 }
 
+pub fn compile_fn_expression(
+    pos_args_required: &Vec<Vec<u8>>,
+    pos_args_optional: &Vec<(Vec<u8>, ExprNode)>,
+    body: &Block,
+) -> Result<Vec<(u8, Span)>, String> {
+    // This will be replaced with a relative jump to after the function
+    // declaration
+    let mut asm = vec![
+        (ByteCode::Jmp as u8, Span { start: 0, end: 1 }),
+        (0, Span { start: 0, end: 1 }),
+        (0, Span { start: 0, end: 1 }),
+    ];
+    asm.extend(
+        compile_fn_body_inner(
+            pos_args_required,
+            pos_args_optional,
+            body,
+        )?
+    );
+
+    // Fix the jump offset at the function declaration now that we know
+    // the size of the body
+    let pc_offset = asm.len() as u16;
+    asm[1].0 = (pc_offset >> 8) as u8;
+    asm[2].0 = (pc_offset & 0xff) as u8;
+
+    // Assign the value to the ident
+    let pc_offset = asm.len() as u16 - 3;
+    asm.push((ByteCode::CreateFn as u8, Span { start: 0, end: 1 }));
+    asm.push(((pc_offset >> 8) as u8, Span { start: 0, end: 1 }));
+    asm.push(((pc_offset & 0xff) as u8, Span { start: 0, end: 1 }));
+
+    Ok(asm)
+}
+
+pub fn compile_fn(func: &Fn) -> Result<Vec<(u8, Span)>, String> {
+    let ident = if let Some(ident) = &func.ident {
+        ident
+    } else {
+        return Err(format!("No ident for function declaration!"));
+    };
+
+    let mut asm = compile_fn_expression(
+        &func.pos_args_required,
+        &func.pos_args_optional,
+        &func.body,
+    )?;
+
+    asm.push((
+        ByteCode::VariableDeclaration as u8,
+        Span { start: 0, end: 1 },
+    ));
+    asm.push((
+        ident
+            .len()
+            .try_into()
+            .expect("Ident len should into u8"),
+        Span { start: 0, end: 1 },
+    ));
+    for b in ident.iter() {
+        asm.push((*b, Span { start: 0, end: 1 }));
+    }
+
+    Ok(asm)
+}
+
 pub fn compile_fn_body(func: &Fn) -> Result<Vec<(u8, Span)>, String> {
     compile_fn_body_inner(
         &func.pos_args_required,
@@ -4012,41 +4091,7 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
             Ok(expr_asm)
         }
         Statement::Fn(func) => {
-            // This will be replaced with a relative jump to after the function
-            // declaration
-            let mut asm = vec![
-                (ByteCode::Jmp as u8, Span { start: 0, end: 1 }),
-                (0, Span { start: 0, end: 1 }),
-                (0, Span { start: 0, end: 1 }),
-            ];
-            asm.extend(compile_fn_body(func)?);
-
-            // Fix the jump offset at the function declaration now that we know
-            // the size of the body
-            let pc_offset = asm.len() as u16;
-            asm[1].0 = (pc_offset >> 8) as u8;
-            asm[2].0 = (pc_offset & 0xff) as u8;
-
-            // Assign the value to the ident
-            let pc_offset = asm.len() as u16 - 3;
-            asm.push((ByteCode::CreateFn as u8, Span { start: 0, end: 1 }));
-            asm.push(((pc_offset >> 8) as u8, Span { start: 0, end: 1 }));
-            asm.push(((pc_offset & 0xff) as u8, Span { start: 0, end: 1 }));
-
-            asm.push((
-                ByteCode::VariableDeclaration as u8,
-                Span { start: 0, end: 1 },
-            ));
-            asm.push((
-                func.ident
-                    .len()
-                    .try_into()
-                    .expect("Ident len should into u8"),
-                Span { start: 0, end: 1 },
-            ));
-            for b in func.ident.iter() {
-                asm.push((*b, Span { start: 0, end: 1 }));
-            }
+            let mut asm = compile_fn(func)?;
 
             Ok(asm)
         }
@@ -4120,7 +4165,12 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
                 )
             );
             for method in methods {
-                method_defs.push((&method.ident, compile_fn_body(method)?));
+                let ident = if let Some(ident) = &method.ident {
+                    ident
+                } else {
+                    return Err(format!("Method does not have ident!"));
+                };
+                method_defs.push((&ident, compile_fn_body(method)?));
             }
 
             let mut jump_asm_idx = Vec::new();
@@ -4559,7 +4609,14 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
         Expression::Block(block) => compile_block(block, true),
         Expression::If(conditional, if_body, else_body) => {
             compile_if(conditional, if_body, else_body, true)
-        }
+        },
+        Expression::Fn(func) => {
+            compile_fn_expression(
+                &func.pos_args_required,
+                &func.pos_args_optional,
+                &func.body,
+            )
+        },
     }
 }
 
