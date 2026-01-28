@@ -197,6 +197,7 @@ pub enum Token {
     String(Vec<u8>),
     StringInterpolationStart,
     StringInterpolationEnd,
+    EOF,
 }
 
 impl Token {
@@ -306,7 +307,7 @@ impl TokenStream {
      */
     fn peek(&self) -> Result<&Token, String> {
         if self.is_empty() {
-            Err(self.format_peek_err("End of token stream"))
+            Ok(&Token::EOF)
         } else {
             Ok(&self.tokens[self.idx])
         }
@@ -314,7 +315,7 @@ impl TokenStream {
 
     fn peek_span(&self) -> Result<Span, String> {
         if self.is_empty() {
-            Err(self.format_peek_err("End of token stream"))
+            Ok(self.token_spans[self.token_spans.len()-1])
         } else {
             Ok(self.token_spans[self.idx])
         }
@@ -329,7 +330,7 @@ impl TokenStream {
             self.idx += 1;
             Ok(result)
         } else {
-            Err(self.format_peek_err("End of token stream"))
+            Ok(Token::EOF)
         }
     }
 
@@ -347,7 +348,9 @@ impl TokenStream {
     }
 
     fn advance(&mut self) -> Result<(), String> {
-        self.pop()?;
+        if self.pop()? == Token::EOF {
+            return Err(self.format_peek_err("End of token stream"));
+        }
         Ok(())
     }
 
@@ -669,7 +672,7 @@ pub fn parse_comparison(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                 expr = Node {
                     data: Expression::BinaryOp(BinaryOp::GT(
                         Box::new(expr),
-                        Box::new(parse_expression(tokens)?),
+                        Box::new(parse_term(tokens)?),
                     )),
                     span: span,
                 };
@@ -679,7 +682,7 @@ pub fn parse_comparison(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                 expr = Node {
                     data: Expression::BinaryOp(BinaryOp::GTE(
                         Box::new(expr),
-                        Box::new(parse_expression(tokens)?),
+                        Box::new(parse_term(tokens)?),
                     )),
                     span: span,
                 };
@@ -689,7 +692,7 @@ pub fn parse_comparison(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                 expr = Node {
                     data: Expression::BinaryOp(BinaryOp::LT(
                         Box::new(expr),
-                        Box::new(parse_expression(tokens)?),
+                        Box::new(parse_term(tokens)?),
                     )),
                     span: span,
                 };
@@ -699,7 +702,7 @@ pub fn parse_comparison(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                 expr = Node {
                     data: Expression::BinaryOp(BinaryOp::LTE(
                         Box::new(expr),
-                        Box::new(parse_expression(tokens)?),
+                        Box::new(parse_term(tokens)?),
                     )),
                     span: span,
                 };
@@ -709,7 +712,7 @@ pub fn parse_comparison(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                 expr = Node {
                     data: Expression::BinaryOp(BinaryOp::In(
                         Box::new(expr),
-                        Box::new(parse_expression(tokens)?),
+                        Box::new(parse_term(tokens)?),
                     )),
                     span: span,
                 };
@@ -1555,7 +1558,7 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
                     text = &text[1..];
                     tokens.push(Token::GTE);
                 }
-                _ => tokens.push(Token::LT),
+                _ => tokens.push(Token::GT),
             },
             b'<' => match text[1] {
                 b'=' => {
@@ -2962,6 +2965,22 @@ fn shim_panic(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimVal
     Err(out)
 }
 
+//enum ShimSortKey {
+//    Bytes(&[u8]),
+//    Int(i32),
+//    Float(f32),
+//}
+
+fn shim_list_sort(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let obj = unpacker.required(b"obj")?;
+    let lst = obj.list(interpreter)?;
+    let key = unpacker.optional(b"key");
+    unpacker.end()?;
+
+    todo!();
+}
+
 fn shim_list_len(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let obj = unpacker.required(b"obj")?;
@@ -2969,6 +2988,18 @@ fn shim_list_len(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shim
     unpacker.end()?;
 
     Ok(ShimValue::Integer(lst.len() as i32))
+}
+
+fn shim_list_append(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let obj = unpacker.required(b"obj")?;
+    let lst = obj.list_mut(interpreter)?;
+    let item = unpacker.required(b"item")?;
+    unpacker.end()?;
+
+    lst.push(&mut interpreter.mem, item);
+
+    Ok(ShimValue::None)
 }
 
 fn shim_list_iter(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
@@ -3434,6 +3465,7 @@ impl ShimValue {
 
     fn is_truthy(&self, interpreter: &mut Interpreter) -> Result<bool, String> {
         match self {
+            ShimValue::None => Ok(false),
             ShimValue::Integer(i) => Ok(*i != 0),
             ShimValue::Float(f) => Ok(*f != 0.0),
             ShimValue::Bool(false) => Ok(false),
@@ -3537,7 +3569,7 @@ impl ShimValue {
         }
     }
 
-    fn gt(&self, _interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
+    fn gt(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
         match (self, other) {
             (ShimValue::Bool(a), ShimValue::Bool(b)) => {
                 Ok(ShimValue::Bool(*a == true && *b == false))
@@ -3547,11 +3579,14 @@ impl ShimValue {
             (ShimValue::Integer(a), ShimValue::Float(b)) => Ok(ShimValue::Bool((*a as f32) > *b)),
             (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(*a > (*b as f32))),
             (ShimValue::None, ShimValue::None) => Ok(ShimValue::Bool(false)),
+            (ShimValue::String(_), ShimValue::String(_)) => {
+                Ok(ShimValue::Bool(self.string(interpreter)? > other.string(interpreter)?))
+            },
             (a, b) => Err(format!("Can't GT {:?} and {:?}", a, b)),
         }
     }
 
-    fn gte(&self, _interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
+    fn gte(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
         match (self, other) {
             (ShimValue::Bool(a), ShimValue::Bool(b)) => Ok(ShimValue::Bool(a == b)),
             (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Bool(a >= b)),
@@ -3559,11 +3594,14 @@ impl ShimValue {
             (ShimValue::Integer(a), ShimValue::Float(b)) => Ok(ShimValue::Bool((*a as f32) >= *b)),
             (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(*a >= (*b as f32))),
             (ShimValue::None, ShimValue::None) => Ok(ShimValue::Bool(true)),
+            (ShimValue::String(_), ShimValue::String(_)) => {
+                Ok(ShimValue::Bool(self.string(interpreter)? >= other.string(interpreter)?))
+            },
             (a, b) => Err(format!("Can't GTE {:?} and {:?}", a, b)),
         }
     }
 
-    fn lt(&self, _interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
+    fn lt(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
         match (self, other) {
             (ShimValue::Bool(a), ShimValue::Bool(b)) => {
                 Ok(ShimValue::Bool(*a == false && *b == true))
@@ -3572,12 +3610,15 @@ impl ShimValue {
             (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(a < b)),
             (ShimValue::Integer(a), ShimValue::Float(b)) => Ok(ShimValue::Bool((*a as f32) < *b)),
             (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(*a < (*b as f32))),
+            (ShimValue::String(_), ShimValue::String(_)) => {
+                Ok(ShimValue::Bool(self.string(interpreter)? < other.string(interpreter)?))
+            },
             (ShimValue::None, ShimValue::None) => Ok(ShimValue::Bool(false)),
             (a, b) => Err(format!("Can't LT {:?} and {:?}", a, b)),
         }
     }
 
-    fn lte(&self, _interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
+    fn lte(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
         match (self, other) {
             (ShimValue::Bool(a), ShimValue::Bool(b)) => Ok(ShimValue::Bool(a == b)),
             (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Bool(a <= b)),
@@ -3585,6 +3626,9 @@ impl ShimValue {
             (ShimValue::Integer(a), ShimValue::Float(b)) => Ok(ShimValue::Bool((*a as f32) <= *b)),
             (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(*a <= (*b as f32))),
             (ShimValue::None, ShimValue::None) => Ok(ShimValue::Bool(true)),
+            (ShimValue::String(_), ShimValue::String(_)) => {
+                Ok(ShimValue::Bool(self.string(interpreter)? <= other.string(interpreter)?))
+            },
             (a, b) => Err(format!("Can't LTE {:?} and {:?}", a, b)),
         }
     }
@@ -3684,6 +3728,8 @@ impl ShimValue {
                 let func = match ident {
                     b"len" => shim_list_len,
                     b"iter" => shim_list_iter,
+                    b"sort" => shim_list_sort,
+                    b"append" => shim_list_append,
                     _ => return Err(format!("No ident {:?} on list", debug_u8s(ident))),
                 };
                 Ok(interpreter.mem.alloc_bound_native_fn(self, func))
@@ -5332,14 +5378,20 @@ impl Interpreter {
                     let index = stack.pop().expect("index val");
                     let obj = stack.pop().expect("index obj");
 
-                    stack.push(obj.index(self, &index)?);
+                    let val = obj.index(self, &index).map_err(|err_str| {
+                        format_script_err(program.spans[pc], &program.script, &err_str)
+                    })?;
+
+                    stack.push(val);
                 }
                 val if val == ByteCode::SetIndex as u8 => {
                     let val = stack.pop().expect("index assigned val");
                     let index = stack.pop().expect("index index");
                     let obj = stack.pop().expect("index obj");
 
-                    obj.set_index(self, &index, &val)?;
+                    obj.set_index(self, &index, &val).map_err(|err_str| {
+                        format_script_err(program.spans[pc], &program.script, &err_str)
+                    })?;
                 }
                 val if val == ByteCode::Call as u8 => {
                     let arg_count = bytes[pc + 1];
@@ -5555,6 +5607,16 @@ pub fn print_asm(bytes: &[u8]) {
             eprint!("assignment");
         } else if *b == ByteCode::Call as u8 {
             eprint!("call");
+        } else if *b == ByteCode::Not as u8 {
+            eprint!("Not");
+        } else if *b == ByteCode::GT as u8 {
+            eprint!("GT");
+        } else if *b == ByteCode::GTE as u8 {
+            eprint!("GTE");
+        } else if *b == ByteCode::LT as u8 {
+            eprint!("LT");
+        } else if *b == ByteCode::LTE as u8 {
+            eprint!("LTE");
         } else if *b == ByteCode::Index as u8 {
             eprint!("index");
         } else if *b == ByteCode::Add as u8 {
