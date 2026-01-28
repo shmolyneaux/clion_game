@@ -6,29 +6,28 @@
     - index
     - insert
     - pop
-    - sort
-    - sorted
+    - Sorting
+        - sort
+        - sorted
+        - Kind of needs anonymous functions even if not full closures?
     - reverse
     - reversed
-- Dicts
-    - Pop
-- Custom hashing?
-    - Fairly big bump in complexity, with potentially limited usefullness for a game
-    - Need to be able to call the `hash` method on a struct from the `get` method of the dict
-    - Currently scripts can call into native code, but native code can't call into scripts,
-      which seems like a prereq
+- Dict methods
+    - Iter values
+    - Iter keys
+    - Iter keys+values
+- Tuple
+- Tuple unpacking
+- Anonymous functions (non-closures?)
+- Native range type
 - String methods
 - `*args`, and `**kwargs`
 - Numeric literals with underscores
-- Format strings
 - Integer division
-- Operator overloading
 - Type annotations
 - Runtime type checking
 - Static type checking
 - Add value type for strings less than 7 bytes
-- Remove use of `Vec` for strings
-- Remove use of `Vec` for dicts
 - Remove use of Box for native values
     - It can be the type id (which gives us the size), followed by that number of bytes
 - Debugger
