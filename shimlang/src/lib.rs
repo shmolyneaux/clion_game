@@ -2950,63 +2950,32 @@ fn shim_panic(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimVal
 }
 
 fn shim_list_len(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
-    if args.len() != 1 {
-        return Err(format!("No args expected for list len"));
-    }
-
-    let lst = args.args[0].list(interpreter)?;
+    let mut unpacker = ArgUnpacker::new(args);
+    let obj = unpacker.required(b"obj")?;
+    let lst = obj.list(interpreter)?;
+    unpacker.end()?;
 
     Ok(ShimValue::Integer(lst.len() as i32))
 }
 
 fn shim_list_iter(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
-    if args.len() != 1 {
-        return Err(format!("No args expected for list iter"));
-    }
+    let mut unpacker = ArgUnpacker::new(args);
+    let obj = unpacker.required(b"obj")?;
+    unpacker.end()?;
 
-    let slf = args.args[0];
-
-    Ok(interpreter.mem.alloc_native(ListIterator {lst: slf, idx: 0}))
+    Ok(interpreter.mem.alloc_native(ListIterator {lst: obj, idx: 0}))
 }
 
 fn shim_dict_pop(
     interpreter: &mut Interpreter,
     args: &ArgBundle,
 ) -> Result<ShimValue, String> {
-    if args.len() != 2 && args.len() != 3 {
-        return Err(format!("Expected 2/3 args for dict pop, got {}", args.len()));
-    }
-
-    let dict: &mut NewShimDict = if let ShimValue::Dict(position) = args.args[0] {
-        unsafe {
-            let ptr: &mut NewShimDict =
-                std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
-            ptr
-        }
-    } else {
-        return Err(format!("Can't set on non-dict {:?}", args.args[0]));
-    };
-
-    let key = if args.args.len() >=2 {
-        args.args[1]
-    } else {
-        todo!("Get key from kwargs");
-    };
-
-    let default = if args.len() == 2 {
-        None
-    } else if args.args.len() == 3 {
-        Some(args.args[2])
-    } else {
-        let mut default = None;
-        for (key, val) in args.kwargs.iter() {
-            if key == b"default" {
-                default = Some(*val);
-                break
-            }
-        }
-        default
-    };
+    let mut unpacker = ArgUnpacker::new(args);
+    let binding = unpacker.required(b"obj")?;
+    let dict = binding.dict_mut(interpreter)?;
+    let key = unpacker.required(b"key")?;
+    let default = unpacker.optional(b"default");
+    unpacker.end()?;
 
     dict.pop(interpreter, key, default)
 }
@@ -3015,23 +2984,14 @@ fn shim_dict_index_set(
     interpreter: &mut Interpreter,
     args: &ArgBundle,
 ) -> Result<ShimValue, String> {
-    if args.len() != 3 {
-        return Err(format!("Expected 3 args for dict set"));
-    }
+    let mut unpacker = ArgUnpacker::new(args);
+    let binding = unpacker.required(b"obj")?;
+    let dict = binding.dict_mut(interpreter)?;
+    let key = unpacker.required(b"key")?;
+    let value = unpacker.required(b"value")?;
+    unpacker.end()?;
 
-    let dict: &mut NewShimDict = if let ShimValue::Dict(position) = args.args[0] {
-        unsafe {
-            let ptr: &mut NewShimDict =
-                std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
-            ptr
-        }
-    } else {
-        return Err(format!("Can't set on non-dict {:?}", args.args[0]));
-    };
-
-    let key = args.args[1];
-    let val = args.args[2];
-    dict.set(interpreter, key, val)?;
+    dict.set(interpreter, key, value)?;
 
     Ok(ShimValue::None)
 }
@@ -3040,75 +3000,47 @@ fn shim_dict_index_get(
     interpreter: &mut Interpreter,
     args: &ArgBundle,
 ) -> Result<ShimValue, String> {
-    if args.len() != 2 {
-        return Err(format!("Expected 2 args for dict get"));
-    }
+    let mut unpacker = ArgUnpacker::new(args);
+    let binding = unpacker.required(b"obj")?;
+    let dict = binding.dict_mut(interpreter)?;
+    let key = unpacker.required(b"key")?;
+    unpacker.end()?;
 
-    let dict: &mut NewShimDict = if let ShimValue::Dict(position) = args.args[0] {
-        unsafe {
-            let ptr: &mut NewShimDict =
-                std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
-            ptr
-        }
-    } else {
-        return Err(format!("Can't get non-dict {:?}", args.args[0]));
-    };
-
-    dict.get(interpreter, args.args[1])
+    dict.get(interpreter, key)
 }
 
 fn shim_dict_index_has(
     interpreter: &mut Interpreter,
     args: &ArgBundle,
 ) -> Result<ShimValue, String> {
-    if args.len() != 2 {
-        return Err(format!("Expected 2 args for dict has"));
-    }
+    let mut unpacker = ArgUnpacker::new(args);
+    let binding = unpacker.required(b"obj")?;
+    let dict = binding.dict_mut(interpreter)?;
+    let key = unpacker.required(b"key")?;
+    unpacker.end()?;
 
-    let dict: &mut NewShimDict = if let ShimValue::Dict(position) = args.args[0] {
-        unsafe {
-            let ptr: &mut NewShimDict =
-                std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
-            ptr
-        }
-    } else {
-        return Err(format!("Can't get non-dict {:?}", args.args[0]));
-    };
-
-    if let Ok(_) = dict.get(interpreter, args.args[1]) {
-        return Ok(ShimValue::Bool(true));
-    } else {
-        return Ok(ShimValue::Bool(false));
-    }
+    Ok(ShimValue::Bool(dict.get(interpreter, key).is_ok()))
 }
 
 fn shim_dict_len(
     interpreter: &mut Interpreter,
     args: &ArgBundle,
 ) -> Result<ShimValue, String> {
-    if args.args.len() != 1 {
-        return Err(format!("Expected 0 args for dict len"));
-    }
+    let mut unpacker = ArgUnpacker::new(args);
+    let binding = unpacker.required(b"obj")?;
+    let dict = binding.dict_mut(interpreter)?;
+    unpacker.end()?;
 
-    Ok(ShimValue::Integer(args.args[0].dict_mut(interpreter)?.len() as i32))
+    Ok(ShimValue::Integer(dict.len() as i32))
 }
 
 fn shim_str_len(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
-    if args.len() != 1 {
-        return Err(format!("No args expected for str len"));
-    }
+    let mut unpacker = ArgUnpacker::new(args);
+    let binding = unpacker.required(b"obj")?;
+    let s = binding.string(interpreter)?;
+    unpacker.end()?;
 
-    let lst = if let ShimValue::String(position) = args.args[0] {
-        unsafe {
-            let ptr: *mut Vec<u8> =
-                std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
-            ptr
-        }
-    } else {
-        return Err(format!("Can't get str len on non-str {:?}", args.args[0]));
-    };
-
-    unsafe { Ok(ShimValue::Integer((*lst).len() as i32)) }
+    Ok(ShimValue::Integer(s.len() as i32))
 }
 
 #[derive(Debug)]
@@ -3132,6 +3064,48 @@ impl ArgBundle {
     fn clear(&mut self) {
         self.args.clear();
         self.kwargs.clear();
+    }
+}
+
+struct ArgUnpacker<'a> {
+    bundle: &'a ArgBundle,
+    pos: usize,
+    kwargs_consumed: usize,
+}
+
+impl<'a> ArgUnpacker<'a> {
+    fn new(bundle: &'a ArgBundle) -> Self {
+        Self { bundle, pos: 0, kwargs_consumed: 0 }
+    }
+
+    fn required(&mut self, name: &[u8]) -> Result<ShimValue, String> {
+        self.optional(name).ok_or_else(|| format!("Missing required argument: '{}'", debug_u8s(name)))
+    }
+
+    fn optional(&mut self, name: &[u8]) -> Option<ShimValue> {
+        for (ident, arg) in self.bundle.kwargs.iter() {
+            if ident == name {
+                self.kwargs_consumed += 1;
+                return Some(*arg);
+            }
+        }
+        // Return next positional argument
+        match self.bundle.args.get(self.pos) {
+            Some(val) => {
+                self.pos += 1;
+                Some(*val)
+            },
+            None => None,
+        }
+    }
+
+    fn end(&self) -> Result<(), String> {
+        let consumed = self.pos + self.kwargs_consumed;
+        if self.bundle.len() != consumed {
+            Err(format!("Got {} arguments, but only used {}", self.bundle.len(), consumed))
+        } else {
+            Ok(())
+        }
     }
 }
 
