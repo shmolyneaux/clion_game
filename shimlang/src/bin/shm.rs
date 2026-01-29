@@ -4,6 +4,7 @@ use std::io::Read;
 use std::process::ExitCode;
 
 use shimlang;
+use shimlang::*;
 
 #[derive(Debug, PartialEq)]
 enum Command {
@@ -99,18 +100,18 @@ fn run() -> Result<(), String> {
                     }
                 };
                 let program = shimlang::compile_ast(&ast)?;
-                let mut interpreter = shimlang::Interpreter::default();
-                match interpreter.execute_bytecode(&program) {
-                    Ok(()) => (),
+                let mut interpreter = shimlang::Interpreter::create(&Config::default(), program);
+                match interpreter.execute_bytecode(0) {
+                    Ok((_ret, env)) => {
+                        if args.gc {
+                            interpreter.gc(&env);
+                        }
+                    },
                     Err(msg) => {
                         eprintln!("{msg}");
                         return Err((format!("")).into());
                     }
                 };
-
-                if args.gc {
-                    interpreter.gc();
-                }
             }
             Command::Parse => {
                 match shimlang::ast_from_text(&contents) {

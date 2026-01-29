@@ -8,6 +8,7 @@ use std::ops::{Add, Sub};
 use std::ops::{AddAssign, SubAssign};
 use std::any::{Any, type_name, type_name_of_val};
 use std::mem::size_of;
+use std::rc::Rc;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Span {
@@ -1882,6 +1883,17 @@ impl MMU {
         ShimValue::Dict(position)
     }
 
+    fn alloc_list(&mut self) -> ShimValue {
+        let word_count = Word((std::mem::size_of::<ShimList>() as u32).div_ceil(8).into());
+        let position = alloc!(self, word_count, "List");
+        unsafe {
+            let ptr: *mut ShimList =
+                std::mem::transmute(&mut self.mem[usize::from(position.0)]);
+            ptr.write(ShimList::new());
+        }
+        ShimValue::List(position)
+    }
+
     fn alloc_native<T: ShimNative>(&mut self, val: T) -> ShimValue {
         assert!(std::mem::size_of::<Box<dyn ShimNative>>() == 16);
         let word_count = Word(2.into());
@@ -2085,13 +2097,6 @@ impl Environment {
             }
         }
     }
-}
-
-// TODO: uncomment #[derive(Facet)]
-pub struct Interpreter {
-    pub mem: MMU,
-    pub source: HashMap<String, String>,
-    pub env: Environment,
 }
 
 // TODO: If we do NaN-boxing we could have f64 (rather than f32) for "free"
@@ -2463,7 +2468,7 @@ impl NewShimDict {
         let alloc_word_count = Word((self.capacity() * 3).into());
         self.entries = alloc!(interpreter.mem, alloc_word_count, "Dict entry array").0;
 
-        let mut new_entries = self.entries_mut(interpreter);
+        let new_entries = self.entries_mut(interpreter);
 
         let mut write_idx = 0;
         for read_idx in 0..old_entries.len() {
@@ -2798,6 +2803,10 @@ struct ShimList {
     data: u24,
 }
 
+const _: () = {
+    assert!(std::mem::size_of::<ShimList>() == 8);
+};
+
 impl ShimList {
     fn new() -> Self {
         Self {
@@ -2979,6 +2988,38 @@ fn shim_list_sort(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shi
     unpacker.end()?;
 
     todo!();
+}
+
+fn shim_list_map(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let obj = unpacker.required(b"obj")?;
+    let lst = obj.list(interpreter)?;
+    let key = unpacker.required(b"key")?;
+    unpacker.end()?;
+
+    let new_lst_val = interpreter.mem.alloc_list();
+    let new_lst = new_lst_val.list_mut(interpreter)?;
+
+    for idx in 0..lst.len() {
+        let input = lst.get(&interpreter.mem, idx as isize)?;
+        let mut args = ArgBundle::new();
+        args.args.push(input);
+        let output = match key.call(interpreter, &mut args)? {
+            CallResult::ReturnValue(val) => {
+                val
+            },
+            CallResult::PC(pc) => {
+                let (val, _env) = interpreter.execute_bytecode_extended(
+                    pc as usize,
+                    args
+                )?;
+                val
+            },
+        };
+        new_lst.push(&mut interpreter.mem, output);
+    }
+
+    Ok(new_lst_val)
 }
 
 fn shim_list_len(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
@@ -3508,6 +3549,8 @@ impl ShimValue {
                 Ok(CallResult::ReturnValue(ShimValue::String(position)))
             }
             (ShimValue::Struct(_), b) => {
+                // TODO: why do we need to take in `pending_args` when we could
+                // construct a new ArgBundle?
                 pending_args.args.clear();
                 pending_args.args.push(*b);
                 self.get_attr(interpreter, b"add")?.call(interpreter, pending_args)
@@ -3726,6 +3769,7 @@ impl ShimValue {
             }
             ShimValue::List(_) => {
                 let func = match ident {
+                    b"map" => shim_list_map,
                     b"len" => shim_list_len,
                     b"iter" => shim_list_iter,
                     b"sort" => shim_list_sort,
@@ -4137,9 +4181,7 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
             Ok(expr_asm)
         }
         Statement::Fn(func) => {
-            let mut asm = compile_fn(func)?;
-
-            Ok(asm)
+            compile_fn(func)
         }
         Statement::Struct(Struct {
             ident,
@@ -4349,6 +4391,9 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
             asm[loop_start_idx + 2].0 = loop_end[1];
 
             asm.push((ByteCode::LoopEnd as u8, Span { start: 0, end: 0 }));
+
+            // Remove the `iter` method from the stack
+            asm.push((ByteCode::Pop as u8, Span { start: 0, end: 0 }));
 
             Ok(asm)
         }
@@ -4876,6 +4921,13 @@ impl<'a> GC<'a> {
     }
 }
 
+// TODO: uncomment #[derive(Facet)]
+pub struct Interpreter {
+    pub mem: MMU,
+    pub source: HashMap<String, String>,
+    pub program: Rc<Program>,
+}
+
 impl Interpreter {
     pub fn print_mem(&self) {
         let mut count = 0;
@@ -4893,8 +4945,8 @@ impl Interpreter {
         }
     }
 
-    pub fn print_env(&self) {
-        for (idx, scope) in self.env.env_chain.iter().enumerate() {
+    pub fn print_env(&self, env: &Environment) {
+        for (idx, scope) in env.env_chain.iter().enumerate() {
             println!("Scope {idx}");
             for (ident, bytes) in scope.iter() {
                 let val = unsafe { ShimValue::from_u64(*bytes) };
@@ -4938,12 +4990,12 @@ impl Interpreter {
         }
     }
 
-    pub fn gc(&mut self) {
+    pub fn gc(&mut self, env: &Environment) {
         self.print_mem();
-        self.print_env();
+        self.print_env(env);
         let mut gc = GC::new(&mut self.mem);
         let mut roots: Vec<ShimValue> = Vec::new();
-        for scope in self.env.env_chain.iter() {
+        for scope in env.env_chain.iter() {
             for (_ident, bytes) in scope.iter() {
                 roots.push(unsafe { ShimValue::from_u64(*bytes) });
             }
@@ -4952,8 +5004,33 @@ impl Interpreter {
         gc.sweep();
     }
 
-    pub fn create(config: &Config) -> Self {
-        let mut mmu = MMU::with_capacity(Word((config.memory_space_bytes / 8).into()));
+    pub fn create(config: &Config, program: Program) -> Self {
+        let mmu = MMU::with_capacity(Word((config.memory_space_bytes / 8).into()));
+
+        Self {
+            mem: mmu,
+            source: HashMap::new(),
+            program: Rc::new(program),
+        }
+    }
+
+    // TODO: Pass in mutable Environment?
+    pub fn execute_bytecode(&mut self, mut pc: usize) -> Result<(ShimValue, Environment), String> {
+        self.execute_bytecode_extended(
+            pc,
+            ArgBundle::new(),
+        )
+    }
+
+    pub fn execute_bytecode_extended(
+        &mut self,
+        mut pc: usize,
+        mut pending_args: ArgBundle,
+    ) -> Result<(ShimValue, Environment), String> {
+        // These are values that are operated on. Expressions push and pop to
+        // this stack, return values go on this stack etc.
+        let mut stack: Vec<ShimValue> = Vec::new();
+
         let mut env = Environment::new();
 
         let builtins: &[(&[u8], Box<NativeFn>)] = &[
@@ -5004,28 +5081,14 @@ impl Interpreter {
         ];
 
         for (name, func) in builtins {
-            let position = alloc!(mmu, Word(1.into()), &format!("builtin func {}", debug_u8s(name)));
+            let position = alloc!(self.mem, Word(1.into()), &format!("builtin func {}", debug_u8s(name)));
             unsafe {
-                let ptr: *mut NativeFn = std::mem::transmute(&mut mmu.mem[usize::from(position.0)]);
+                let ptr: *mut NativeFn = std::mem::transmute(&mut self.mem.mem[usize::from(position.0)]);
                 ptr.write(**func);
             }
 
             env.insert_new(name.to_vec(), ShimValue::NativeFn(position));
         }
-
-        Self {
-            mem: mmu,
-            source: HashMap::new(),
-            env,
-        }
-    }
-
-    pub fn execute_bytecode(&mut self, program: &Program) -> Result<(), String> {
-        let mut pc = 0;
-
-        // These are values that are operated on. Expressions push and pop to
-        // this stack, return values go on this stack etc.
-        let mut stack: Vec<ShimValue> = Vec::new();
 
         // This is the (PC, loop_info, scope_count, fn_optional_param_names,
         // fn_optional_param_name_idx) call stack
@@ -5046,11 +5109,10 @@ impl Interpreter {
         // current function
         let mut loop_info: Vec<(usize, usize, usize)> = Vec::new();
 
-        let mut pending_args: ArgBundle = ArgBundle::new();
         let mut fn_optional_param_name_idx = 0;
         let mut fn_optional_param_names: Vec<Ident> = Vec::new();
 
-        let bytes = &program.bytecode;
+        let bytes = &self.program.clone().bytecode;
         while pc < bytes.len() {
             match bytes[pc] {
                 val if val == ByteCode::Pop as u8 => {
@@ -5061,19 +5123,19 @@ impl Interpreter {
                     let a = stack.pop().expect("Operand for add");
 
                     match a.add(self, &b, &mut pending_args).map_err(|err_str| {
-                        format_script_err(program.spans[pc], &program.script, &err_str)
+                        format_script_err(self.program.spans[pc], &self.program.script, &err_str)
                     })? {
                         CallResult::ReturnValue(res) => stack.push(res),
                         CallResult::PC(new_pc) => {
                             stack_frame.push((
                                 pc + 1,
                                 loop_info.clone(),
-                                self.env.env_chain.len(),
+                                env.env_chain.len(),
                                 fn_optional_param_names.clone(),
                                 fn_optional_param_name_idx,
                             ));
                             loop_info = Vec::new();
-                            self.env.push_scope();
+                            env.push_scope();
                             pc = new_pc as usize;
                             continue;
                         }
@@ -5149,7 +5211,7 @@ impl Interpreter {
                 }
                 val if val == ByteCode::LoopStart as u8 => {
                     let loop_end = pc + (((bytes[pc + 1] as usize) << 8) + bytes[pc + 2] as usize);
-                    loop_info.push((pc + 3, loop_end, self.env.env_chain.len()));
+                    loop_info.push((pc + 3, loop_end, env.env_chain.len()));
                     pc += 2;
                 }
                 val if val == ByteCode::LoopEnd as u8 => {
@@ -5158,8 +5220,8 @@ impl Interpreter {
                 val if val == ByteCode::Break as u8 => {
                     let (_, end_pc, scope_count) =
                         loop_info.last().expect("break should have loop info");
-                    while self.env.env_chain.len() > *scope_count {
-                        self.env.pop_scope().unwrap();
+                    while env.env_chain.len() > *scope_count {
+                        env.pop_scope().unwrap();
                     }
                     pc = *end_pc;
                     continue;
@@ -5167,8 +5229,8 @@ impl Interpreter {
                 val if val == ByteCode::Continue as u8 => {
                     let (start_pc, _, scope_count) =
                         loop_info.last().expect("continue should have loop info");
-                    while self.env.env_chain.len() > *scope_count {
-                        self.env.pop_scope().unwrap();
+                    while env.env_chain.len() > *scope_count {
+                        env.pop_scope().unwrap();
                     }
                     pc = *start_pc;
                     continue;
@@ -5179,8 +5241,6 @@ impl Interpreter {
 
                     let mut pos_arg_idx = 0;
 
-                    // TODO: these need to be part of the stack frame since a
-                    // default value can call into another function
                     fn_optional_param_names.clear();
                     fn_optional_param_name_idx = 0;
 
@@ -5205,7 +5265,7 @@ impl Interpreter {
                         }
                         if let Some(idx) = found_idx {
                             let (_ident, val) = pending_args.kwargs.remove(idx);
-                            self.env.insert_new(param_name.to_vec(), val);
+                            env.insert_new(param_name.to_vec(), val);
                             set_arg = true;
                         }
 
@@ -5222,15 +5282,15 @@ impl Interpreter {
                                 // enough and we need to exit
                                 if param_idx < required_arg_count {
                                     return Err(format_script_err(
-                                        program.spans[stack_frame[stack_frame.len() - 1].0 - 3],
-                                        &program.script,
+                                        self.program.spans[stack_frame[stack_frame.len() - 1].0 - 3],
+                                        &self.program.script,
                                         &format!("Not enough positional args, arg_count: {}, kwarg_count: {}", pending_args.args.len(), pending_args.kwargs.len()),
                                     ));
                                 }
 
                                 ShimValue::Uninitialized
                             };
-                            self.env.insert_new(param_name.to_vec(), val);
+                            env.insert_new(param_name.to_vec(), val);
                         }
 
                         idx += 1 + len as usize;
@@ -5238,8 +5298,8 @@ impl Interpreter {
                     if pos_arg_idx != pending_args.args.len() {
                         let remaining = pending_args.args.len() - pos_arg_idx;
                         return Err(format_script_err(
-                            program.spans[stack_frame[stack_frame.len() - 1].0 - 3],
-                            &program.script,
+                            self.program.spans[stack_frame[stack_frame.len() - 1].0 - 3],
+                            &self.program.script,
                             &format!("Too many positional args, {} remaining", remaining),
                         ));
                     }
@@ -5250,8 +5310,8 @@ impl Interpreter {
                             msg.push_str(debug_u8s(ident));
                         }
                         return Err(format_script_err(
-                            program.spans[stack_frame[stack_frame.len() - 1].0 - 3],
-                            &program.script,
+                            self.program.spans[stack_frame[stack_frame.len() - 1].0 - 3],
+                            &self.program.script,
                             &msg,
                         ));
                     }
@@ -5262,7 +5322,7 @@ impl Interpreter {
                     let optional_param_name = &fn_optional_param_names[fn_optional_param_name_idx];
                     fn_optional_param_name_idx += 1;
 
-                    match self.env.get(optional_param_name) {
+                    match env.get(optional_param_name) {
                         Some(ShimValue::Uninitialized) => (),
                         Some(_) => {
                             let new_pc =
@@ -5281,7 +5341,7 @@ impl Interpreter {
                 val if val == ByteCode::AssignArg as u8 => {
                     let arg_num = bytes[pc + 1] as usize;
                     let optional_param_name = &fn_optional_param_names[arg_num];
-                    self.env.update(optional_param_name, stack.pop().unwrap())?;
+                    env.update(optional_param_name, stack.pop().unwrap())?;
                     pc += 1;
                 }
                 val if val == ByteCode::LiteralShimValue as u8 => {
@@ -5309,7 +5369,7 @@ impl Interpreter {
                     let val = stack.pop().expect("Value for declaration");
                     let ident_len = bytes[pc + 1] as usize;
                     let ident = &bytes[pc + 2..pc + 2 + ident_len as usize];
-                    self.env.insert_new(ident.to_vec(), val);
+                    env.insert_new(ident.to_vec(), val);
                     pc += 1 + ident_len;
                 }
                 val if val == ByteCode::Assignment as u8 => {
@@ -5317,26 +5377,26 @@ impl Interpreter {
                     let ident_len = bytes[pc + 1] as usize;
                     let ident = &bytes[pc + 2..pc + 2 + ident_len as usize];
 
-                    if !self.env.contains_key(ident) {
+                    if !env.contains_key(ident) {
                         return Err(format_script_err(
-                            program.spans[pc],
-                            &program.script,
+                            self.program.spans[pc],
+                            &self.program.script,
                             &format!("Identifier {:?} not found", ident),
                         ));
                     }
-                    self.env.update(ident, val)?;
+                    env.update(ident, val)?;
 
                     pc += 1 + ident_len;
                 }
                 val if val == ByteCode::VariableLoad as u8 => {
                     let ident_len = bytes[pc + 1] as usize;
                     let ident = &bytes[pc + 2..pc + 2 + ident_len as usize];
-                    if let Some(value) = self.env.get(ident) {
+                    if let Some(value) = env.get(ident) {
                         stack.push(value);
                     } else {
                         return Err(format_script_err(
-                            program.spans[pc],
-                            &program.script,
+                            self.program.spans[pc],
+                            &self.program.script,
                             &format!("Unknown identifier {:?}", debug_u8s(ident)),
                         ));
                     }
@@ -5351,8 +5411,8 @@ impl Interpreter {
                     let res = match obj.get_attr(self, ident) {
                         Ok(val) => val,
                         Err(msg) => return Err(format_script_err(
-                            program.spans[pc],
-                            &program.script,
+                            self.program.spans[pc],
+                            &self.program.script,
                             &msg,
                         )),
                     };
@@ -5369,7 +5429,7 @@ impl Interpreter {
                     let val = stack.pop().expect("val to assign");
                     let obj = stack.pop().expect("obj to set");
                     obj.set_attr(self, ident, val).map_err(|err_str| {
-                        format_script_err(program.spans[pc], &program.script, &err_str)
+                        format_script_err(self.program.spans[pc], &self.program.script, &err_str)
                     })?;
 
                     pc += 1 + ident_len;
@@ -5379,7 +5439,7 @@ impl Interpreter {
                     let obj = stack.pop().expect("index obj");
 
                     let val = obj.index(self, &index).map_err(|err_str| {
-                        format_script_err(program.spans[pc], &program.script, &err_str)
+                        format_script_err(self.program.spans[pc], &self.program.script, &err_str)
                     })?;
 
                     stack.push(val);
@@ -5390,7 +5450,7 @@ impl Interpreter {
                     let obj = stack.pop().expect("index obj");
 
                     obj.set_index(self, &index, &val).map_err(|err_str| {
-                        format_script_err(program.spans[pc], &program.script, &err_str)
+                        format_script_err(self.program.spans[pc], &self.program.script, &err_str)
                     })?;
                 }
                 val if val == ByteCode::Call as u8 => {
@@ -5421,19 +5481,19 @@ impl Interpreter {
                     let callable = stack.pop().expect("callable not on stack");
 
                     match callable.call(self, &mut pending_args).map_err(|err_str| {
-                        format_script_err(program.spans[pc], &program.script, &err_str)
+                        format_script_err(self.program.spans[pc], &self.program.script, &err_str)
                     })? {
                         CallResult::ReturnValue(res) => stack.push(res),
                         CallResult::PC(new_pc) => {
                             stack_frame.push((
                                 pc + 3,
                                 loop_info.clone(),
-                                self.env.env_chain.len(),
+                                env.env_chain.len(),
                                 fn_optional_param_names.clone(),
                                 fn_optional_param_name_idx,
                             ));
                             loop_info = Vec::new();
-                            self.env.push_scope();
+                            env.push_scope();
                             pc = new_pc as usize;
                             continue;
                         }
@@ -5441,12 +5501,24 @@ impl Interpreter {
                     pc += 2;
                 }
                 val if val == ByteCode::StartScope as u8 => {
-                    self.env.push_scope();
+                    env.push_scope();
                 }
                 val if val == ByteCode::EndScope as u8 => {
-                    self.env.pop_scope()?;
+                    env.pop_scope()?;
                 }
                 val if val == ByteCode::Return as u8 => {
+                    if stack_frame.is_empty() {
+                        // We're assuming that we were called to run just a
+                        // particular function
+
+                        // There should be a single value on that stack that we return
+                        if stack.len() != 1 {
+                            return Err(format!("Expected one element on stack: {stack:?}"));
+                        }
+
+                        return Ok((stack[0], env));
+                    }
+
                     // The value at the top of the stack is the return value of
                     // the function, so we just need to pop the PC
                     let scope_count;
@@ -5457,8 +5529,8 @@ impl Interpreter {
                         fn_optional_param_names,
                         fn_optional_param_name_idx,
                     ) = stack_frame.pop().expect("stack frame to return to");
-                    while self.env.env_chain.len() > scope_count {
-                        self.env.pop_scope().unwrap();
+                    while env.env_chain.len() > scope_count {
+                        env.pop_scope().unwrap();
                     }
                     continue;
                 }
@@ -5496,21 +5568,13 @@ impl Interpreter {
                 val if val == ByteCode::CreateList as u8 => {
                     let len = ((bytes[pc + 1] as usize) << 8) + bytes[pc + 2] as usize;
 
-                    let word_count = Word(1.into());
-                    let position = alloc!(
-                        self.mem,
-                        word_count,
-                        &format!("ByteCode::CreateList PC {pc}")
-                    );
-                    unsafe {
-                        let ptr: *mut ShimList =
-                            std::mem::transmute(&self.mem.mem[usize::from(position.0)]);
-                        ptr.write(ShimList::new());
-                        for item in stack.drain(stack.len() - len..) {
-                            (*ptr).push(&mut self.mem, item);
-                        }
+                    let lst_val = self.mem.alloc_list();
+                    let lst = lst_val.list_mut(self)?;
+                    for item in stack.drain(stack.len() - len..) {
+                        lst.push(&mut self.mem, item);
                     }
-                    stack.push(ShimValue::List(position));
+
+                    stack.push(lst_val);
 
                     pc += 2;
                 }
@@ -5584,7 +5648,8 @@ impl Interpreter {
             }
             pc += 1;
         }
-        Ok(())
+
+        Ok((ShimValue::Uninitialized, env))
     }
 }
 
@@ -5655,6 +5720,8 @@ pub fn print_asm(bytes: &[u8]) {
             eprint!("String");
         } else if *b == ByteCode::LiteralNone as u8 {
             eprint!("None");
+        } else if *b == ByteCode::CreateList as u8 {
+            eprint!("CreateList");
         } else if *b == ByteCode::Copy as u8 {
             eprint!("Copy");
         } else if *b == ByteCode::LoopStart as u8 {
@@ -5689,13 +5756,6 @@ pub fn print_asm(bytes: &[u8]) {
             eprint!("return");
         }
         eprintln!();
-    }
-}
-
-impl Default for Interpreter {
-    fn default() -> Self {
-        let config = Config::default();
-        Self::create(&config)
     }
 }
 
