@@ -82,6 +82,7 @@ pub enum BinaryOp {
     GTE(Box<ExprNode>, Box<ExprNode>),
     LT(Box<ExprNode>, Box<ExprNode>),
     LTE(Box<ExprNode>, Box<ExprNode>),
+    Modulus(Box<ExprNode>, Box<ExprNode>),
     In(Box<ExprNode>, Box<ExprNode>),
 }
 
@@ -183,6 +184,7 @@ pub enum Token {
     GTE,
     LT,
     LTE,
+    Percent,
     Semicolon,
     LSquare,
     RSquare,
@@ -463,6 +465,11 @@ pub fn parse_primary(tokens: &mut TokenStream) -> Result<ExprNode, String> {
             // TODO: fix span here
             Expression::Primary(Primary::List(items))
         }
+        Token::Fn => {
+            tokens.unadvance()?;
+            let f = parse_function(tokens)?;
+            Expression::Fn(f)
+        }
         token => {
             tokens.unadvance()?;
             return Err(tokens.format_peek_err(&format!(
@@ -631,7 +638,7 @@ pub fn parse_logical_or(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                 expr = Node {
                     data: Expression::BooleanOp(BooleanOp::Or(
                         Box::new(expr),
-                        Box::new(parse_expression(tokens)?),
+                        Box::new(parse_logical_and(tokens)?),
                     )),
                     span: span,
                 };
@@ -652,7 +659,7 @@ pub fn parse_logical_and(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                 expr = Node {
                     data: Expression::BooleanOp(BooleanOp::And(
                         Box::new(expr),
-                        Box::new(parse_expression(tokens)?),
+                        Box::new(parse_equality(tokens)?),
                     )),
                     span: span,
                 };
@@ -734,7 +741,7 @@ pub fn parse_factor(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                 expr = Node {
                     data: Expression::BinaryOp(BinaryOp::Multiply(
                         Box::new(expr),
-                        Box::new(parse_expression(tokens)?),
+                        Box::new(parse_unary(tokens)?),
                     )),
                     span: span,
                 };
@@ -744,7 +751,17 @@ pub fn parse_factor(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                 expr = Node {
                     data: Expression::BinaryOp(BinaryOp::Divide(
                         Box::new(expr),
-                        Box::new(parse_expression(tokens)?),
+                        Box::new(parse_unary(tokens)?),
+                    )),
+                    span: span,
+                };
+            }
+            Token::Percent => {
+                tokens.advance()?;
+                expr = Node {
+                    data: Expression::BinaryOp(BinaryOp::Modulus(
+                        Box::new(expr),
+                        Box::new(parse_unary(tokens)?),
                     )),
                     span: span,
                 };
@@ -765,7 +782,7 @@ pub fn parse_equality(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                 expr = Node {
                     data: Expression::BinaryOp(BinaryOp::Equal(
                         Box::new(expr),
-                        Box::new(parse_expression(tokens)?),
+                        Box::new(parse_comparison(tokens)?),
                     )),
                     span: span,
                 };
@@ -775,7 +792,7 @@ pub fn parse_equality(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                 expr = Node {
                     data: Expression::BinaryOp(BinaryOp::NotEqual(
                         Box::new(expr),
-                        Box::new(parse_expression(tokens)?),
+                        Box::new(parse_comparison(tokens)?),
                     )),
                     span: span,
                 };
@@ -796,7 +813,7 @@ pub fn parse_term(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                 expr = Node {
                     data: Expression::BinaryOp(BinaryOp::Add(
                         Box::new(expr),
-                        Box::new(parse_expression(tokens)?),
+                        Box::new(parse_factor(tokens)?),
                     )),
                     span: span,
                 };
@@ -806,7 +823,7 @@ pub fn parse_term(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                 expr = Node {
                     data: Expression::BinaryOp(BinaryOp::Subtract(
                         Box::new(expr),
-                        Box::new(parse_expression(tokens)?),
+                        Box::new(parse_factor(tokens)?),
                     )),
                     span: span,
                 };
@@ -884,13 +901,6 @@ pub fn parse_expression(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                 span: Span::start(),
             })
         },
-        Token::Fn => {
-            let f = parse_function(tokens)?;
-            Ok(ExprNode {
-                data: Expression::Fn(f),
-                span: Span::start(),
-            })
-        }
         _ => parse_logical_or(tokens),
     }
 }
@@ -1526,6 +1536,7 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
             b',' => tokens.push(Token::Comma),
             b'+' => tokens.push(Token::Plus),
             b'*' => tokens.push(Token::Star),
+            b'%' => tokens.push(Token::Percent),
             b'/' => match text[1] {
                 b'/' => {
                     loop {
@@ -3612,6 +3623,17 @@ impl ShimValue {
         }
     }
 
+    fn modulus(&self, _interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
+        // NOTE: All division is floating point division
+        match (self, other) {
+            (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Float(a % b)),
+            (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Integer(a % b)),
+            (ShimValue::Integer(a), ShimValue::Float(b)) => Ok(ShimValue::Float((*a as f32) % *b)),
+            (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(ShimValue::Float(*a % (*b as f32))),
+            (a, b) => Err(format!("Can't Divide {:?} and {:?}", a, b)),
+        }
+    }
+
     fn gt(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
         match (self, other) {
             (ShimValue::Bool(a), ShimValue::Bool(b)) => {
@@ -3890,6 +3912,7 @@ enum ByteCode {
     NotEqual,
     Multiply,
     Divide,
+    Modulus,
     GT,
     GTE,
     LT,
@@ -4625,6 +4648,7 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
                 BinaryOp::Equal(a, b) => (ByteCode::Equal, a, b),
                 BinaryOp::NotEqual(a, b) => (ByteCode::NotEqual, a, b),
                 BinaryOp::Multiply(a, b) => (ByteCode::Multiply, a, b),
+                BinaryOp::Modulus(a, b) => (ByteCode::Modulus, a, b),
                 BinaryOp::Divide(a, b) => (ByteCode::Divide, a, b),
                 BinaryOp::GT(a, b) => (ByteCode::GT, a, b),
                 BinaryOp::GTE(a, b) => (ByteCode::GTE, a, b),
@@ -5165,6 +5189,11 @@ impl Interpreter {
                     let b = stack.pop().expect("Operand for ByteCode::Divide");
                     let a = stack.pop().expect("Operand for ByteCode::Divide");
                     stack.push(a.div(self, &b)?);
+                }
+                val if val == ByteCode::Modulus as u8 => {
+                    let b = stack.pop().expect("Operand for ByteCode::Modulus");
+                    let a = stack.pop().expect("Operand for ByteCode::Modulus");
+                    stack.push(a.modulus(self, &b)?);
                 }
                 val if val == ByteCode::GT as u8 => {
                     let b = stack.pop().expect("Operand for ByteCode::GT");
