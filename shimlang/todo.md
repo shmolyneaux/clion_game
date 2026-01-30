@@ -16,7 +16,6 @@
     - Iter values
     - Iter keys
     - Iter keys+values
-- Stop using `Vec` for strings
 - Tuple
 - Tuple unpacking
 - Anonymous functions (non-closures?)

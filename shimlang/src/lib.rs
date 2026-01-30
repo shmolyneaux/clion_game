@@ -3548,21 +3548,18 @@ impl ShimValue {
             ShimValue::String(_) => {
                 String::from_utf8(self.string(interpreter).unwrap().to_vec()).expect("valid utf-8 string stored")
             },
-            ShimValue::List(position) => {
+            ShimValue::List(_) => {
+                let lst = self.list(interpreter).unwrap();
+
                 let mut out = "[".to_string();
-                unsafe {
-                    let lst: &ShimList = std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
-
-                    for idx in 0..lst.len() {
-                        if idx != 0 {
-                            out.push_str(",");
-                            out.push_str(" ");
-                        }
-                        let item = lst.get(&interpreter.mem, idx as isize).unwrap();
-                        out.push_str(&item.to_string(interpreter));
+                for idx in 0..lst.len() {
+                    if idx != 0 {
+                        out.push_str(",");
+                        out.push_str(" ");
                     }
+                    let item = lst.get(&interpreter.mem, idx as isize).unwrap();
+                    out.push_str(&item.to_string(interpreter));
                 }
-
                 out.push_str("]");
 
                 out
@@ -3639,6 +3636,21 @@ impl ShimValue {
                 Ok(a == b)
             }
             (ShimValue::None, ShimValue::None) => Ok(true),
+            (a @ ShimValue::List(_), b @ ShimValue::List(_)) => {
+                let a = a.list(interpreter)?;
+                let b = b.list(interpreter)?;
+                if a.len() != b.len() {
+                    return Ok(false)
+                }
+                for idx in 0..a.len() {
+                    let item_a = a.get(&interpreter.mem, idx as isize)?;
+                    let item_b = b.get(&interpreter.mem, idx as isize)?;
+                    if !item_a.equal_inner(interpreter, &item_b)? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            },
             _ => Ok(false),
         }
     }
