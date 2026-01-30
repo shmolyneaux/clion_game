@@ -32,26 +32,25 @@
 #include <SDL_opengl.h>
 #endif
 
-// This example can also compile and run with Emscripten! See 'Makefile.emscripten' for details.
-#ifdef __EMSCRIPTEN__
-#include "imgui-docking/examples/libs/emscripten/emscripten_mainloop_stub.h"
-
-char _whatever[] = "empscripten/has/no/exe";
-
-char* exe_path() {
-    return _whatever;
-}
-
-
-#endif
-
-#ifndef __EMSCRIPTEN__
+#if defined(_WIN32)
 #include <windows.h>
 char* exe_path() {
     static char path[MAX_PATH];
     GetModuleFileNameA(NULL, path, MAX_PATH);
     std::cout << "Executable path: " << path << std::endl;
     return path;
+}
+#elif defined(__linux__)
+#include "imgui-docking/examples/libs/emscripten/emscripten_mainloop_stub.h"
+char _whatever[] = "linux/has/no/exe";
+char* exe_path() {
+    return _whatever;
+}
+#elif defined(__EMSCRIPTEN__)
+#include "imgui-docking/examples/libs/emscripten/emscripten_mainloop_stub.h"
+char _whatever[] = "empscripten/has/no/exe";
+char* exe_path() {
+    return _whatever;
 }
 #endif
 

@@ -16,3 +16,9 @@ The following are goals of the project:
 The following are explicit non-goals:
 - Advanced graphical features
 - 
+
+## Building on Linux?
+
+```
+sudo apt-get install libsdl2-dev libglew-dev
+```

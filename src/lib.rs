@@ -282,7 +282,7 @@ pub struct DebugState {
 }
 
 
-#[derive(Facet)]
+//#[derive(Facet)]
 /// -180.0 180.0
 pub struct State {
     interpreter: shimlang::Interpreter,
@@ -304,17 +304,17 @@ pub struct State {
     debug_verts: Vec<(Vec3, Vec3)>,
     debug_vert_indices: Vec<u32>,
 
-    #[facet(range = (-90.0, 90.0))]
+    //#[facet(range = (-90.0, 90.0))]
     pitch: f32,
 
-    #[facet(range = (-180.0, 180.0))]
+    //#[facet(range = (-180.0, 180.0))]
     yaw: f32,
 
     camera_pos: Vec3,
     camera_front: Vec3,
     camera_up: Vec3,
 
-    #[facet(readonly)]
+    //#[facet(readonly)]
     mouse_captured: bool,
 
     test_mesh: StaticMesh,
@@ -968,7 +968,9 @@ fn init_state() -> State {
 
     println!("Creating interpreter");
     let interpreter_config = shimlang::Config::default();
-    let interpreter = shimlang::Interpreter::create(&interpreter_config);
+    let ast = shimlang::ast_from_text(br#"print("Hello world");"#).unwrap();
+    let program = shimlang::compile_ast(&ast).unwrap();
+    let interpreter = shimlang::Interpreter::create(&shimlang::Config::default(), program);
 
     println!("Generating arrays/buffers");
     let debug_vao = VertexArray::create();
@@ -1290,7 +1292,7 @@ fn frame(state: &mut State, delta: f32) {
 
     {
         let _zone = zone_scoped!("imgui_debug");
-        imgui_debug(state);
+        //imgui_debug(state);
     }
 
     unsafe {
