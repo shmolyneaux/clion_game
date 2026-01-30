@@ -1870,16 +1870,28 @@ impl MMU {
     }
 
     fn alloc_str(&mut self, contents: &[u8]) -> ShimValue {
-        const _: () = {
-            assert!(std::mem::size_of::<Vec<u8>>() == 24);
-        };
-        let word_count = Word(3.into());
+        // Length + contents + padding
+        let total_len = 1 + contents.len().div_ceil(8);
+        let word_count = Word(total_len.into());
         let position = alloc!(self, word_count, &format!("str `{}`", debug_u8s(contents)));
-        unsafe {
-            let ptr: *mut Vec<u8> =
-                std::mem::transmute(&mut self.mem[usize::from(position.0)]);
-            ptr.write(contents.to_vec());
+
+        self.mem[usize::from(position.0)] = contents.len() as u64;
+
+        let bytes: &mut [u8] = unsafe {
+            let u64_slice = &mut self.mem[
+                (1+usize::from(position.0))..
+                (usize::from(position.0)+total_len)
+            ];
+            std::slice::from_raw_parts_mut(
+                u64_slice.as_mut_ptr() as *mut u8,
+                contents.len(),
+            )
+        };
+
+        for (idx, b) in contents.iter().enumerate() {
+            bytes[idx] = *b;
         }
+
         ShimValue::String(position)
     }
 
@@ -3001,6 +3013,44 @@ fn shim_list_sort(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shi
     todo!();
 }
 
+fn shim_list_filter(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let obj = unpacker.required(b"obj")?;
+    let lst = obj.list(interpreter)?;
+    let key = unpacker.optional(b"key");
+    unpacker.end()?;
+
+    let new_lst_val = interpreter.mem.alloc_list();
+    let new_lst = new_lst_val.list_mut(interpreter)?;
+
+    for idx in 0..lst.len() {
+        let input = lst.get(&interpreter.mem, idx as isize)?;
+        let result = if let Some(key) = key {
+            let mut args = ArgBundle::new();
+            args.args.push(input);
+            match key.call(interpreter, &mut args)? {
+                CallResult::ReturnValue(val) => {
+                    val
+                },
+                CallResult::PC(pc) => {
+                    let (val, _env) = interpreter.execute_bytecode_extended(
+                        pc as usize,
+                        args
+                    )?;
+                    val
+                },
+            } 
+        } else {
+            input
+        };
+        if result.is_truthy(interpreter)? {
+            new_lst.push(&mut interpreter.mem, input);
+        }
+    }
+
+    Ok(new_lst_val)
+}
+
 fn shim_list_map(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let obj = unpacker.required(b"obj")?;
@@ -3401,11 +3451,20 @@ impl ShimValue {
     fn string(&self, interpreter: &Interpreter) -> Result<&[u8], String> {
         match self {
             ShimValue::String(position) => {
-                unsafe {
-                    let ptr: *const Vec<u8> =
-                        std::mem::transmute(&interpreter.mem.mem[usize::from(position.0)]);
-                    Ok(&*ptr)
-                }
+                let len = interpreter.mem.mem[usize::from(position.0)];
+                let total_len: usize = 1 + len.div_ceil(8) as usize;
+
+                let bytes: &[u8] = unsafe {
+                    let u64_slice = &interpreter.mem.mem[
+                        (1+usize::from(position.0))..
+                        (usize::from(position.0)+total_len)
+                    ];
+                    std::slice::from_raw_parts(
+                        u64_slice.as_ptr() as *const u8,
+                        len as usize,
+                    )
+                };
+                Ok(bytes)
             },
             _ => {
                 Err(format!("Not a string"))
@@ -3538,26 +3597,18 @@ impl ShimValue {
             (ShimValue::Float(a), ShimValue::Float(b)) => Ok(CallResult::ReturnValue(ShimValue::Float(*a + *b))),
             (ShimValue::Integer(a), ShimValue::Float(b)) => Ok(CallResult::ReturnValue(ShimValue::Float((*a as f32) + *b))),
             (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(CallResult::ReturnValue(ShimValue::Float(*a + (*b as f32)))),
-            (ShimValue::String(a), ShimValue::String(b)) => {
-                let a: &mut Vec<u8> =
-                    unsafe { std::mem::transmute(&mut interpreter.mem.mem[usize::from(a.0)]) };
-                let b: &mut Vec<u8> =
-                    unsafe { std::mem::transmute(&mut interpreter.mem.mem[usize::from(b.0)]) };
+            (a @ ShimValue::String(_), b @ ShimValue::String(_)) => {
+                let a = a.string(interpreter)?;
+                let b = b.string(interpreter)?;
 
-                let position = alloc!(interpreter.mem, Word(3.into()), "String addition result");
-                unsafe {
-                    let c: *mut Vec<u8> =
-                        std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
-                    c.write(Vec::new());
-                    for val in a.iter() {
-                        (*c).push(*val);
-                    }
-                    for val in b.iter() {
-                        (*c).push(*val);
-                    }
-                };
+                let c = interpreter.mem.alloc_str(
+                    &format!("{}{}",
+                        unsafe { std::str::from_utf8_unchecked(a) },
+                        unsafe { std::str::from_utf8_unchecked(b) },
+                    ).into_bytes()
+                );
 
-                Ok(CallResult::ReturnValue(ShimValue::String(position)))
+                Ok(CallResult::ReturnValue(c))
             }
             (ShimValue::Struct(_), b) => {
                 // TODO: why do we need to take in `pending_args` when we could
@@ -3582,11 +3633,9 @@ impl ShimValue {
             (ShimValue::Bool(a), ShimValue::Bool(b)) => Ok(a == b),
             (ShimValue::Float(a), ShimValue::Float(b)) => Ok(a == b),
             (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(a == b),
-            (ShimValue::String(a), ShimValue::String(b)) => {
-                let a: &mut Vec<u8> =
-                    unsafe { std::mem::transmute(&mut interpreter.mem.mem[usize::from(a.0)]) };
-                let b: &mut Vec<u8> =
-                    unsafe { std::mem::transmute(&mut interpreter.mem.mem[usize::from(b.0)]) };
+            (a @ ShimValue::String(_), b @ ShimValue::String(_)) => {
+                let a = a.string(interpreter)?;
+                let b = b.string(interpreter)?;
                 Ok(a == b)
             }
             (ShimValue::None, ShimValue::None) => Ok(true),
@@ -3792,6 +3841,7 @@ impl ShimValue {
             ShimValue::List(_) => {
                 let func = match ident {
                     b"map" => shim_list_map,
+                    b"filter" => shim_list_filter,
                     b"len" => shim_list_len,
                     b"iter" => shim_list_iter,
                     b"sort" => shim_list_sort,
@@ -4830,7 +4880,9 @@ impl<'a> GC<'a> {
                     },
                     ShimValue::String(pos) => {
                         let pos: usize = pos.into();
-                        for idx in pos..(pos + (std::mem::size_of::<Vec<u8>>()/8)) {
+                        let len = self.mem.mem[pos] as usize;
+                        // TODO: check this...
+                        for idx in pos..(pos + 1 + len.div_ceil(8)) {
                             self.mask.set(idx);
                         }
                     },
@@ -5039,7 +5091,7 @@ impl Interpreter {
     }
 
     // TODO: Pass in mutable Environment?
-    pub fn execute_bytecode(&mut self, mut pc: usize) -> Result<(ShimValue, Environment), String> {
+    pub fn execute_bytecode(&mut self, pc: usize) -> Result<(ShimValue, Environment), String> {
         self.execute_bytecode_extended(
             pc,
             ArgBundle::new(),
@@ -5491,10 +5543,8 @@ impl Interpreter {
                     for _ in 0..kwarg_count {
                         let val = stack.pop().unwrap();
                         let ident = match stack.pop().unwrap() {
-                            ShimValue::String(position) => unsafe {
-                                let ptr: &mut Vec<u8> =
-                                    std::mem::transmute(&mut self.mem.mem[usize::from(position.0)]);
-                                ptr.clone()
+                            val @ ShimValue::String(position) => unsafe {
+                                val.string(self)?.to_vec()
                             },
                             other => return Err(format!("Invalid kwarg ident {:?}", other)),
                         };
