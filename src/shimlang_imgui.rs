@@ -81,7 +81,9 @@ impl Navigation {
             igBegin(c"Shimlang Debug".as_ptr(), &mut open as *mut bool, IMGUI_WINDOW_FLAGS_NO_FOCUS_ON_APPEARING);
             igText(CString::new(format!("Interpreter source: {:#?}", interpreter.source)).unwrap().as_ptr());
             igText(cformat!("ANother test {}", 42).as_ptr());
-            igText(CString::new(format!("Free list: {:#?}", interpreter.mem.free_list)).unwrap().as_ptr());
+            igText(CString::new(format!("Disassembly:\n{}",
+                                        shimlang::format_asm(&interpreter.program.bytecode)
+                                        )).unwrap().as_ptr());
 
             // Memory viewer
 

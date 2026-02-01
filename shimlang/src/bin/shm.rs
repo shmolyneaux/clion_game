@@ -3,6 +3,9 @@ use std::fs::File;
 use std::io::Read;
 use std::process::ExitCode;
 
+use std::io;
+use std::io::Write;
+
 use shimlang;
 use shimlang::*;
 
@@ -101,8 +104,10 @@ fn run() -> Result<(), String> {
                 };
                 let program = shimlang::compile_ast(&ast)?;
                 let mut interpreter = shimlang::Interpreter::create(&Config::default(), program);
-                match interpreter.execute_bytecode(0) {
-                    Ok((_ret, env)) => {
+                let mut env = shimlang::Environment::new_with_builtins(&mut interpreter.mem);
+                let mut pc = 0;
+                match interpreter.execute_bytecode_extended(&mut pc, shimlang::ArgBundle::new(), &mut env) {
+                    Ok(_) => {
                         if args.gc {
                             interpreter.gc(&env);
                         }
@@ -145,7 +150,46 @@ fn run() -> Result<(), String> {
             }
         }
     } else {
-        return Err("Expected script path".into());
+        let ast = shimlang::ast_from_text(b"").unwrap();
+        let program = shimlang::compile_ast(&ast)?;
+        let mut interpreter = shimlang::Interpreter::create(&Config::default(), program);
+        let mut env = shimlang::Environment::new_with_builtins(&mut interpreter.mem);
+
+        let mut pc = 0;
+
+        loop {
+            let mut input = String::new();
+
+            print!(">>> ");
+            io::stdout().flush().unwrap();
+
+            io::stdin()
+                .read_line(&mut input)
+                .expect("Failed to read line");
+
+            let ast = match shimlang::ast_from_text(&input.into_bytes()) {
+                Ok(ast) => {
+                    ast
+                },
+                Err(msg) => {
+                    eprintln!("{msg}");
+                    return Err((format!("")).into());
+                }
+            };
+            let program = shimlang::compile_ast(&ast)?;
+
+            interpreter.append_program(program);
+            match interpreter.execute_bytecode_extended(&mut pc, shimlang::ArgBundle::new(), &mut env) {
+                Ok(shimlang::ShimValue::None) => (),
+                Ok(val) => {
+                    println!("{}", val.to_string(&mut interpreter));
+                },
+                Err(msg) => {
+                    eprintln!("{msg}");
+                    return Err((format!("")).into());
+                }
+            };
+        }
     }
 
     Ok(())

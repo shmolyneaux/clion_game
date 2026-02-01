@@ -2066,11 +2066,74 @@ pub struct Environment {
 }
 
 impl Environment {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             env_chain: vec![HashMap::new()],
         }
     }
+
+    pub fn new_with_builtins(mem: &mut MMU) -> Self {
+        let mut env = Self::new();
+        let builtins: &[(&[u8], Box<NativeFn>)] = &[
+            (b"print", Box::new(shim_print)),
+            (b"panic", Box::new(shim_panic)),
+            (b"dict", Box::new(shim_dict)),
+            (b"assert", Box::new(shim_assert)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"__PLACEHOLDER", Box::new(shim_print)),
+        ];
+
+        for (name, func) in builtins {
+            let position = alloc!(mem, Word(1.into()), &format!("builtin func {}", debug_u8s(name)));
+            unsafe {
+                let ptr: *mut NativeFn = std::mem::transmute(&mut mem.mem[usize::from(position.0)]);
+                ptr.write(**func);
+            }
+
+            env.insert_new(name.to_vec(), ShimValue::NativeFn(position));
+        }
+
+        env
+    }
+
 
     fn insert_new(&mut self, key: Vec<u8>, val: ShimValue) {
         let idx = self.env_chain.len() - 1;
@@ -3033,9 +3096,11 @@ fn shim_list_filter(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<S
                     val
                 },
                 CallResult::PC(pc) => {
-                    let (val, _env) = interpreter.execute_bytecode_extended(
-                        pc as usize,
-                        args
+                    let val = interpreter.execute_bytecode_extended(
+                        &mut (pc as usize),
+                        args,
+                        // TODO: this doesn't even have print...
+                        &mut Environment::new(),
                     )?;
                     val
                 },
@@ -3070,9 +3135,11 @@ fn shim_list_map(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shim
                 val
             },
             CallResult::PC(pc) => {
-                let (val, _env) = interpreter.execute_bytecode_extended(
-                    pc as usize,
-                    args
+                let val = interpreter.execute_bytecode_extended(
+                    &mut (pc as usize),
+                    args,
+                    // TODO: this doesn't even have print...
+                    &mut Environment::new(),
                 )?;
                 val
             },
@@ -3190,13 +3257,13 @@ fn shim_str_len(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimV
 }
 
 #[derive(Debug)]
-struct ArgBundle {
+pub struct ArgBundle {
     args: Vec<ShimValue>,
     kwargs: Vec<(Ident, ShimValue)>,
 }
 
 impl ArgBundle {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             args: Vec::new(),
             kwargs: Vec::new(),
@@ -3539,8 +3606,9 @@ impl ShimValue {
         interpreter.mem.alloc_str(&s.into_bytes())
     }
 
-    fn to_string(&self, interpreter: &mut Interpreter) -> String {
+    pub fn to_string(&self, interpreter: &mut Interpreter) -> String {
         match self {
+            ShimValue::Uninitialized => format!("Uninitialized"),
             ShimValue::Integer(i) => i.to_string(),
             ShimValue::Float(f) => format_float(*f),
             ShimValue::Bool(false) => "false".to_string(),
@@ -4025,7 +4093,7 @@ pub struct Program {
 
 pub fn compile_ast(ast: &Ast) -> Result<Program, String> {
     let mut program = Vec::new();
-    compile_block_inner(&ast.block, false, &mut program)?;
+    compile_block_inner(&ast.block, true, &mut program)?;
     let (bytecode, spans): (Vec<u8>, Vec<Span>) = program.into_iter().unzip();
     Ok(Program {
         bytecode: bytecode,
@@ -5102,81 +5170,31 @@ impl Interpreter {
         }
     }
 
-    // TODO: Pass in mutable Environment?
-    pub fn execute_bytecode(&mut self, pc: usize) -> Result<(ShimValue, Environment), String> {
-        self.execute_bytecode_extended(
-            pc,
-            ArgBundle::new(),
-        )
+    pub fn append_program(&mut self, program: Program) -> Result<(), String> {
+        let span_offset = self.program.script.len() as u32;
+        Rc::<Program>::get_mut(&mut self.program).unwrap().bytecode.extend(program.bytecode);
+        Rc::<Program>::get_mut(&mut self.program).unwrap().spans.extend(
+            program.spans.into_iter().map(|span| Span {
+                start: span.start + span_offset,
+                end: span.end + span_offset,
+            })
+        );
+        Rc::<Program>::get_mut(&mut self.program).unwrap().script.extend(program.script);
+
+        Ok(())
     }
 
     pub fn execute_bytecode_extended(
         &mut self,
-        mut pc: usize,
+        mod_pc: &mut usize,
         mut pending_args: ArgBundle,
-    ) -> Result<(ShimValue, Environment), String> {
+        env: &mut Environment,
+    ) -> Result<ShimValue, String> {
+        let mut pc = *mod_pc;
         // These are values that are operated on. Expressions push and pop to
         // this stack, return values go on this stack etc.
         let mut stack: Vec<ShimValue> = Vec::new();
 
-        let mut env = Environment::new();
-
-        let builtins: &[(&[u8], Box<NativeFn>)] = &[
-            (b"print", Box::new(shim_print)),
-            (b"panic", Box::new(shim_panic)),
-            (b"dict", Box::new(shim_dict)),
-            (b"assert", Box::new(shim_assert)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-        ];
-
-        for (name, func) in builtins {
-            let position = alloc!(self.mem, Word(1.into()), &format!("builtin func {}", debug_u8s(name)));
-            unsafe {
-                let ptr: *mut NativeFn = std::mem::transmute(&mut self.mem.mem[usize::from(position.0)]);
-                ptr.write(**func);
-            }
-
-            env.insert_new(name.to_vec(), ShimValue::NativeFn(position));
-        }
 
         // This is the (PC, loop_info, scope_count, fn_optional_param_names,
         // fn_optional_param_name_idx) call stack
@@ -5607,7 +5625,11 @@ impl Interpreter {
                             return Err(format!("Expected one element on stack: {stack:?}"));
                         }
 
-                        return Ok((stack[0], env));
+                        // TODO: we should supply `pc` as a `&mut usize`, but
+                        // that requires changing far too much code here that
+                        // works with `pc` as a value.
+                        *mod_pc = pc;
+                        return Ok(stack[0]);
                     }
 
                     // The value at the top of the stack is the return value of
@@ -5740,114 +5762,135 @@ impl Interpreter {
             pc += 1;
         }
 
-        Ok((ShimValue::Uninitialized, env))
+        *mod_pc = pc;
+        if stack.len() > 0 {
+            Ok(stack.pop().unwrap())
+        } else {
+            Ok(ShimValue::Uninitialized)
+        }
     }
 }
 
 pub fn print_asm(bytes: &[u8]) {
-    for (idx, b) in bytes.iter().enumerate() {
-        eprint!("{idx:4}:  {b:3}  ");
+    println!("{}", format_asm(bytes));
+}
 
-        let text = printable_byte(*b);
-        if !text.starts_with('\\') {
-            eprint!("{:4} ", text);
-        }
+pub fn format_asm(bytes: &[u8]) -> String {
+    let mut out = String::new();
+
+    let mut idx = 0;
+    while idx < bytes.len() {
+        let b = &bytes[idx];
+        out.push_str(&format!("{idx:4}:  {b:3}  "));
 
         if *b == ByteCode::Jmp as u8 {
-            eprint!("JMP");
+            out.push_str(&format!("JMP"));
         } else if *b == ByteCode::VariableDeclaration as u8 {
-            eprint!("let");
+            out.push_str(&format!("let"));
         } else if *b == ByteCode::NoOp as u8 {
-            eprint!("no-op");
+            out.push_str(&format!("no-op"));
+        } else if *b == ByteCode::Pop as u8 {
+            out.push_str(&format!("pop"));
         } else if *b == ByteCode::Assignment as u8 {
-            eprint!("assignment");
+            out.push_str(&format!("assignment"));
         } else if *b == ByteCode::Call as u8 {
-            eprint!("call");
+            let arg_count = bytes[idx+1] as usize;
+            let kwarg_count = bytes[idx+2] as usize;
+            out.push_str(&format!("call args={}  kwargs={}", arg_count, kwarg_count));
+            idx += 2;
         } else if *b == ByteCode::Not as u8 {
-            eprint!("Not");
+            out.push_str(&format!("Not"));
         } else if *b == ByteCode::GT as u8 {
-            eprint!("GT");
+            out.push_str(&format!("GT"));
         } else if *b == ByteCode::GTE as u8 {
-            eprint!("GTE");
+            out.push_str(&format!("GTE"));
         } else if *b == ByteCode::LT as u8 {
-            eprint!("LT");
+            out.push_str(&format!("LT"));
         } else if *b == ByteCode::LTE as u8 {
-            eprint!("LTE");
+            out.push_str(&format!("LTE"));
         } else if *b == ByteCode::Index as u8 {
-            eprint!("index");
+            out.push_str(&format!("index"));
         } else if *b == ByteCode::Add as u8 {
-            eprint!("add");
+            out.push_str(&format!("add"));
         } else if *b == ByteCode::CreateFn as u8 {
-            eprint!("fn");
+            out.push_str(&format!("fn"));
         } else if *b == ByteCode::JmpZ as u8 {
-            eprint!("JMPZ");
+            out.push_str(&format!("JMPZ"));
         } else if *b == ByteCode::JmpNZ as u8 {
-            eprint!("JMPNZ");
+            out.push_str(&format!("JMPNZ"));
         } else if *b == ByteCode::JmpUp as u8 {
-            eprint!("JMPUP");
+            out.push_str(&format!("JMPUP"));
         } else if *b == ByteCode::JmpInitArg as u8 {
-            eprint!("JmpInitArg");
+            out.push_str(&format!("JmpInitArg"));
         } else if *b == ByteCode::UnpackArgs as u8 {
-            eprint!("unpack_args");
+            out.push_str(&format!("unpack_args"));
         } else if *b == ByteCode::AssignArg as u8 {
-            eprint!("assign arg");
+            out.push_str(&format!("assign arg"));
         } else if *b == ByteCode::CreateFn as u8 {
-            eprint!("fn");
+            out.push_str(&format!("fn"));
         } else if *b == ByteCode::CreateStruct as u8 {
-            eprint!("create struct");
+            out.push_str(&format!("create struct"));
         } else if *b == ByteCode::GetAttr as u8 {
-            eprint!("get");
+            out.push_str(&format!("get"));
         } else if *b == ByteCode::SetAttr as u8 {
-            eprint!("set");
+            out.push_str(&format!("set"));
         } else if *b == ByteCode::VariableLoad as u8 {
-            eprint!("load");
+            let len = bytes[idx+1] as usize;
+            let slice = &bytes[idx+2..idx+2+len];
+            out.push_str(&format!(r#"load "{}""#, debug_u8s(slice)));
+            idx += len + 1;
         } else if *b == ByteCode::Break as u8 {
-            eprint!("break");
+            out.push_str(&format!("break"));
         } else if *b == ByteCode::Continue as u8 {
-            eprint!("continue");
+            out.push_str(&format!("continue"));
         } else if *b == ByteCode::LiteralShimValue as u8 {
-            eprint!("ShimValue");
+            out.push_str(&format!("ShimValue"));
         } else if *b == ByteCode::LiteralString as u8 {
-            eprint!("String");
+            let len = bytes[idx+1] as usize;
+            let slice = &bytes[idx+2..idx+2+len];
+            out.push_str(&format!(r#"String "{}""#, debug_u8s(slice)));
+            idx += len + 1;
         } else if *b == ByteCode::LiteralNone as u8 {
-            eprint!("None");
+            out.push_str(&format!("None"));
         } else if *b == ByteCode::CreateList as u8 {
-            eprint!("CreateList");
+            out.push_str(&format!("CreateList"));
         } else if *b == ByteCode::Copy as u8 {
-            eprint!("Copy");
+            out.push_str(&format!("Copy"));
         } else if *b == ByteCode::LoopStart as u8 {
-            eprint!("Loop Start");
+            out.push_str(&format!("Loop Start"));
         } else if *b == ByteCode::LoopEnd as u8 {
-            eprint!("Loop End");
+            out.push_str(&format!("Loop End"));
         } else if *b == ByteCode::StartScope as u8 {
-            eprint!("start_scope");
+            out.push_str(&format!("start_scope"));
         } else if *b == ByteCode::EndScope as u8 {
-            eprint!("end_scope");
+            out.push_str(&format!("end_scope"));
         } else if *b == ByteCode::Pad0 as u8 {
-            eprint!("");
+            out.push_str(&format!(""));
         } else if *b == ByteCode::Pad1 as u8 {
-            eprint!("");
+            out.push_str(&format!(""));
         } else if *b == ByteCode::Pad2 as u8 {
-            eprint!("");
+            out.push_str(&format!(""));
         } else if *b == ByteCode::Pad3 as u8 {
-            eprint!("");
+            out.push_str(&format!(""));
         } else if *b == ByteCode::Pad4 as u8 {
-            eprint!("");
+            out.push_str(&format!(""));
         } else if *b == ByteCode::Pad5 as u8 {
-            eprint!("");
+            out.push_str(&format!(""));
         } else if *b == ByteCode::Pad6 as u8 {
-            eprint!("");
+            out.push_str(&format!(""));
         } else if *b == ByteCode::Pad7 as u8 {
-            eprint!("");
+            out.push_str(&format!(""));
         } else if *b == ByteCode::Pad8 as u8 {
-            eprint!("");
+            out.push_str(&format!(""));
         } else if *b == ByteCode::Pad9 as u8 {
-            eprint!("");
+            out.push_str(&format!(""));
         } else if *b == ByteCode::Return as u8 {
-            eprint!("return");
+            out.push_str(&format!("return"));
         }
-        eprintln!();
+        out.push('\n');
+        idx += 1;
     }
+    out
 }
 
 #[cfg(test)]

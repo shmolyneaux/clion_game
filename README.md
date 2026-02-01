@@ -21,4 +21,10 @@ The following are explicit non-goals:
 
 ```
 sudo apt-get install libsdl2-dev libglew-dev
+mkdir build && cd build
+# For release build
+cmake ..
+# For debug
+cmake -DCMAKE_BUILD_TYPE=Debug ..
+cmake --build .
 ```
