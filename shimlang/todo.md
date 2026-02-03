@@ -31,6 +31,14 @@
 - Remove use of Box for native values
     - It can be the type id (which gives us the size), followed by that number of bytes
 - Debugger
+  - Step through bytecode/code (in, over, out)
+  - Show code for current span
+  - Show stack trace
+  - Show current environment
+  - Execute code
+  - Code breakpoint
+  - Conditional breakpoint
+  - Memory breakpoint 
 - Memory viewer
   - Colour-coded data types
   - Links for u24's to other sections of menory
