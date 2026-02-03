@@ -32,6 +32,11 @@
     - It can be the type id (which gives us the size), followed by that number of bytes
 - Debugger
 - Memory viewer
+  - Colour-coded data types
+  - Links for u24's to other sections of menory
+  - Breakdown of memory usage (code, specific struct types, shimvalues)
+  - Rate of garbage production
+  - Memory fragmentation summary
 - Assemby viewer
 - Stack viewer
 - Spans for statements
