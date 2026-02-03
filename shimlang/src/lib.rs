@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::collections::HashMap;
 
 #[cfg(feature = "facet")]
@@ -1228,7 +1230,7 @@ pub fn lex_identifier(text: &mut &[u8]) -> Result<Vec<u8>, String> {
     Ok(text.to_vec())
 }
 
-enum StringLexResult {
+pub enum StringLexResult {
     Literal(Vec<u8>),
     Interpolation(Vec<u8>),
 }
@@ -2520,7 +2522,7 @@ impl NewShimDict {
 
     fn print_entries(&self, interpreter: &Interpreter) {
         eprintln!("Entries");
-        let entries: &[DictEntry] = unsafe {
+        let _entries: &[DictEntry] = unsafe {
             let u64_slice = &interpreter.mem.mem[
                 usize::from(self.entries)..
                 usize::from(self.entries)+3*(self.entry_count as usize)
@@ -2705,7 +2707,7 @@ impl NewShimDict {
         panic!("Probe entry realloc failed probing!");
     }
 
-    fn probe(&self, interpreter: &mut Interpreter, key: ShimValue) -> Result<DictSlot, String> {
+    fn probe(&self, interpreter: &mut Interpreter, key: ShimValue) -> Result<DictSlot<'_>, String> {
         let longhash = key.hash(interpreter)? as usize;
         let mask = self.mask();
 
@@ -3069,8 +3071,8 @@ fn shim_panic(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimVal
 fn shim_list_sort(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let obj = unpacker.required(b"obj")?;
-    let lst = obj.list(interpreter)?;
-    let key = unpacker.optional(b"key");
+    let _lst = obj.list(interpreter)?;
+    let _key = unpacker.optional(b"key");
     unpacker.end()?;
 
     todo!();
@@ -5573,7 +5575,7 @@ impl Interpreter {
                     for _ in 0..kwarg_count {
                         let val = stack.pop().unwrap();
                         let ident = match stack.pop().unwrap() {
-                            val @ ShimValue::String(position) => unsafe {
+                            val @ ShimValue::String(_position) => {
                                 val.string(self)?.to_vec()
                             },
                             other => return Err(format!("Invalid kwarg ident {:?}", other)),
