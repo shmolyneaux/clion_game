@@ -1228,7 +1228,7 @@ pub fn lex_identifier(text: &mut &[u8]) -> Result<Vec<u8>, String> {
     Ok(text.to_vec())
 }
 
-enum StringLexResult {
+pub enum StringLexResult {
     Literal(Vec<u8>),
     Interpolation(Vec<u8>),
 }
@@ -1829,7 +1829,7 @@ macro_rules! alloc {
 }
 
 impl MMU {
-    fn eprint_free_list(&self) {
+    fn _eprint_free_list(&self) {
         eprintln!("Free list:");
         for block in self.free_list.iter() {
             eprintln!("    {block:?}");
@@ -1944,7 +1944,7 @@ impl MMU {
         }
     }
 
-    fn alloc_debug(&mut self, words: Word, msg: &str) -> Word {
+    fn _alloc_debug(&mut self, words: Word, msg: &str) -> Word {
         let result = self.alloc_no_debug(words);
         eprintln!("Alloc {} {}: {}", usize::from(words.0), msg, usize::from(result));
         result
@@ -1992,8 +1992,8 @@ impl MMU {
     /**
      * Returns the position in `self.mem` of the block allocted
      */
-    fn alloc(&mut self, size: Word) -> Word {
-        self.alloc_debug(size, "Unspecified alloc")
+    fn _alloc(&mut self, size: Word) -> Word {
+        self._alloc_debug(size, "Unspecified alloc")
     }
 
     fn free(&mut self, pos: Word, size: Word) {
@@ -2405,7 +2405,7 @@ impl DictEntry {
             && !self.value.is_uninitialized()
     }
 
-    fn invalidate(&mut self) {
+    fn _invalidate(&mut self) {
         self.hash = 0;
         self.key = ShimValue::Uninitialized;
         self.value = ShimValue::Uninitialized;
@@ -2518,9 +2518,9 @@ impl NewShimDict {
         }
     }
 
-    fn print_entries(&self, interpreter: &Interpreter) {
+    fn _print_entries(&self, interpreter: &Interpreter) {
         eprintln!("Entries");
-        let entries: &[DictEntry] = unsafe {
+        let _entries: &[DictEntry] = unsafe {
             let u64_slice = &interpreter.mem.mem[
                 usize::from(self.entries)..
                 usize::from(self.entries)+3*(self.entry_count as usize)
@@ -2705,7 +2705,7 @@ impl NewShimDict {
         panic!("Probe entry realloc failed probing!");
     }
 
-    fn probe(&self, interpreter: &mut Interpreter, key: ShimValue) -> Result<DictSlot, String> {
+    fn probe(&self, interpreter: &mut Interpreter, key: ShimValue) -> Result<DictSlot<'_>, String> {
         let longhash = key.hash(interpreter)? as usize;
         let mask = self.mask();
 
@@ -2853,7 +2853,7 @@ impl NewShimDict {
         }
     }
 
-    fn get_entry(&self, interpreter: &Interpreter, idx: usize) -> &DictEntry {
+    fn _get_entry(&self, interpreter: &Interpreter, idx: usize) -> &DictEntry {
         unsafe{std::mem::transmute(&interpreter.mem.mem[
             usize::from(self.entries)+3*idx
         ])}
@@ -3069,8 +3069,8 @@ fn shim_panic(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimVal
 fn shim_list_sort(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let obj = unpacker.required(b"obj")?;
-    let lst = obj.list(interpreter)?;
-    let key = unpacker.optional(b"key");
+    let _lst = obj.list(interpreter)?;
+    let _key = unpacker.optional(b"key");
     unpacker.end()?;
 
     todo!();
@@ -5573,7 +5573,7 @@ impl Interpreter {
                     for _ in 0..kwarg_count {
                         let val = stack.pop().unwrap();
                         let ident = match stack.pop().unwrap() {
-                            val @ ShimValue::String(position) => unsafe {
+                            val @ ShimValue::String(_position) => {
                                 val.string(self)?.to_vec()
                             },
                             other => return Err(format!("Invalid kwarg ident {:?}", other)),

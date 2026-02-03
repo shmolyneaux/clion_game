@@ -178,7 +178,7 @@ fn run() -> Result<(), String> {
             };
             let program = shimlang::compile_ast(&ast)?;
 
-            interpreter.append_program(program);
+            interpreter.append_program(program)?;
             match interpreter.execute_bytecode_extended(&mut pc, shimlang::ArgBundle::new(), &mut env) {
                 Ok(shimlang::ShimValue::None) => (),
                 Ok(val) => {
