@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::collections::HashMap;
 
 #[cfg(feature = "facet")]
@@ -1829,7 +1831,7 @@ macro_rules! alloc {
 }
 
 impl MMU {
-    fn _eprint_free_list(&self) {
+    fn eprint_free_list(&self) {
         eprintln!("Free list:");
         for block in self.free_list.iter() {
             eprintln!("    {block:?}");
@@ -1944,7 +1946,7 @@ impl MMU {
         }
     }
 
-    fn _alloc_debug(&mut self, words: Word, msg: &str) -> Word {
+    fn alloc_debug(&mut self, words: Word, msg: &str) -> Word {
         let result = self.alloc_no_debug(words);
         eprintln!("Alloc {} {}: {}", usize::from(words.0), msg, usize::from(result));
         result
@@ -1992,8 +1994,8 @@ impl MMU {
     /**
      * Returns the position in `self.mem` of the block allocted
      */
-    fn _alloc(&mut self, size: Word) -> Word {
-        self._alloc_debug(size, "Unspecified alloc")
+    fn alloc(&mut self, size: Word) -> Word {
+        self.alloc_debug(size, "Unspecified alloc")
     }
 
     fn free(&mut self, pos: Word, size: Word) {
@@ -2405,7 +2407,7 @@ impl DictEntry {
             && !self.value.is_uninitialized()
     }
 
-    fn _invalidate(&mut self) {
+    fn invalidate(&mut self) {
         self.hash = 0;
         self.key = ShimValue::Uninitialized;
         self.value = ShimValue::Uninitialized;
@@ -2518,7 +2520,7 @@ impl NewShimDict {
         }
     }
 
-    fn _print_entries(&self, interpreter: &Interpreter) {
+    fn print_entries(&self, interpreter: &Interpreter) {
         eprintln!("Entries");
         let _entries: &[DictEntry] = unsafe {
             let u64_slice = &interpreter.mem.mem[
@@ -2853,7 +2855,7 @@ impl NewShimDict {
         }
     }
 
-    fn _get_entry(&self, interpreter: &Interpreter, idx: usize) -> &DictEntry {
+    fn get_entry(&self, interpreter: &Interpreter, idx: usize) -> &DictEntry {
         unsafe{std::mem::transmute(&interpreter.mem.mem[
             usize::from(self.entries)+3*idx
         ])}
