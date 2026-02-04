@@ -3777,6 +3777,43 @@ impl ShimValue {
             ShimValue::Native(_) => {
                 self.native(interpreter).unwrap().to_string(interpreter)
             }
+            ShimValue::Struct(pos) => {
+                unsafe {
+                    let def_pos: u64 = *interpreter.mem.get(*pos);
+                    let def_pos: Word = Word((def_pos as u32).into());
+                    let def: &StructDef = interpreter.mem.get(def_pos);
+                    
+                    // Get the struct name
+                    let struct_name = debug_u8s(&def.name).to_string();
+                    
+                    // Collect member names and values first to avoid borrowing issues
+                    let mut members: Vec<(String, ShimValue)> = Vec::new();
+                    for (attr, loc) in def.lookup.iter() {
+                        // Only collect member variables, not methods
+                        if let StructAttribute::MemberInstanceOffset(offset) = loc {
+                            let attr_name = debug_u8s(attr).to_string();
+                            let val: ShimValue = *interpreter.mem.get(*pos + *offset as u32 + 1);
+                            members.push((attr_name, val));
+                        }
+                    }
+                    
+                    // Build output like "Point(x=2.0, y=3.0)"
+                    let mut out = struct_name;
+                    out.push('(');
+                    
+                    for (idx, (attr_name, val)) in members.iter().enumerate() {
+                        if idx != 0 {
+                            out.push_str(", ");
+                        }
+                        out.push_str(attr_name);
+                        out.push('=');
+                        out.push_str(&val.to_string(interpreter));
+                    }
+                    
+                    out.push(')');
+                    out
+                }
+            }
             value => format!("{:?}", value),
         }
     }

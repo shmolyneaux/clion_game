@@ -1,0 +1,4 @@
+Point(x=2.0, y=3.0)
+Person(name=Alice, age=30, city=NYC)
+Vec2(x=5, y=10)
+Empty()

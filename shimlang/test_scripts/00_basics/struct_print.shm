@@ -1,0 +1,30 @@
+struct Point {
+    x,
+    y
+}
+
+let p = Point(2.0, 3.0);
+print(p);
+
+struct Person {
+    name,
+    age,
+    city
+}
+
+let person = Person("Alice", 30, "NYC");
+print(person);
+
+// Test with integer values
+struct Vec2 {
+    x,
+    y
+}
+
+let v = Vec2(5, 10);
+print(v);
+
+// Empty struct
+struct Empty {}
+let e = Empty();
+print(e);
