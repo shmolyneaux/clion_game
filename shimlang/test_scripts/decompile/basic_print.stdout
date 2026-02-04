@@ -1,0 +1,6 @@
+0  154  PC=   7  load "print"
+7  147  PC=  14  String "Hello"
+14  164  PC=  17  call args=1  kwargs=0
+17  130  PC=  18  pop
+18  148  PC=  19  None
+

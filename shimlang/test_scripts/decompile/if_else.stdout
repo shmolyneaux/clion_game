@@ -1,0 +1,21 @@
+0  146  PC=   9  ShimValue
+9  171  PC=  12  JMPZ -> 41
+12  157  PC=  13  start_scope
+13  154  PC=  20  load "print"
+20  147  PC=  31  String "not taken"
+31  164  PC=  34  call args=1  kwargs=0
+34  130  PC=  35  pop
+35  148  PC=  36  None
+36  130  PC=  37  pop
+37  158  PC=  38  end_scope
+38  168  PC=  41  JMP -> 63
+41  157  PC=  42  start_scope
+42  154  PC=  49  load "print"
+49  147  PC=  56  String "taken"
+56  164  PC=  59  call args=1  kwargs=0
+59  130  PC=  60  pop
+60  148  PC=  61  None
+61  130  PC=  62  pop
+62  158  PC=  63  end_scope
+63  148  PC=  64  None
+

@@ -5783,114 +5783,190 @@ pub fn format_asm(bytes: &[u8]) -> String {
     let mut idx = 0;
     while idx < bytes.len() {
         let b = &bytes[idx];
-        out.push_str(&format!("{idx:4}:  {b:3}  "));
-
-        if *b == ByteCode::Jmp as u8 {
-            out.push_str(&format!("JMP"));
+        let start_idx = idx;
+        
+        // Calculate instruction name and advance idx for multi-byte instructions
+        let instruction_name = if *b == ByteCode::Jmp as u8 {
+            let offset = ((bytes[idx + 1] as usize) << 8) + bytes[idx + 2] as usize;
+            let target = idx + offset;
+            idx += 2;
+            format!("JMP -> {}", target)
+        } else if *b == ByteCode::JmpZ as u8 {
+            let offset = ((bytes[idx + 1] as usize) << 8) + bytes[idx + 2] as usize;
+            let target = idx + offset;
+            idx += 2;
+            format!("JMPZ -> {}", target)
+        } else if *b == ByteCode::JmpNZ as u8 {
+            let offset = ((bytes[idx + 1] as usize) << 8) + bytes[idx + 2] as usize;
+            let target = idx + offset;
+            idx += 2;
+            format!("JMPNZ -> {}", target)
+        } else if *b == ByteCode::JmpUp as u8 {
+            let offset = ((bytes[idx + 1] as usize) << 8) + bytes[idx + 2] as usize;
+            let target = idx.saturating_sub(offset);
+            idx += 2;
+            format!("JMPUP -> {}", target)
+        } else if *b == ByteCode::JmpInitArg as u8 {
+            let offset = ((bytes[idx + 1] as usize) << 8) + bytes[idx + 2] as usize;
+            let target = idx + offset;
+            idx += 2;
+            format!("JmpInitArg -> {}", target)
+        } else if *b == ByteCode::LoopStart as u8 {
+            let offset = ((bytes[idx + 1] as usize) << 8) + bytes[idx + 2] as usize;
+            let target = idx + offset;
+            idx += 2;
+            format!("Loop Start -> {}", target)
         } else if *b == ByteCode::VariableDeclaration as u8 {
-            out.push_str(&format!("let"));
-        } else if *b == ByteCode::NoOp as u8 {
-            out.push_str(&format!("no-op"));
-        } else if *b == ByteCode::Pop as u8 {
-            out.push_str(&format!("pop"));
+            let len = bytes[idx+1] as usize;
+            let slice = &bytes[idx+2..idx+2+len];
+            idx += len + 1;
+            format!(r#"let "{}""#, debug_u8s(slice))
         } else if *b == ByteCode::Assignment as u8 {
-            out.push_str(&format!("assignment"));
+            let len = bytes[idx+1] as usize;
+            let slice = &bytes[idx+2..idx+2+len];
+            idx += len + 1;
+            format!(r#"assignment "{}""#, debug_u8s(slice))
+        } else if *b == ByteCode::NoOp as u8 {
+            format!("no-op")
+        } else if *b == ByteCode::Pop as u8 {
+            format!("pop")
         } else if *b == ByteCode::Call as u8 {
             let arg_count = bytes[idx+1] as usize;
             let kwarg_count = bytes[idx+2] as usize;
-            out.push_str(&format!("call args={}  kwargs={}", arg_count, kwarg_count));
             idx += 2;
+            format!("call args={}  kwargs={}", arg_count, kwarg_count)
         } else if *b == ByteCode::Not as u8 {
-            out.push_str(&format!("Not"));
+            format!("Not")
         } else if *b == ByteCode::GT as u8 {
-            out.push_str(&format!("GT"));
+            format!("GT")
         } else if *b == ByteCode::GTE as u8 {
-            out.push_str(&format!("GTE"));
+            format!("GTE")
         } else if *b == ByteCode::LT as u8 {
-            out.push_str(&format!("LT"));
+            format!("LT")
         } else if *b == ByteCode::LTE as u8 {
-            out.push_str(&format!("LTE"));
+            format!("LTE")
         } else if *b == ByteCode::Index as u8 {
-            out.push_str(&format!("index"));
+            format!("index")
         } else if *b == ByteCode::Add as u8 {
-            out.push_str(&format!("add"));
+            format!("add")
+        } else if *b == ByteCode::Sub as u8 {
+            format!("sub")
+        } else if *b == ByteCode::Multiply as u8 {
+            format!("mul")
+        } else if *b == ByteCode::Divide as u8 {
+            format!("div")
+        } else if *b == ByteCode::Modulus as u8 {
+            format!("mod")
+        } else if *b == ByteCode::Equal as u8 {
+            format!("equal")
+        } else if *b == ByteCode::NotEqual as u8 {
+            format!("not_equal")
+        } else if *b == ByteCode::Negate as u8 {
+            format!("negate")
+        } else if *b == ByteCode::In as u8 {
+            format!("in")
+        } else if *b == ByteCode::Stringify as u8 {
+            format!("stringify")
         } else if *b == ByteCode::CreateFn as u8 {
-            out.push_str(&format!("fn"));
-        } else if *b == ByteCode::JmpZ as u8 {
-            out.push_str(&format!("JMPZ"));
-        } else if *b == ByteCode::JmpNZ as u8 {
-            out.push_str(&format!("JMPNZ"));
-        } else if *b == ByteCode::JmpUp as u8 {
-            out.push_str(&format!("JMPUP"));
-        } else if *b == ByteCode::JmpInitArg as u8 {
-            out.push_str(&format!("JmpInitArg"));
+            let offset = ((bytes[idx + 1] as usize) << 8) + bytes[idx + 2] as usize;
+            idx += 2;
+            format!("fn offset={}", offset)
         } else if *b == ByteCode::UnpackArgs as u8 {
-            out.push_str(&format!("unpack_args"));
+            let required_arg_count = bytes[idx + 1] as usize;
+            let optional_arg_count = bytes[idx + 2] as usize;
+            let mut arg_idx = idx + 3;
+            let mut args = Vec::new();
+            for _ in 0..(required_arg_count + optional_arg_count) {
+                let len = bytes[arg_idx];
+                let param_name = &bytes[arg_idx + 1..arg_idx + 1 + len as usize];
+                args.push(debug_u8s(param_name));
+                arg_idx = arg_idx + 1 + len as usize;
+            }
+            idx = arg_idx - 1;  // -1 because we'll add 1 at the end
+            format!("unpack_args req={} opt={} ({})", required_arg_count, optional_arg_count, args.join(", "))
         } else if *b == ByteCode::AssignArg as u8 {
-            out.push_str(&format!("assign arg"));
-        } else if *b == ByteCode::CreateFn as u8 {
-            out.push_str(&format!("fn"));
+            let arg_num = bytes[idx + 1] as usize;
+            idx += 1;
+            format!("assign arg {}", arg_num)
         } else if *b == ByteCode::CreateStruct as u8 {
-            out.push_str(&format!("create struct"));
+            let offset = ((bytes[idx + 1] as usize) << 8) + bytes[idx + 2] as usize;
+            let target = idx + offset;
+            idx = target - 1;  // -1 because we'll add 1 at the end
+            format!("create struct -> {}", target)
         } else if *b == ByteCode::GetAttr as u8 {
-            out.push_str(&format!("get"));
+            let len = bytes[idx+1] as usize;
+            let slice = &bytes[idx+2..idx+2+len];
+            idx += len + 1;
+            format!(r#"get "{}""#, debug_u8s(slice))
         } else if *b == ByteCode::SetAttr as u8 {
-            out.push_str(&format!("set"));
+            let len = bytes[idx+1] as usize;
+            let slice = &bytes[idx+2..idx+2+len];
+            idx += len + 1;
+            format!(r#"set "{}""#, debug_u8s(slice))
         } else if *b == ByteCode::VariableLoad as u8 {
             let len = bytes[idx+1] as usize;
             let slice = &bytes[idx+2..idx+2+len];
-            out.push_str(&format!(r#"load "{}""#, debug_u8s(slice)));
             idx += len + 1;
+            format!(r#"load "{}""#, debug_u8s(slice))
         } else if *b == ByteCode::Break as u8 {
-            out.push_str(&format!("break"));
+            format!("break")
         } else if *b == ByteCode::Continue as u8 {
-            out.push_str(&format!("continue"));
+            format!("continue")
         } else if *b == ByteCode::LiteralShimValue as u8 {
-            out.push_str(&format!("ShimValue"));
+            idx += 8;
+            format!("ShimValue")
         } else if *b == ByteCode::LiteralString as u8 {
             let len = bytes[idx+1] as usize;
             let slice = &bytes[idx+2..idx+2+len];
-            out.push_str(&format!(r#"String "{}""#, debug_u8s(slice)));
             idx += len + 1;
+            format!(r#"String "{}""#, debug_u8s(slice))
         } else if *b == ByteCode::LiteralNone as u8 {
-            out.push_str(&format!("None"));
+            format!("None")
         } else if *b == ByteCode::CreateList as u8 {
-            out.push_str(&format!("CreateList"));
+            let len = ((bytes[idx + 1] as usize) << 8) + bytes[idx + 2] as usize;
+            idx += 2;
+            format!("CreateList len={}", len)
         } else if *b == ByteCode::Copy as u8 {
-            out.push_str(&format!("Copy"));
-        } else if *b == ByteCode::LoopStart as u8 {
-            out.push_str(&format!("Loop Start"));
+            format!("Copy")
         } else if *b == ByteCode::LoopEnd as u8 {
-            out.push_str(&format!("Loop End"));
+            format!("Loop End")
         } else if *b == ByteCode::StartScope as u8 {
-            out.push_str(&format!("start_scope"));
+            format!("start_scope")
         } else if *b == ByteCode::EndScope as u8 {
-            out.push_str(&format!("end_scope"));
+            format!("end_scope")
+        } else if *b == ByteCode::SetIndex as u8 {
+            format!("set_index")
         } else if *b == ByteCode::Pad0 as u8 {
-            out.push_str(&format!(""));
+            format!("")
         } else if *b == ByteCode::Pad1 as u8 {
-            out.push_str(&format!(""));
+            format!("")
         } else if *b == ByteCode::Pad2 as u8 {
-            out.push_str(&format!(""));
+            format!("")
         } else if *b == ByteCode::Pad3 as u8 {
-            out.push_str(&format!(""));
+            format!("")
         } else if *b == ByteCode::Pad4 as u8 {
-            out.push_str(&format!(""));
+            format!("")
         } else if *b == ByteCode::Pad5 as u8 {
-            out.push_str(&format!(""));
+            format!("")
         } else if *b == ByteCode::Pad6 as u8 {
-            out.push_str(&format!(""));
+            format!("")
         } else if *b == ByteCode::Pad7 as u8 {
-            out.push_str(&format!(""));
+            format!("")
         } else if *b == ByteCode::Pad8 as u8 {
-            out.push_str(&format!(""));
+            format!("")
         } else if *b == ByteCode::Pad9 as u8 {
-            out.push_str(&format!(""));
+            format!("")
         } else if *b == ByteCode::Return as u8 {
-            out.push_str(&format!("return"));
-        }
-        out.push('\n');
+            format!("return")
+        } else {
+            format!("UNKNOWN({})", b)
+        };
+        
+        // Advance past the instruction byte
         idx += 1;
+        
+        // Format output with offset, bytecode value, next PC, and instruction
+        out.push_str(&format!("{}  {:3}  PC={:4}  {}\n", start_idx, b, idx, instruction_name));
     }
     out
 }

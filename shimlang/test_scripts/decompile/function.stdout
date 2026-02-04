@@ -1,0 +1,17 @@
+0  168  PC=   3  JMP -> 18
+3  128  PC=  10  unpack_args req=2 opt=0 (a, b)
+10  154  PC=  13  load "a"
+13  154  PC=  16  load "b"
+16  131  PC=  17  add
+17  167  PC=  18  return
+18  149  PC=  21  fn offset=15
+21  152  PC=  26  let "add"
+26  154  PC=  33  load "print"
+33  154  PC=  38  load "add"
+38  146  PC=  47  ShimValue
+47  146  PC=  56  ShimValue
+56  164  PC=  59  call args=2  kwargs=0
+59  164  PC=  62  call args=1  kwargs=0
+62  130  PC=  63  pop
+63  148  PC=  64  None
+

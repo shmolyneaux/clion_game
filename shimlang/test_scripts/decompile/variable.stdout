@@ -1,0 +1,10 @@
+0  146  PC=   9  ShimValue
+9  152  PC=  12  let "x"
+12  146  PC=  21  ShimValue
+21  153  PC=  24  assignment "x"
+24  154  PC=  31  load "print"
+31  154  PC=  34  load "x"
+34  164  PC=  37  call args=1  kwargs=0
+37  130  PC=  38  pop
+38  148  PC=  39  None
+
