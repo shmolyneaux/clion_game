@@ -3117,15 +3117,13 @@ fn shim_list_sort(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shi
         }
     });
     
-    // Create new sorted list
-    let new_lst_val = interpreter.mem.alloc_list();
-    let new_lst = new_lst_val.list_mut(interpreter)?;
-    
-    for (_, item, _) in items_with_keys {
-        new_lst.push(&mut interpreter.mem, item);
+    // Mutate the list in place
+    let lst_mut = obj.list_mut(interpreter)?;
+    for (idx, (_, item, _)) in items_with_keys.iter().enumerate() {
+        lst_mut.set(&mut interpreter.mem, idx as isize, *item)?;
     }
     
-    Ok(new_lst_val)
+    Ok(ShimValue::None)
 }
 
 // Helper function to compare two ShimValues
