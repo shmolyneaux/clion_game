@@ -1,0 +1,73 @@
+   0:  146  ShimValue
+   1:    3  
+   2:    0  no-op
+   3:    0  no-op
+   4:    0  no-op
+   5:    0  no-op
+   6:    0  no-op
+   7:    0  no-op
+   8:    0  no-op
+   9:  152  let
+  10:    1  
+  11:  105  
+  12:  159  Loop Start -> 96
+  15:  154  load "i"
+  18:  146  ShimValue
+  19:    3  
+  20:    0  no-op
+  21:    0  no-op
+  22:    0  no-op
+  23:    3  
+  24:    0  no-op
+  25:    0  no-op
+  26:    0  no-op
+  27:  140  LT
+  28:  171  JMPZ -> 96
+  31:  157  start_scope
+  32:  154  load "i"
+  35:  146  ShimValue
+  36:    3  
+  37:    0  no-op
+  38:    0  no-op
+  39:    0  no-op
+  40:    1  
+  41:    0  no-op
+  42:    0  no-op
+  43:    0  no-op
+  44:  131  add
+  45:  153  assignment
+  46:    1  
+  47:  105  
+  48:  154  load "i"
+  51:  146  ShimValue
+  52:    3  
+  53:    0  no-op
+  54:    0  no-op
+  55:    0  no-op
+  56:    2  
+  57:    0  no-op
+  58:    0  no-op
+  59:    0  no-op
+  60:  133  
+  61:  171  JMPZ -> 72
+  64:  157  start_scope
+  65:  163  continue
+  66:  148  None
+  67:  130  pop
+  68:  158  end_scope
+  69:  168  JMP -> 76
+  72:  157  start_scope
+  73:  148  None
+  74:  130  pop
+  75:  158  end_scope
+  76:  154  load "print"
+  83:  154  load "i"
+  86:  164  call args=1  kwargs=0
+  89:  130  pop
+  90:  148  None
+  91:  130  pop
+  92:  158  end_scope
+  93:  169  JMPUP -> 15
+  96:  160  Loop End
+  97:  148  None
+

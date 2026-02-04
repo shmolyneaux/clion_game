@@ -5786,7 +5786,10 @@ pub fn format_asm(bytes: &[u8]) -> String {
         out.push_str(&format!("{idx:4}:  {b:3}  "));
 
         if *b == ByteCode::Jmp as u8 {
-            out.push_str(&format!("JMP"));
+            let offset = ((bytes[idx + 1] as usize) << 8) + bytes[idx + 2] as usize;
+            let target = idx + offset;
+            out.push_str(&format!("JMP -> {}", target));
+            idx += 2;
         } else if *b == ByteCode::VariableDeclaration as u8 {
             out.push_str(&format!("let"));
         } else if *b == ByteCode::NoOp as u8 {
@@ -5817,13 +5820,25 @@ pub fn format_asm(bytes: &[u8]) -> String {
         } else if *b == ByteCode::CreateFn as u8 {
             out.push_str(&format!("fn"));
         } else if *b == ByteCode::JmpZ as u8 {
-            out.push_str(&format!("JMPZ"));
+            let offset = ((bytes[idx + 1] as usize) << 8) + bytes[idx + 2] as usize;
+            let target = idx + offset;
+            out.push_str(&format!("JMPZ -> {}", target));
+            idx += 2;
         } else if *b == ByteCode::JmpNZ as u8 {
-            out.push_str(&format!("JMPNZ"));
+            let offset = ((bytes[idx + 1] as usize) << 8) + bytes[idx + 2] as usize;
+            let target = idx + offset;
+            out.push_str(&format!("JMPNZ -> {}", target));
+            idx += 2;
         } else if *b == ByteCode::JmpUp as u8 {
-            out.push_str(&format!("JMPUP"));
+            let offset = ((bytes[idx + 1] as usize) << 8) + bytes[idx + 2] as usize;
+            let target = idx.saturating_sub(offset);
+            out.push_str(&format!("JMPUP -> {}", target));
+            idx += 2;
         } else if *b == ByteCode::JmpInitArg as u8 {
-            out.push_str(&format!("JmpInitArg"));
+            let offset = ((bytes[idx + 1] as usize) << 8) + bytes[idx + 2] as usize;
+            let target = idx + offset;
+            out.push_str(&format!("JmpInitArg -> {}", target));
+            idx += 2;
         } else if *b == ByteCode::UnpackArgs as u8 {
             out.push_str(&format!("unpack_args"));
         } else if *b == ByteCode::AssignArg as u8 {
@@ -5859,7 +5874,10 @@ pub fn format_asm(bytes: &[u8]) -> String {
         } else if *b == ByteCode::Copy as u8 {
             out.push_str(&format!("Copy"));
         } else if *b == ByteCode::LoopStart as u8 {
-            out.push_str(&format!("Loop Start"));
+            let offset = ((bytes[idx + 1] as usize) << 8) + bytes[idx + 2] as usize;
+            let target = idx + offset;
+            out.push_str(&format!("Loop Start -> {}", target));
+            idx += 2;
         } else if *b == ByteCode::LoopEnd as u8 {
             out.push_str(&format!("Loop End"));
         } else if *b == ByteCode::StartScope as u8 {
