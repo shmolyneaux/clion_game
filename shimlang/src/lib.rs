@@ -2307,6 +2307,7 @@ enum StructAttribute {
 
 #[derive(Debug)]
 struct StructDef {
+    name: Vec<u8>,
     member_count: u8,
     lookup: Vec<(Vec<u8>, StructAttribute)>,
 }
@@ -2986,7 +2987,7 @@ impl StructDef {
         // TODO: if the StructDef changes it might be effectively non const sized
         // in interpreter memory
         const _: () = {
-            assert!(std::mem::size_of::<StructDef>() == 32);
+            assert!(std::mem::size_of::<StructDef>() == 56);
         };
         std::mem::size_of::<StructDef>() / 8
     }
@@ -4013,6 +4014,15 @@ impl ShimValue {
     fn get_attr(&self, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
         match self {
             ShimValue::Struct(pos) => {
+                // Handle __type__ special attribute
+                if ident == b"__type__" {
+                    unsafe {
+                        let def_pos: u64 = *interpreter.mem.get(*pos);
+                        let def_pos: Word = Word((def_pos as u32).into());
+                        return Ok(ShimValue::StructDef(def_pos));
+                    }
+                }
+                
                 unsafe {
                     let def_pos: u64 = *interpreter.mem.get(*pos);
                     let def_pos: Word = Word((def_pos as u32).into());
@@ -4033,6 +4043,15 @@ impl ShimValue {
                 Err(format!("Ident {:?} not found for {:?}", debug_u8s(ident), self))
             }
             ShimValue::StructDef(def_pos) => {
+                // Handle __name__ special attribute
+                if ident == b"__name__" {
+                    unsafe {
+                        let def: &StructDef = interpreter.mem.get(*def_pos);
+                        let name = def.name.clone();
+                        return Ok(interpreter.mem.alloc_str(&name));
+                    }
+                }
+                
                 unsafe {
                     let def: &StructDef = interpreter.mem.get(*def_pos);
                     for (attr, loc) in def.lookup.iter() {
@@ -4492,6 +4511,18 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
 
             // The +1 is for the constructor
             asm.push(((methods.len() + 1) as u8, Span { start: 0, end: 1 }));
+
+            // Add struct name
+            asm.push((
+                ident
+                    .len()
+                    .try_into()
+                    .expect("Struct name len should into u8"),
+                Span { start: 0, end: 1 },
+            ));
+            for b in ident.into_iter() {
+                asm.push((*b, Span { start: 0, end: 1 }));
+            }
 
             let member_names: Vec<Vec<u8>> = members_required.iter().cloned().chain(members_optional.iter().map(|(x, _)| x.clone())).collect();
 
@@ -5845,9 +5876,15 @@ impl Interpreter {
                     let member_count = bytes[pc + 3];
                     let method_count = bytes[pc + 4];
 
+                    let mut idx = pc + 5;
+                    
+                    // Read struct name
+                    let name_len = bytes[idx];
+                    let name = bytes[idx + 1..idx + 1 + name_len as usize].to_vec();
+                    idx = idx + 1 + name_len as usize;
+
                     let mut struct_table = Vec::new();
 
-                    let mut idx = pc + 5;
                     for member_idx in 0..member_count {
                         let ident_len = bytes[idx];
                         let ident = &bytes[idx + 1..idx + 1 + ident_len as usize];
@@ -5872,11 +5909,11 @@ impl Interpreter {
                         idx = idx + 1 + ident_len as usize;
                     }
                     const _: () = {
-                        assert!(std::mem::size_of::<StructDef>() == 32);
+                        assert!(std::mem::size_of::<StructDef>() == 56);
                     };
                     let pos = alloc!(
                         self.mem,
-                        Word(4.into()),
+                        Word(7.into()),
                         &format!("ByteCode::CreateStruct def PC {pc}")
                     );
 
@@ -5884,6 +5921,7 @@ impl Interpreter {
                         let ptr: *mut StructDef =
                             std::mem::transmute(&mut self.mem.mem[usize::from(pos.0)]);
                         ptr.write(StructDef {
+                            name: name,
                             member_count: member_count,
                             lookup: struct_table,
                         });
