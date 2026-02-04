@@ -1,15 +1,15 @@
-   0:  151  create struct
-   1:    0  no-op
+   0:  151  CREATE_STRUCT
+   1:    0  NOP
    2:  103  
-   3:    2  
-   4:    2  
-   5:    1  
+   3:    2  PAD1
+   4:    2  PAD1
+   5:    1  PAD0
    6:  120  
-   7:    1  
+   7:    1  PAD0
    8:  121  
-   9:    0  no-op
+   9:    0  NOP
   10:   31  
-  11:    8  
+  11:    8  PAD7
   12:   95  
   13:   95  
   14:  105  
@@ -18,9 +18,9 @@
   17:  116  
   18:   95  
   19:   95  
-  20:    0  no-op
+  20:    0  NOP
   21:   55  
-  22:    8  
+  22:    8  PAD7
   23:  100  
   24:  105  
   25:  115  
@@ -29,80 +29,80 @@
   28:  110  
   29:   99  
   30:  101  
-  31:  128  unpack_args
-  32:    2  
-  33:    0  no-op
-  34:    1  
+  31:  128  UNPACK_ARGS
+  32:    2  PAD1
+  33:    0  NOP
+  34:    1  PAD0
   35:  120  
-  36:    1  
+  36:    1  PAD0
   37:  121  
-  38:  154  load "Point"
-  45:  154  load "x"
-  48:  154  load "y"
-  51:  164  call args=2  kwargs=0
-  54:  167  return
-  55:  128  unpack_args
-  56:    1  
-  57:    0  no-op
-  58:    4  
+  38:  154  LOAD "Point"
+  45:  154  LOAD "x"
+  48:  154  LOAD "y"
+  51:  164  CALL args=2 kwargs=0
+  54:  167  RETURN
+  55:  128  UNPACK_ARGS
+  56:    1  PAD0
+  57:    0  NOP
+  58:    4  PAD3
   59:  115  
   60:  101  
   61:  108  
   62:  102  
-  63:  154  load "self"
-  69:  155  get
-  70:    1  
+  63:  154  LOAD "self"
+  69:  155  GET_ATTR
+  70:    1  PAD0
   71:  120  
-  72:  154  load "self"
-  78:  155  get
-  79:    1  
+  72:  154  LOAD "self"
+  78:  155  GET_ATTR
+  79:    1  PAD0
   80:  120  
   81:  135  
-  82:  154  load "self"
-  88:  155  get
-  89:    1  
+  82:  154  LOAD "self"
+  88:  155  GET_ATTR
+  89:    1  PAD0
   90:  121  
-  91:  154  load "self"
-  97:  155  get
-  98:    1  
+  91:  154  LOAD "self"
+  97:  155  GET_ATTR
+  98:    1  PAD0
   99:  121  
  100:  135  
- 101:  131  add
- 102:  167  return
- 103:  152  let
- 104:    5  
+ 101:  131  ADD
+ 102:  167  RETURN
+ 103:  152  VAR_DECL
+ 104:    5  PAD4
  105:   80  
  106:  111  
  107:  105  
  108:  110  
  109:  116  
- 110:  154  load "Point"
- 117:  146  ShimValue
- 118:    3  
- 119:    0  no-op
- 120:    0  no-op
- 121:    0  no-op
- 122:    3  
- 123:    0  no-op
- 124:    0  no-op
- 125:    0  no-op
- 126:  146  ShimValue
- 127:    3  
- 128:    0  no-op
- 129:    0  no-op
- 130:    0  no-op
- 131:    4  
- 132:    0  no-op
- 133:    0  no-op
- 134:    0  no-op
- 135:  164  call args=2  kwargs=0
- 138:  152  let
- 139:    1  
+ 110:  154  LOAD "Point"
+ 117:  146  SHIM_VALUE
+ 118:    3  PAD2
+ 119:    0  NOP
+ 120:    0  NOP
+ 121:    0  NOP
+ 122:    3  PAD2
+ 123:    0  NOP
+ 124:    0  NOP
+ 125:    0  NOP
+ 126:  146  SHIM_VALUE
+ 127:    3  PAD2
+ 128:    0  NOP
+ 129:    0  NOP
+ 130:    0  NOP
+ 131:    4  PAD3
+ 132:    0  NOP
+ 133:    0  NOP
+ 134:    0  NOP
+ 135:  164  CALL args=2 kwargs=0
+ 138:  152  VAR_DECL
+ 139:    1  PAD0
  140:  112  
- 141:  154  load "print"
- 148:  154  load "p"
- 151:  155  get
- 152:    8  
+ 141:  154  LOAD "print"
+ 148:  154  LOAD "p"
+ 151:  155  GET_ATTR
+ 152:    8  PAD7
  153:  100  
  154:  105  
  155:  115  
@@ -111,8 +111,8 @@
  158:  110  
  159:   99  
  160:  101  
- 161:  164  call args=0  kwargs=0
- 164:  164  call args=1  kwargs=0
- 167:  130  pop
- 168:  148  None
+ 161:  164  CALL args=0 kwargs=0
+ 164:  164  CALL args=1 kwargs=0
+ 167:  130  POP
+ 168:  148  NONE
 

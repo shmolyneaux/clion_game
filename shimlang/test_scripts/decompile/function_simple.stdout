@@ -1,33 +1,33 @@
    0:  168  JMP -> 34
-   3:  128  unpack_args
-   4:    0  no-op
-   5:    0  no-op
-   6:  154  load "print"
-  13:  147  String "Hello"
-  20:  164  call args=1  kwargs=0
-  23:  130  pop
-  24:  146  ShimValue
-  25:    2  
-  26:    0  no-op
-  27:    0  no-op
-  28:    0  no-op
-  29:    0  no-op
-  30:    0  no-op
-  31:    0  no-op
-  32:    0  no-op
-  33:  167  return
-  34:  149  fn
-  35:    0  no-op
+   3:  128  UNPACK_ARGS
+   4:    0  NOP
+   5:    0  NOP
+   6:  154  LOAD "print"
+  13:  147  STRING "Hello"
+  20:  164  CALL args=1 kwargs=0
+  23:  130  POP
+  24:  146  SHIM_VALUE
+  25:    2  PAD1
+  26:    0  NOP
+  27:    0  NOP
+  28:    0  NOP
+  29:    0  NOP
+  30:    0  NOP
+  31:    0  NOP
+  32:    0  NOP
+  33:  167  RETURN
+  34:  149  FN
+  35:    0  NOP
   36:   31  
-  37:  152  let
-  38:    5  
+  37:  152  VAR_DECL
+  38:    5  PAD4
   39:  103  
   40:  114  
   41:  101  
   42:  101  
   43:  116  
-  44:  154  load "greet"
-  51:  164  call args=0  kwargs=0
-  54:  130  pop
-  55:  148  None
+  44:  154  LOAD "greet"
+  51:  164  CALL args=0 kwargs=0
+  54:  130  POP
+  55:  148  NONE
 

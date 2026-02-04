@@ -1,24 +1,24 @@
-   0:  159  Loop Start -> 40
-   3:  146  ShimValue
-   4:    3  
-   5:    0  no-op
-   6:    0  no-op
-   7:    0  no-op
-   8:    1  
-   9:    0  no-op
-  10:    0  no-op
-  11:    0  no-op
+   0:  159  LOOP_START -> 40
+   3:  146  SHIM_VALUE
+   4:    3  PAD2
+   5:    0  NOP
+   6:    0  NOP
+   7:    0  NOP
+   8:    1  PAD0
+   9:    0  NOP
+  10:    0  NOP
+  11:    0  NOP
   12:  171  JMPZ -> 40
-  15:  157  start_scope
-  16:  154  load "print"
-  23:  147  String "loop"
-  29:  164  call args=1  kwargs=0
-  32:  130  pop
-  33:  162  break
-  34:  148  None
-  35:  130  pop
-  36:  158  end_scope
+  15:  157  START_SCOPE
+  16:  154  LOAD "print"
+  23:  147  STRING "loop"
+  29:  164  CALL args=1 kwargs=0
+  32:  130  POP
+  33:  162  BREAK
+  34:  148  NONE
+  35:  130  POP
+  36:  158  END_SCOPE
   37:  169  JMPUP -> 3
-  40:  160  Loop End
-  41:  148  None
+  40:  160  LOOP_END
+  41:  148  NONE
 

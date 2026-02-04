@@ -1,77 +1,77 @@
-   0:  146  ShimValue
-   1:    3  
-   2:    0  no-op
-   3:    0  no-op
-   4:    0  no-op
-   5:    1  
-   6:    0  no-op
-   7:    0  no-op
-   8:    0  no-op
-   9:  146  ShimValue
-  10:    3  
-  11:    0  no-op
-  12:    0  no-op
-  13:    0  no-op
-  14:    2  
-  15:    0  no-op
-  16:    0  no-op
-  17:    0  no-op
-  18:  146  ShimValue
-  19:    3  
-  20:    0  no-op
-  21:    0  no-op
-  22:    0  no-op
-  23:    3  
-  24:    0  no-op
-  25:    0  no-op
-  26:    0  no-op
-  27:  150  CreateList
-  28:    0  no-op
-  29:    3  
-  30:  152  let
-  31:    5  
+   0:  146  SHIM_VALUE
+   1:    3  PAD2
+   2:    0  NOP
+   3:    0  NOP
+   4:    0  NOP
+   5:    1  PAD0
+   6:    0  NOP
+   7:    0  NOP
+   8:    0  NOP
+   9:  146  SHIM_VALUE
+  10:    3  PAD2
+  11:    0  NOP
+  12:    0  NOP
+  13:    0  NOP
+  14:    2  PAD1
+  15:    0  NOP
+  16:    0  NOP
+  17:    0  NOP
+  18:  146  SHIM_VALUE
+  19:    3  PAD2
+  20:    0  NOP
+  21:    0  NOP
+  22:    0  NOP
+  23:    3  PAD2
+  24:    0  NOP
+  25:    0  NOP
+  26:    0  NOP
+  27:  150  CREATE_LIST
+  28:    0  NOP
+  29:    3  PAD2
+  30:  152  VAR_DECL
+  31:    5  PAD4
   32:  105  
   33:  116  
   34:  101  
   35:  109  
   36:  115  
-  37:  154  load "items"
-  44:  155  get
-  45:    4  
+  37:  154  LOAD "items"
+  44:  155  GET_ATTR
+  45:    4  PAD3
   46:  105  
   47:  116  
   48:  101  
   49:  114  
-  50:  164  call args=0  kwargs=0
-  53:  155  get
-  54:    4  
+  50:  164  CALL args=0 kwargs=0
+  53:  155  GET_ATTR
+  54:    4  PAD3
   55:  110  
   56:  101  
   57:  120  
   58:  116  
-  59:  159  Loop Start -> 102
-  62:  145  Copy
-  63:  164  call args=0  kwargs=0
-  66:  145  Copy
-  67:  152  let
-  68:    4  
+  59:  159  LOOP_START -> 102
+  62:  145  COPY
+  63:  164  CALL args=0 kwargs=0
+  66:  145  COPY
+  67:  152  VAR_DECL
+  68:    4  PAD3
   69:  105  
   70:  116  
   71:  101  
   72:  109  
-  73:  148  None
+  73:  148  NONE
   74:  133  
   75:  170  JMPNZ -> 102
-  78:  157  start_scope
-  79:  154  load "print"
-  86:  154  load "item"
-  92:  164  call args=1  kwargs=0
-  95:  130  pop
-  96:  148  None
-  97:  130  pop
-  98:  158  end_scope
+  78:  157  START_SCOPE
+  79:  154  LOAD "print"
+  86:  154  LOAD "item"
+  92:  164  CALL args=1 kwargs=0
+  95:  130  POP
+  96:  148  NONE
+  97:  130  POP
+  98:  158  END_SCOPE
   99:  169  JMPUP -> 62
- 102:  160  Loop End
- 103:  130  pop
- 104:  148  None
+ 102:  160  LOOP_END
+ 103:  130  POP
+ 104:  148  NONE
 

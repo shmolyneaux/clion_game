@@ -1,29 +1,29 @@
-   0:  146  ShimValue
-   1:    3  
-   2:    0  no-op
-   3:    0  no-op
-   4:    0  no-op
-   5:    0  no-op
-   6:    0  no-op
-   7:    0  no-op
-   8:    0  no-op
+   0:  146  SHIM_VALUE
+   1:    3  PAD2
+   2:    0  NOP
+   3:    0  NOP
+   4:    0  NOP
+   5:    0  NOP
+   6:    0  NOP
+   7:    0  NOP
+   8:    0  NOP
    9:  171  JMPZ -> 41
-  12:  157  start_scope
-  13:  154  load "print"
-  20:  147  String "not taken"
-  31:  164  call args=1  kwargs=0
-  34:  130  pop
-  35:  148  None
-  36:  130  pop
-  37:  158  end_scope
+  12:  157  START_SCOPE
+  13:  154  LOAD "print"
+  20:  147  STRING "not taken"
+  31:  164  CALL args=1 kwargs=0
+  34:  130  POP
+  35:  148  NONE
+  36:  130  POP
+  37:  158  END_SCOPE
   38:  168  JMP -> 63
-  41:  157  start_scope
-  42:  154  load "print"
-  49:  147  String "taken"
-  56:  164  call args=1  kwargs=0
-  59:  130  pop
-  60:  148  None
-  61:  130  pop
-  62:  158  end_scope
-  63:  148  None
+  41:  157  START_SCOPE
+  42:  154  LOAD "print"
+  49:  147  STRING "taken"
+  56:  164  CALL args=1 kwargs=0
+  59:  130  POP
+  60:  148  NONE
+  61:  130  POP
+  62:  158  END_SCOPE
+  63:  148  NONE
 
