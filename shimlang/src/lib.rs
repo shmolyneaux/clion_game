@@ -5792,9 +5792,9 @@ pub fn format_asm(bytes: &[u8]) -> String {
             idx += 2;
         } else if *b == ByteCode::VariableDeclaration as u8 {
             if idx + 1 < bytes.len() {
-                let len = bytes[idx+1] as usize;
+                let len = bytes[idx + 1] as usize;
                 if idx + 2 + len <= bytes.len() {
-                    let slice = &bytes[idx+2..idx+2+len];
+                    let slice = &bytes[idx + 2..idx + 2 + len];
                     out.push_str(&format!(r#"let "{}""#, debug_u8s(slice)));
                     idx += len + 1;
                 } else {
@@ -5852,8 +5852,8 @@ pub fn format_asm(bytes: &[u8]) -> String {
             idx += 2;
         } else if *b == ByteCode::UnpackArgs as u8 {
             if idx + 2 < bytes.len() {
-                let required_arg_count = bytes[idx+1] as usize;
-                let optional_arg_count = bytes[idx+2] as usize;
+                let required_arg_count = bytes[idx + 1] as usize;
+                let optional_arg_count = bytes[idx + 2] as usize;
                 
                 let mut param_names = Vec::new();
                 let mut param_idx = idx + 3;
@@ -5893,9 +5893,9 @@ pub fn format_asm(bytes: &[u8]) -> String {
             out.push_str(&format!("create struct"));
         } else if *b == ByteCode::GetAttr as u8 {
             if idx + 1 < bytes.len() {
-                let len = bytes[idx+1] as usize;
+                let len = bytes[idx + 1] as usize;
                 if idx + 2 + len <= bytes.len() {
-                    let slice = &bytes[idx+2..idx+2+len];
+                    let slice = &bytes[idx + 2..idx + 2 + len];
                     out.push_str(&format!(r#"get .{}"#, debug_u8s(slice)));
                     idx += len + 1;
                 } else {
@@ -5906,9 +5906,9 @@ pub fn format_asm(bytes: &[u8]) -> String {
             }
         } else if *b == ByteCode::SetAttr as u8 {
             if idx + 1 < bytes.len() {
-                let len = bytes[idx+1] as usize;
+                let len = bytes[idx + 1] as usize;
                 if idx + 2 + len <= bytes.len() {
-                    let slice = &bytes[idx+2..idx+2+len];
+                    let slice = &bytes[idx + 2..idx + 2 + len];
                     out.push_str(&format!(r#"set .{}"#, debug_u8s(slice)));
                     idx += len + 1;
                 } else {
