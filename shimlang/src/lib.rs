@@ -3296,6 +3296,20 @@ fn trim_bytes(s: &[u8]) -> &[u8] {
     &s[start..end]
 }
 
+fn parse_string_to<T: std::str::FromStr>(
+    s: &[u8],
+    type_name: &str,
+) -> Result<T, String> {
+    let trimmed = trim_bytes(s);
+    unsafe {
+        std::str::from_utf8_unchecked(trimmed).parse::<T>()
+            .map_err(|_| {
+                let string_repr = std::str::from_utf8(s).unwrap_or("<invalid utf8>");
+                format!("Cannot convert string '{}' to {}", string_repr, type_name)
+            })
+    }
+}
+
 fn shim_str(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let value = unpacker.required(b"value")?;
@@ -3317,15 +3331,7 @@ fn shim_int(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue
         ShimValue::Bool(b) => Ok(ShimValue::Integer(if b { 1 } else { 0 })),
         ShimValue::String(_) => {
             let s = value.string(interpreter)?;
-            let trimmed = trim_bytes(s);
-            unsafe {
-                std::str::from_utf8_unchecked(trimmed).parse::<i32>()
-                    .map(ShimValue::Integer)
-                    .map_err(|_| {
-                        let string_repr = std::str::from_utf8(s).unwrap_or("<invalid utf8>");
-                        format!("Cannot convert string '{}' to int", string_repr)
-                    })
-            }
+            parse_string_to::<i32>(s, "int").map(ShimValue::Integer)
         },
         _ => Err(format!("Cannot convert {} to int", get_type_name(&value)))
     }
@@ -3342,15 +3348,7 @@ fn shim_float(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimVal
         ShimValue::Bool(b) => Ok(ShimValue::Float(if b { 1.0 } else { 0.0 })),
         ShimValue::String(_) => {
             let s = value.string(interpreter)?;
-            let trimmed = trim_bytes(s);
-            unsafe {
-                std::str::from_utf8_unchecked(trimmed).parse::<f32>()
-                    .map(ShimValue::Float)
-                    .map_err(|_| {
-                        let string_repr = std::str::from_utf8(s).unwrap_or("<invalid utf8>");
-                        format!("Cannot convert string '{}' to float", string_repr)
-                    })
-            }
+            parse_string_to::<f32>(s, "float").map(ShimValue::Float)
         },
         _ => Err(format!("Cannot convert {} to float", get_type_name(&value)))
     }
@@ -3367,12 +3365,9 @@ fn shim_try_int(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimV
         ShimValue::Bool(b) => Some(ShimValue::Integer(if b { 1 } else { 0 })),
         ShimValue::String(_) => {
             let s = value.string(interpreter)?;
-            let trimmed = trim_bytes(s);
-            unsafe {
-                std::str::from_utf8_unchecked(trimmed).parse::<i32>()
-                    .map(ShimValue::Integer)
-                    .ok()
-            }
+            parse_string_to::<i32>(s, "int")
+                .map(ShimValue::Integer)
+                .ok()
         },
         _ => None
     };
@@ -3391,12 +3386,9 @@ fn shim_try_float(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shi
         ShimValue::Bool(b) => Some(ShimValue::Float(if b { 1.0 } else { 0.0 })),
         ShimValue::String(_) => {
             let s = value.string(interpreter)?;
-            let trimmed = trim_bytes(s);
-            unsafe {
-                std::str::from_utf8_unchecked(trimmed).parse::<f32>()
-                    .map(ShimValue::Float)
-                    .ok()
-            }
+            parse_string_to::<f32>(s, "float")
+                .map(ShimValue::Float)
+                .ok()
         },
         _ => None
     };
