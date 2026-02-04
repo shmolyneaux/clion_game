@@ -5921,8 +5921,8 @@ impl Interpreter {
                         let ptr: *mut StructDef =
                             std::mem::transmute(&mut self.mem.mem[usize::from(pos.0)]);
                         ptr.write(StructDef {
-                            name: name,
-                            member_count: member_count,
+                            name,
+                            member_count,
                             lookup: struct_table,
                         });
                     }
