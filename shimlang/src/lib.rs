@@ -3072,11 +3072,127 @@ fn shim_panic(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimVal
 fn shim_list_sort(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let obj = unpacker.required(b"obj")?;
-    let _lst = obj.list(interpreter)?;
-    let _key = unpacker.optional(b"key");
+    let lst = obj.list(interpreter)?;
+    let key = unpacker.optional(b"key");
     unpacker.end()?;
 
-    todo!();
+    // Create a vector of (index, value, sort_key) tuples to maintain stability
+    let mut items_with_keys: Vec<(usize, ShimValue, ShimValue)> = Vec::new();
+    
+    for idx in 0..lst.len() {
+        let item = lst.get(&interpreter.mem, idx as isize)?;
+        
+        let sort_key = if let Some(key) = key {
+            let mut args = ArgBundle::new();
+            args.args.push(item);
+            match key.call(interpreter, &mut args)? {
+                CallResult::ReturnValue(val) => val,
+                CallResult::PC(pc) => {
+                    interpreter.execute_bytecode_extended(
+                        &mut (pc as usize),
+                        args,
+                        &mut Environment::new(),
+                    )?
+                },
+            }
+        } else {
+            item
+        };
+        
+        items_with_keys.push((idx, item, sort_key));
+    }
+    
+    // Perform stable sort by comparing sort keys
+    items_with_keys.sort_by(|a, b| {
+        let (idx_a, _, key_a) = a;
+        let (idx_b, _, key_b) = b;
+        
+        // Try to compare the keys
+        match compare_values(interpreter, key_a, key_b) {
+            Ok(ordering) => ordering,
+            Err(_) => {
+                // If comparison fails, maintain original order (stability)
+                idx_a.cmp(idx_b)
+            }
+        }
+    });
+    
+    // Mutate the list in place
+    let lst_mut = obj.list_mut(interpreter)?;
+    for (idx, (_, item, _)) in items_with_keys.iter().enumerate() {
+        lst_mut.set(&mut interpreter.mem, idx as isize, *item)?;
+    }
+    
+    Ok(ShimValue::None)
+}
+
+// Helper function to compare two ShimValues
+fn compare_values(interpreter: &mut Interpreter, a: &ShimValue, b: &ShimValue) -> Result<std::cmp::Ordering, String> {
+    use std::cmp::Ordering;
+    
+    match (a, b) {
+        (ShimValue::Integer(x), ShimValue::Integer(y)) => Ok(x.cmp(y)),
+        (ShimValue::Float(x), ShimValue::Float(y)) => {
+            // Handle NaN comparison by treating NaN as equal to itself
+            if x.is_nan() && y.is_nan() {
+                Ok(Ordering::Equal)
+            } else if x.is_nan() {
+                Ok(Ordering::Greater)
+            } else if y.is_nan() {
+                Ok(Ordering::Less)
+            } else if x < y {
+                Ok(Ordering::Less)
+            } else if x > y {
+                Ok(Ordering::Greater)
+            } else {
+                Ok(Ordering::Equal)
+            }
+        },
+        (ShimValue::Integer(x), ShimValue::Float(y)) => {
+            let x_f = *x as f32;
+            if x_f < *y {
+                Ok(Ordering::Less)
+            } else if x_f > *y {
+                Ok(Ordering::Greater)
+            } else {
+                Ok(Ordering::Equal)
+            }
+        },
+        (ShimValue::Float(x), ShimValue::Integer(y)) => {
+            let y_f = *y as f32;
+            if *x < y_f {
+                Ok(Ordering::Less)
+            } else if *x > y_f {
+                Ok(Ordering::Greater)
+            } else {
+                Ok(Ordering::Equal)
+            }
+        },
+        (ShimValue::String(_), ShimValue::String(_)) => {
+            let str_a = a.string(interpreter)?;
+            let str_b = b.string(interpreter)?;
+            Ok(str_a.cmp(&str_b))
+        },
+        (ShimValue::Bool(x), ShimValue::Bool(y)) => Ok(x.cmp(y)),
+        (ShimValue::None, ShimValue::None) => Ok(Ordering::Equal),
+        (ShimValue::List(_), ShimValue::List(_)) => {
+            // Compare lists lexicographically
+            let lst_a = a.list(interpreter)?;
+            let lst_b = b.list(interpreter)?;
+            
+            let min_len = std::cmp::min(lst_a.len(), lst_b.len());
+            for i in 0..min_len {
+                let item_a = lst_a.get(&interpreter.mem, i as isize)?;
+                let item_b = lst_b.get(&interpreter.mem, i as isize)?;
+                match compare_values(interpreter, &item_a, &item_b)? {
+                    Ordering::Equal => continue,
+                    other => return Ok(other),
+                }
+            }
+            Ok(lst_a.len().cmp(&lst_b.len()))
+        },
+        _ => Err(format!("Cannot compare {:?} and {:?}", a, b)),
+    }
 }
 
 fn shim_list_filter(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
@@ -3955,6 +4071,13 @@ impl ShimValue {
             (ShimValue::String(_), ShimValue::String(_)) => {
                 Ok(ShimValue::Bool(self.string(interpreter)? > other.string(interpreter)?))
             },
+            (ShimValue::List(_), ShimValue::List(_)) => {
+                match compare_values(interpreter, self, other) {
+                    Ok(std::cmp::Ordering::Greater) => Ok(ShimValue::Bool(true)),
+                    Ok(_) => Ok(ShimValue::Bool(false)),
+                    Err(e) => Err(e),
+                }
+            },
             (a, b) => Err(format!("Can't GT {:?} and {:?}", a, b)),
         }
     }
@@ -3969,6 +4092,13 @@ impl ShimValue {
             (ShimValue::None, ShimValue::None) => Ok(ShimValue::Bool(true)),
             (ShimValue::String(_), ShimValue::String(_)) => {
                 Ok(ShimValue::Bool(self.string(interpreter)? >= other.string(interpreter)?))
+            },
+            (ShimValue::List(_), ShimValue::List(_)) => {
+                match compare_values(interpreter, self, other) {
+                    Ok(std::cmp::Ordering::Greater) | Ok(std::cmp::Ordering::Equal) => Ok(ShimValue::Bool(true)),
+                    Ok(std::cmp::Ordering::Less) => Ok(ShimValue::Bool(false)),
+                    Err(e) => Err(e),
+                }
             },
             (a, b) => Err(format!("Can't GTE {:?} and {:?}", a, b)),
         }
@@ -3987,6 +4117,13 @@ impl ShimValue {
                 Ok(ShimValue::Bool(self.string(interpreter)? < other.string(interpreter)?))
             },
             (ShimValue::None, ShimValue::None) => Ok(ShimValue::Bool(false)),
+            (ShimValue::List(_), ShimValue::List(_)) => {
+                match compare_values(interpreter, self, other) {
+                    Ok(std::cmp::Ordering::Less) => Ok(ShimValue::Bool(true)),
+                    Ok(_) => Ok(ShimValue::Bool(false)),
+                    Err(e) => Err(e),
+                }
+            },
             (a, b) => Err(format!("Can't LT {:?} and {:?}", a, b)),
         }
     }
@@ -4001,6 +4138,13 @@ impl ShimValue {
             (ShimValue::None, ShimValue::None) => Ok(ShimValue::Bool(true)),
             (ShimValue::String(_), ShimValue::String(_)) => {
                 Ok(ShimValue::Bool(self.string(interpreter)? <= other.string(interpreter)?))
+            },
+            (ShimValue::List(_), ShimValue::List(_)) => {
+                match compare_values(interpreter, self, other) {
+                    Ok(std::cmp::Ordering::Less) | Ok(std::cmp::Ordering::Equal) => Ok(ShimValue::Bool(true)),
+                    Ok(std::cmp::Ordering::Greater) => Ok(ShimValue::Bool(false)),
+                    Err(e) => Err(e),
+                }
             },
             (a, b) => Err(format!("Can't LTE {:?} and {:?}", a, b)),
         }
