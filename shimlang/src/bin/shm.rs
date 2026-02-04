@@ -31,6 +31,25 @@ struct Args {
     command: Command,
 }
 
+fn print_help() {
+    println!("Usage: shm [OPTIONS] [FILE]");
+    println!();
+    println!("Shimlang interpreter and compiler");
+    println!();
+    println!("Arguments:");
+    println!("  [FILE]              Script file to execute (or script content with -c)");
+    println!();
+    println!("Options:");
+    println!("  -c                  Treat positional argument as script content instead of file path");
+    println!("  --gc                Run garbage collector after execution");
+    println!("  --parse             Parse the script and check syntax without execution");
+    println!("  --spans             Display lexical spans (tokens) from the script");
+    println!("  --compile           Compile and display the bytecode assembly");
+    println!("  --help              Display this help message");
+    println!();
+    println!("If no FILE is provided, starts an interactive REPL.");
+}
+
 fn parse_args() -> Result<Args, String> {
     let mut args = Args::default();
 
@@ -38,6 +57,9 @@ fn parse_args() -> Result<Args, String> {
         // Skip the name of the executable, which is the first arg
         if idx == 0 {
             continue;
+        } else if arg == "--help" || arg == "-h" {
+            print_help();
+            std::process::exit(0);
         } else if !arg.starts_with('-') {
             if let Some(existing_positional_arg) = args.pos {
                 return Err(format!(
