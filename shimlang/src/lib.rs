@@ -5885,25 +5885,25 @@ pub fn format_asm(bytes: &[u8]) -> String {
         } else if *b == ByteCode::EndScope as u8 {
             out.push_str(&format!("END_SCOPE"));
         } else if *b == ByteCode::Pad0 as u8 {
-            out.push_str(&format!("PAD"));
+            out.push_str(&format!("PAD0"));
         } else if *b == ByteCode::Pad1 as u8 {
-            out.push_str(&format!("PAD"));
+            out.push_str(&format!("PAD1"));
         } else if *b == ByteCode::Pad2 as u8 {
-            out.push_str(&format!("PAD"));
+            out.push_str(&format!("PAD2"));
         } else if *b == ByteCode::Pad3 as u8 {
-            out.push_str(&format!("PAD"));
+            out.push_str(&format!("PAD3"));
         } else if *b == ByteCode::Pad4 as u8 {
-            out.push_str(&format!("PAD"));
+            out.push_str(&format!("PAD4"));
         } else if *b == ByteCode::Pad5 as u8 {
-            out.push_str(&format!("PAD"));
+            out.push_str(&format!("PAD5"));
         } else if *b == ByteCode::Pad6 as u8 {
-            out.push_str(&format!("PAD"));
+            out.push_str(&format!("PAD6"));
         } else if *b == ByteCode::Pad7 as u8 {
-            out.push_str(&format!("PAD"));
+            out.push_str(&format!("PAD7"));
         } else if *b == ByteCode::Pad8 as u8 {
-            out.push_str(&format!("PAD"));
+            out.push_str(&format!("PAD8"));
         } else if *b == ByteCode::Pad9 as u8 {
-            out.push_str(&format!("PAD"));
+            out.push_str(&format!("PAD9"));
         } else if *b == ByteCode::Return as u8 {
             out.push_str(&format!("RETURN"));
         }
