@@ -5791,20 +5791,20 @@ pub fn format_asm(bytes: &[u8]) -> String {
             out.push_str(&format!("JMP -> {}", target));
             idx += 2;
         } else if *b == ByteCode::VariableDeclaration as u8 {
-            out.push_str(&format!("let"));
+            out.push_str(&format!("VAR_DECL"));
         } else if *b == ByteCode::NoOp as u8 {
-            out.push_str(&format!("no-op"));
+            out.push_str(&format!("NOP"));
         } else if *b == ByteCode::Pop as u8 {
-            out.push_str(&format!("pop"));
+            out.push_str(&format!("POP"));
         } else if *b == ByteCode::Assignment as u8 {
-            out.push_str(&format!("assignment"));
+            out.push_str(&format!("ASSIGN"));
         } else if *b == ByteCode::Call as u8 {
             let arg_count = bytes[idx+1] as usize;
             let kwarg_count = bytes[idx+2] as usize;
-            out.push_str(&format!("call args={}  kwargs={}", arg_count, kwarg_count));
+            out.push_str(&format!("CALL args={} kwargs={}", arg_count, kwarg_count));
             idx += 2;
         } else if *b == ByteCode::Not as u8 {
-            out.push_str(&format!("Not"));
+            out.push_str(&format!("NOT"));
         } else if *b == ByteCode::GT as u8 {
             out.push_str(&format!("GT"));
         } else if *b == ByteCode::GTE as u8 {
@@ -5814,11 +5814,11 @@ pub fn format_asm(bytes: &[u8]) -> String {
         } else if *b == ByteCode::LTE as u8 {
             out.push_str(&format!("LTE"));
         } else if *b == ByteCode::Index as u8 {
-            out.push_str(&format!("index"));
+            out.push_str(&format!("INDEX"));
         } else if *b == ByteCode::Add as u8 {
-            out.push_str(&format!("add"));
+            out.push_str(&format!("ADD"));
         } else if *b == ByteCode::CreateFn as u8 {
-            out.push_str(&format!("fn"));
+            out.push_str(&format!("FN"));
         } else if *b == ByteCode::JmpZ as u8 {
             let offset = ((bytes[idx + 1] as usize) << 8) + bytes[idx + 2] as usize;
             let target = idx + offset;
@@ -5837,75 +5837,75 @@ pub fn format_asm(bytes: &[u8]) -> String {
         } else if *b == ByteCode::JmpInitArg as u8 {
             let offset = ((bytes[idx + 1] as usize) << 8) + bytes[idx + 2] as usize;
             let target = idx + offset;
-            out.push_str(&format!("JmpInitArg -> {}", target));
+            out.push_str(&format!("JMP_INIT_ARG -> {}", target));
             idx += 2;
         } else if *b == ByteCode::UnpackArgs as u8 {
-            out.push_str(&format!("unpack_args"));
+            out.push_str(&format!("UNPACK_ARGS"));
         } else if *b == ByteCode::AssignArg as u8 {
-            out.push_str(&format!("assign arg"));
+            out.push_str(&format!("ASSIGN_ARG"));
         } else if *b == ByteCode::CreateFn as u8 {
-            out.push_str(&format!("fn"));
+            out.push_str(&format!("FN"));
         } else if *b == ByteCode::CreateStruct as u8 {
-            out.push_str(&format!("create struct"));
+            out.push_str(&format!("CREATE_STRUCT"));
         } else if *b == ByteCode::GetAttr as u8 {
-            out.push_str(&format!("get"));
+            out.push_str(&format!("GET_ATTR"));
         } else if *b == ByteCode::SetAttr as u8 {
-            out.push_str(&format!("set"));
+            out.push_str(&format!("SET_ATTR"));
         } else if *b == ByteCode::VariableLoad as u8 {
             let len = bytes[idx+1] as usize;
             let slice = &bytes[idx+2..idx+2+len];
-            out.push_str(&format!(r#"load "{}""#, debug_u8s(slice)));
+            out.push_str(&format!(r#"LOAD "{}""#, debug_u8s(slice)));
             idx += len + 1;
         } else if *b == ByteCode::Break as u8 {
-            out.push_str(&format!("break"));
+            out.push_str(&format!("BREAK"));
         } else if *b == ByteCode::Continue as u8 {
-            out.push_str(&format!("continue"));
+            out.push_str(&format!("CONTINUE"));
         } else if *b == ByteCode::LiteralShimValue as u8 {
-            out.push_str(&format!("ShimValue"));
+            out.push_str(&format!("SHIM_VALUE"));
         } else if *b == ByteCode::LiteralString as u8 {
             let len = bytes[idx+1] as usize;
             let slice = &bytes[idx+2..idx+2+len];
-            out.push_str(&format!(r#"String "{}""#, debug_u8s(slice)));
+            out.push_str(&format!(r#"STRING "{}""#, debug_u8s(slice)));
             idx += len + 1;
         } else if *b == ByteCode::LiteralNone as u8 {
-            out.push_str(&format!("None"));
+            out.push_str(&format!("NONE"));
         } else if *b == ByteCode::CreateList as u8 {
-            out.push_str(&format!("CreateList"));
+            out.push_str(&format!("CREATE_LIST"));
         } else if *b == ByteCode::Copy as u8 {
-            out.push_str(&format!("Copy"));
+            out.push_str(&format!("COPY"));
         } else if *b == ByteCode::LoopStart as u8 {
             let offset = ((bytes[idx + 1] as usize) << 8) + bytes[idx + 2] as usize;
             let target = idx + offset;
-            out.push_str(&format!("Loop Start -> {}", target));
+            out.push_str(&format!("LOOP_START -> {}", target));
             idx += 2;
         } else if *b == ByteCode::LoopEnd as u8 {
-            out.push_str(&format!("Loop End"));
+            out.push_str(&format!("LOOP_END"));
         } else if *b == ByteCode::StartScope as u8 {
-            out.push_str(&format!("start_scope"));
+            out.push_str(&format!("START_SCOPE"));
         } else if *b == ByteCode::EndScope as u8 {
-            out.push_str(&format!("end_scope"));
+            out.push_str(&format!("END_SCOPE"));
         } else if *b == ByteCode::Pad0 as u8 {
-            out.push_str(&format!(""));
+            out.push_str(&format!("PAD"));
         } else if *b == ByteCode::Pad1 as u8 {
-            out.push_str(&format!(""));
+            out.push_str(&format!("PAD"));
         } else if *b == ByteCode::Pad2 as u8 {
-            out.push_str(&format!(""));
+            out.push_str(&format!("PAD"));
         } else if *b == ByteCode::Pad3 as u8 {
-            out.push_str(&format!(""));
+            out.push_str(&format!("PAD"));
         } else if *b == ByteCode::Pad4 as u8 {
-            out.push_str(&format!(""));
+            out.push_str(&format!("PAD"));
         } else if *b == ByteCode::Pad5 as u8 {
-            out.push_str(&format!(""));
+            out.push_str(&format!("PAD"));
         } else if *b == ByteCode::Pad6 as u8 {
-            out.push_str(&format!(""));
+            out.push_str(&format!("PAD"));
         } else if *b == ByteCode::Pad7 as u8 {
-            out.push_str(&format!(""));
+            out.push_str(&format!("PAD"));
         } else if *b == ByteCode::Pad8 as u8 {
-            out.push_str(&format!(""));
+            out.push_str(&format!("PAD"));
         } else if *b == ByteCode::Pad9 as u8 {
-            out.push_str(&format!(""));
+            out.push_str(&format!("PAD"));
         } else if *b == ByteCode::Return as u8 {
-            out.push_str(&format!("return"));
+            out.push_str(&format!("RETURN"));
         }
         out.push('\n');
         idx += 1;
