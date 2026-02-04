@@ -5882,7 +5882,9 @@ pub fn format_asm(bytes: &[u8]) -> String {
                 args.push(debug_u8s(param_name));
                 arg_idx = arg_idx + 1 + len as usize;
             }
-            idx = arg_idx - 1;  // -1 because we'll add 1 at the end
+            // arg_idx now points one past the last parameter byte.
+            // Set idx to arg_idx - 1 because the main loop will add 1 to get the final PC.
+            idx = arg_idx - 1;
             format!("unpack_args req={} opt={} ({})", required_arg_count, optional_arg_count, args.join(", "))
         } else if *b == ByteCode::AssignArg as u8 {
             let arg_num = bytes[idx + 1] as usize;
@@ -5891,7 +5893,10 @@ pub fn format_asm(bytes: &[u8]) -> String {
         } else if *b == ByteCode::CreateStruct as u8 {
             let offset = ((bytes[idx + 1] as usize) << 8) + bytes[idx + 2] as usize;
             let target = idx + offset;
-            idx = target - 1;  // -1 because we'll add 1 at the end
+            // CreateStruct embeds the entire struct definition body (members and methods).
+            // The offset points to the position after all struct data, so we jump there.
+            // Set idx to target - 1 because the main loop will add 1 to get the final PC.
+            idx = target - 1;
             format!("create struct -> {}", target)
         } else if *b == ByteCode::GetAttr as u8 {
             let len = bytes[idx+1] as usize;
