@@ -2081,11 +2081,11 @@ impl Environment {
             (b"panic", Box::new(shim_panic)),
             (b"dict", Box::new(shim_dict)),
             (b"assert", Box::new(shim_assert)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
-            (b"__PLACEHOLDER", Box::new(shim_print)),
+            (b"str", Box::new(shim_str)),
+            (b"int", Box::new(shim_int)),
+            (b"float", Box::new(shim_float)),
+            (b"try_int", Box::new(shim_try_int)),
+            (b"try_float", Box::new(shim_try_float)),
             (b"__PLACEHOLDER", Box::new(shim_print)),
             (b"__PLACEHOLDER", Box::new(shim_print)),
             (b"__PLACEHOLDER", Box::new(shim_print)),
@@ -3258,6 +3258,144 @@ fn shim_str_len(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimV
     Ok(ShimValue::Integer(s.len() as i32))
 }
 
+fn get_type_name(value: &ShimValue) -> &'static str {
+    match value {
+        ShimValue::Uninitialized => "uninitialized",
+        ShimValue::Unit => "unit",
+        ShimValue::None => "none",
+        ShimValue::Integer(_) => "int",
+        ShimValue::Float(_) => "float",
+        ShimValue::Bool(_) => "bool",
+        ShimValue::Fn(_) => "function",
+        ShimValue::BoundMethod(_, _) => "bound method",
+        ShimValue::BoundNativeMethod(_) => "bound native method",
+        ShimValue::NativeFn(_) => "native function",
+        ShimValue::String(_) => "string",
+        ShimValue::List(_) => "list",
+        ShimValue::Dict(_) => "dict",
+        ShimValue::StructDef(_) => "struct definition",
+        ShimValue::Struct(_) => "struct",
+        ShimValue::Native(_) => "native object",
+    }
+}
+
+fn trim_bytes(s: &[u8]) -> &[u8] {
+    let mut start = 0;
+    let mut end = s.len();
+    
+    // Trim from start
+    while start < end && s[start].is_ascii_whitespace() {
+        start += 1;
+    }
+    
+    // Trim from end
+    while end > start && s[end - 1].is_ascii_whitespace() {
+        end -= 1;
+    }
+    
+    &s[start..end]
+}
+
+fn parse_string_to<T: std::str::FromStr>(
+    s: &[u8],
+    type_name: &str,
+) -> Result<T, String> {
+    let trimmed = trim_bytes(s);
+    unsafe {
+        std::str::from_utf8_unchecked(trimmed).parse::<T>()
+            .map_err(|_| {
+                let string_repr = std::str::from_utf8(s).unwrap_or("<invalid utf8>");
+                format!("Cannot convert string '{}' to {}", string_repr, type_name)
+            })
+    }
+}
+
+fn shim_str(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"value")?;
+    unpacker.end()?;
+
+    let string_repr = value.to_string(interpreter);
+    let bytes = string_repr.as_bytes();
+    Ok(interpreter.mem.alloc_str(bytes))
+}
+
+fn shim_int(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"value")?;
+    unpacker.end()?;
+
+    match value {
+        ShimValue::Integer(i) => Ok(ShimValue::Integer(i)),
+        ShimValue::Float(f) => Ok(ShimValue::Integer(f as i32)),
+        ShimValue::Bool(b) => Ok(ShimValue::Integer(if b { 1 } else { 0 })),
+        ShimValue::String(_) => {
+            let s = value.string(interpreter)?;
+            parse_string_to::<i32>(s, "int").map(ShimValue::Integer)
+        },
+        _ => Err(format!("Cannot convert {} to int", get_type_name(&value)))
+    }
+}
+
+fn shim_float(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"value")?;
+    unpacker.end()?;
+
+    match value {
+        ShimValue::Integer(i) => Ok(ShimValue::Float(i as f32)),
+        ShimValue::Float(f) => Ok(ShimValue::Float(f)),
+        ShimValue::Bool(b) => Ok(ShimValue::Float(if b { 1.0 } else { 0.0 })),
+        ShimValue::String(_) => {
+            let s = value.string(interpreter)?;
+            parse_string_to::<f32>(s, "float").map(ShimValue::Float)
+        },
+        _ => Err(format!("Cannot convert {} to float", get_type_name(&value)))
+    }
+}
+
+fn shim_try_int(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"value")?;
+    unpacker.end()?;
+
+    let result = match value {
+        ShimValue::Integer(i) => Some(ShimValue::Integer(i)),
+        ShimValue::Float(f) => Some(ShimValue::Integer(f as i32)),
+        ShimValue::Bool(b) => Some(ShimValue::Integer(if b { 1 } else { 0 })),
+        ShimValue::String(_) => {
+            let s = value.string(interpreter)?;
+            parse_string_to::<i32>(s, "int")
+                .map(ShimValue::Integer)
+                .ok()
+        },
+        _ => None
+    };
+
+    Ok(result.unwrap_or(ShimValue::None))
+}
+
+fn shim_try_float(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"value")?;
+    unpacker.end()?;
+
+    let result = match value {
+        ShimValue::Integer(i) => Some(ShimValue::Float(i as f32)),
+        ShimValue::Float(f) => Some(ShimValue::Float(f)),
+        ShimValue::Bool(b) => Some(ShimValue::Float(if b { 1.0 } else { 0.0 })),
+        ShimValue::String(_) => {
+            let s = value.string(interpreter)?;
+            parse_string_to::<f32>(s, "float")
+                .map(ShimValue::Float)
+                .ok()
+        },
+        _ => None
+    };
+
+    Ok(result.unwrap_or(ShimValue::None))
+}
+
 #[derive(Debug)]
 pub struct ArgBundle {
     args: Vec<ShimValue>,
@@ -3611,6 +3749,7 @@ impl ShimValue {
     pub fn to_string(&self, interpreter: &mut Interpreter) -> String {
         match self {
             ShimValue::Uninitialized => format!("Uninitialized"),
+            ShimValue::None => "None".to_string(),
             ShimValue::Integer(i) => i.to_string(),
             ShimValue::Float(f) => format_float(*f),
             ShimValue::Bool(false) => "false".to_string(),
