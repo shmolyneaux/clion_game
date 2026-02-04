@@ -1,0 +1,15 @@
+0  151  PC= 103  create struct -> 103
+103  152  PC= 110  let "Point"
+110  154  PC= 117  load "Point"
+117  146  PC= 126  ShimValue
+126  146  PC= 135  ShimValue
+135  164  PC= 138  call args=2  kwargs=0
+138  152  PC= 141  let "p"
+141  154  PC= 148  load "print"
+148  154  PC= 151  load "p"
+151  155  PC= 161  get "distance"
+161  164  PC= 164  call args=0  kwargs=0
+164  164  PC= 167  call args=1  kwargs=0
+167  130  PC= 168  pop
+168  148  PC= 169  None
+

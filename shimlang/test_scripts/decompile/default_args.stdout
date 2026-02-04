@@ -1,0 +1,26 @@
+0  168  PC=   3  JMP -> 69
+3  128  PC=  20  unpack_args req=1 opt=1 (name, greeting)
+20  172  PC=  23  JmpInitArg -> 32
+23  147  PC=  30  String "Hello"
+30  129  PC=  32  assign arg 0
+32  154  PC=  39  load "print"
+39  154  PC=  49  load "greeting"
+49  154  PC=  55  load "name"
+55  164  PC=  58  call args=2  kwargs=0
+58  130  PC=  59  pop
+59  146  PC=  68  ShimValue
+68  167  PC=  69  return
+69  149  PC=  72  fn offset=66
+72  152  PC=  79  let "greet"
+79  154  PC=  86  load "greet"
+86  147  PC=  93  String "World"
+93  164  PC=  96  call args=1  kwargs=0
+96  130  PC=  97  pop
+97  154  PC= 104  load "greet"
+104  147  PC= 111  String "Alice"
+111  147  PC= 121  String "greeting"
+121  147  PC= 125  String "Hi"
+125  164  PC= 128  call args=1  kwargs=1
+128  130  PC= 129  pop
+129  148  PC= 130  None
+

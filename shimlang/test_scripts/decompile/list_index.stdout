@@ -1,0 +1,23 @@
+0  146  PC=   9  ShimValue
+9  146  PC=  18  ShimValue
+18  146  PC=  27  ShimValue
+27  150  PC=  30  CreateList len=3
+30  152  PC=  35  let "lst"
+35  154  PC=  42  load "print"
+42  154  PC=  47  load "lst"
+47  146  PC=  56  ShimValue
+56  165  PC=  57  index
+57  164  PC=  60  call args=1  kwargs=0
+60  130  PC=  61  pop
+61  154  PC=  66  load "lst"
+66  146  PC=  75  ShimValue
+75  146  PC=  84  ShimValue
+84  166  PC=  85  set_index
+85  154  PC=  92  load "print"
+92  154  PC=  97  load "lst"
+97  146  PC= 106  ShimValue
+106  165  PC= 107  index
+107  164  PC= 110  call args=1  kwargs=0
+110  130  PC= 111  pop
+111  148  PC= 112  None
+
