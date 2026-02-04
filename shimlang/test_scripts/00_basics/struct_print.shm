@@ -28,3 +28,21 @@ print(v);
 struct Empty {}
 let e = Empty();
 print(e);
+
+// Test with nested struct
+struct Rectangle {
+    top_left,
+    bottom_right
+}
+
+let rect = Rectangle(Point(1.0, 2.0), Point(3.0, 4.0));
+print(rect);
+
+// Test with bool and list
+struct Config {
+    enabled,
+    values
+}
+
+let cfg = Config(true, [1, 2, 3]);
+print(cfg);
