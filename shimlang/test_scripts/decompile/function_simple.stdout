@@ -1,6 +1,4 @@
-   0:  168  JMP
-   1:    0  no-op
-   2:   34  
+   0:  168  JMP -> 34
    3:  128  unpack_args
    4:    0  no-op
    5:    0  no-op

@@ -7,9 +7,7 @@
    6:    0  no-op
    7:    0  no-op
    8:    0  no-op
-   9:  171  JMPZ
-  10:    0  no-op
-  11:   27  
+   9:  171  JMPZ -> 36
   12:  157  start_scope
   13:  154  load "print"
   20:  147  String "true"
@@ -18,9 +16,7 @@
   30:  148  None
   31:  130  pop
   32:  158  end_scope
-  33:  168  JMP
-  34:    0  no-op
-  35:    7  
+  33:  168  JMP -> 40
   36:  157  start_scope
   37:  148  None
   38:  130  pop

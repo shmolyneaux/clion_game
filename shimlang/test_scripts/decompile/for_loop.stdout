@@ -49,9 +49,7 @@
   56:  101  
   57:  120  
   58:  116  
-  59:  159  Loop Start
-  60:    0  no-op
-  61:   43  
+  59:  159  Loop Start -> 102
   62:  145  Copy
   63:  164  call args=0  kwargs=0
   66:  145  Copy
@@ -63,9 +61,7 @@
   72:  109  
   73:  148  None
   74:  133  
-  75:  170  JMPNZ
-  76:    0  no-op
-  77:   27  
+  75:  170  JMPNZ -> 102
   78:  157  start_scope
   79:  154  load "print"
   86:  154  load "item"
@@ -74,9 +70,7 @@
   96:  148  None
   97:  130  pop
   98:  158  end_scope
-  99:  169  JMPUP
- 100:    0  no-op
- 101:   37  
+  99:  169  JMPUP -> 62
  102:  160  Loop End
  103:  130  pop
  104:  148  None

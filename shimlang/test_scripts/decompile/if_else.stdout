@@ -7,9 +7,7 @@
    6:    0  no-op
    7:    0  no-op
    8:    0  no-op
-   9:  171  JMPZ
-  10:    0  no-op
-  11:   32  
+   9:  171  JMPZ -> 41
   12:  157  start_scope
   13:  154  load "print"
   20:  147  String "not taken"
@@ -18,9 +16,7 @@
   35:  148  None
   36:  130  pop
   37:  158  end_scope
-  38:  168  JMP
-  39:    0  no-op
-  40:   25  
+  38:  168  JMP -> 63
   41:  157  start_scope
   42:  154  load "print"
   49:  147  String "taken"

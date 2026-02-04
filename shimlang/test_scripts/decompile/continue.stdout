@@ -10,9 +10,7 @@
    9:  152  let
   10:    1  
   11:  105  
-  12:  159  Loop Start
-  13:    0  no-op
-  14:   84  
+  12:  159  Loop Start -> 96
   15:  154  load "i"
   18:  146  ShimValue
   19:    3  
@@ -24,9 +22,7 @@
   25:    0  no-op
   26:    0  no-op
   27:  140  LT
-  28:  171  JMPZ
-  29:    0  no-op
-  30:   68  
+  28:  171  JMPZ -> 96
   31:  157  start_scope
   32:  154  load "i"
   35:  146  ShimValue
@@ -53,17 +49,13 @@
   58:    0  no-op
   59:    0  no-op
   60:  133  
-  61:  171  JMPZ
-  62:    0  no-op
-  63:   11  
+  61:  171  JMPZ -> 72
   64:  157  start_scope
   65:  163  continue
   66:  148  None
   67:  130  pop
   68:  158  end_scope
-  69:  168  JMP
-  70:    0  no-op
-  71:    7  
+  69:  168  JMP -> 76
   72:  157  start_scope
   73:  148  None
   74:  130  pop
@@ -75,9 +67,7 @@
   90:  148  None
   91:  130  pop
   92:  158  end_scope
-  93:  169  JMPUP
-  94:    0  no-op
-  95:   78  
+  93:  169  JMPUP -> 15
   96:  160  Loop End
   97:  148  None
 

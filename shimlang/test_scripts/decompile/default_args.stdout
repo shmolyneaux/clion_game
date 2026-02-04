@@ -1,6 +1,4 @@
-   0:  168  JMP
-   1:    0  no-op
-   2:   69  
+   0:  168  JMP -> 69
    3:  128  unpack_args
    4:    1  
    5:    1  
@@ -18,9 +16,7 @@
   17:  105  
   18:  110  
   19:  103  
-  20:  172  JmpInitArg
-  21:    0  no-op
-  22:   12  
+  20:  172  JmpInitArg -> 32
   23:  147  String "Hello"
   30:  129  assign arg
   31:    0  no-op
