@@ -3258,6 +3258,27 @@ fn shim_str_len(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimV
     Ok(ShimValue::Integer(s.len() as i32))
 }
 
+fn get_type_name(value: &ShimValue) -> &'static str {
+    match value {
+        ShimValue::Uninitialized => "uninitialized",
+        ShimValue::Unit => "unit",
+        ShimValue::None => "none",
+        ShimValue::Integer(_) => "int",
+        ShimValue::Float(_) => "float",
+        ShimValue::Bool(_) => "bool",
+        ShimValue::Fn(_) => "function",
+        ShimValue::BoundMethod(_, _) => "bound method",
+        ShimValue::BoundNativeMethod(_) => "bound native method",
+        ShimValue::NativeFn(_) => "native function",
+        ShimValue::String(_) => "string",
+        ShimValue::List(_) => "list",
+        ShimValue::Dict(_) => "dict",
+        ShimValue::StructDef(_) => "struct definition",
+        ShimValue::Struct(_) => "struct",
+        ShimValue::Native(_) => "native object",
+    }
+}
+
 fn shim_str(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let value = unpacker.required(b"value")?;
@@ -3284,7 +3305,7 @@ fn shim_int(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue
                 .map(ShimValue::Integer)
                 .map_err(|_| format!("Cannot convert string '{}' to int", string_repr))
         },
-        _ => Err(format!("Cannot convert {:?} to int", value))
+        _ => Err(format!("Cannot convert {} to int", get_type_name(&value)))
     }
 }
 
@@ -3304,7 +3325,7 @@ fn shim_float(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimVal
                 .map(ShimValue::Float)
                 .map_err(|_| format!("Cannot convert string '{}' to float", string_repr))
         },
-        _ => Err(format!("Cannot convert {:?} to float", value))
+        _ => Err(format!("Cannot convert {} to float", get_type_name(&value)))
     }
 }
 
