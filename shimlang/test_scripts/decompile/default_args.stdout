@@ -1,26 +1,63 @@
-0  168  PC=   3  JMP -> 69
-3  128  PC=  20  unpack_args req=1 opt=1 (name, greeting)
-20  172  PC=  23  JmpInitArg -> 32
-23  147  PC=  30  String "Hello"
-30  129  PC=  32  assign arg 0
-32  154  PC=  39  load "print"
-39  154  PC=  49  load "greeting"
-49  154  PC=  55  load "name"
-55  164  PC=  58  call args=2  kwargs=0
-58  130  PC=  59  pop
-59  146  PC=  68  ShimValue
-68  167  PC=  69  return
-69  149  PC=  72  fn offset=66
-72  152  PC=  79  let "greet"
-79  154  PC=  86  load "greet"
-86  147  PC=  93  String "World"
-93  164  PC=  96  call args=1  kwargs=0
-96  130  PC=  97  pop
-97  154  PC= 104  load "greet"
-104  147  PC= 111  String "Alice"
-111  147  PC= 121  String "greeting"
-121  147  PC= 125  String "Hi"
-125  164  PC= 128  call args=1  kwargs=1
-128  130  PC= 129  pop
-129  148  PC= 130  None
+   0:  168  JMP
+   1:    0  no-op
+   2:   69  
+   3:  128  unpack_args
+   4:    1  
+   5:    1  
+   6:    4  
+   7:  110  
+   8:   97  
+   9:  109  
+  10:  101  
+  11:    8  
+  12:  103  
+  13:  114  
+  14:  101  
+  15:  101  
+  16:  116  
+  17:  105  
+  18:  110  
+  19:  103  
+  20:  172  JmpInitArg
+  21:    0  no-op
+  22:   12  
+  23:  147  String "Hello"
+  30:  129  assign arg
+  31:    0  no-op
+  32:  154  load "print"
+  39:  154  load "greeting"
+  49:  154  load "name"
+  55:  164  call args=2  kwargs=0
+  58:  130  pop
+  59:  146  ShimValue
+  60:    2  
+  61:    0  no-op
+  62:    0  no-op
+  63:    0  no-op
+  64:    0  no-op
+  65:    0  no-op
+  66:    0  no-op
+  67:    0  no-op
+  68:  167  return
+  69:  149  fn
+  70:    0  no-op
+  71:   66  
+  72:  152  let
+  73:    5  
+  74:  103  
+  75:  114  
+  76:  101  
+  77:  101  
+  78:  116  
+  79:  154  load "greet"
+  86:  147  String "World"
+  93:  164  call args=1  kwargs=0
+  96:  130  pop
+  97:  154  load "greet"
+ 104:  147  String "Alice"
+ 111:  147  String "greeting"
+ 121:  147  String "Hi"
+ 125:  164  call args=1  kwargs=1
+ 128:  130  pop
+ 129:  148  None
 

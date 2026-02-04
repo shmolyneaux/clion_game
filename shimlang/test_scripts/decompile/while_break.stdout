@@ -1,16 +1,30 @@
-0  159  PC=   3  Loop Start -> 40
-3  146  PC=  12  ShimValue
-12  171  PC=  15  JMPZ -> 40
-15  157  PC=  16  start_scope
-16  154  PC=  23  load "print"
-23  147  PC=  29  String "loop"
-29  164  PC=  32  call args=1  kwargs=0
-32  130  PC=  33  pop
-33  162  PC=  34  break
-34  148  PC=  35  None
-35  130  PC=  36  pop
-36  158  PC=  37  end_scope
-37  169  PC=  40  JMPUP -> 3
-40  160  PC=  41  Loop End
-41  148  PC=  42  None
+   0:  159  Loop Start
+   1:    0  no-op
+   2:   40  
+   3:  146  ShimValue
+   4:    3  
+   5:    0  no-op
+   6:    0  no-op
+   7:    0  no-op
+   8:    1  
+   9:    0  no-op
+  10:    0  no-op
+  11:    0  no-op
+  12:  171  JMPZ
+  13:    0  no-op
+  14:   28  
+  15:  157  start_scope
+  16:  154  load "print"
+  23:  147  String "loop"
+  29:  164  call args=1  kwargs=0
+  32:  130  pop
+  33:  162  break
+  34:  148  None
+  35:  130  pop
+  36:  158  end_scope
+  37:  169  JMPUP
+  38:    0  no-op
+  39:   34  
+  40:  160  Loop End
+  41:  148  None
 

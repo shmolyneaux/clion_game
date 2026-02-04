@@ -1,0 +1,35 @@
+   0:  168  JMP
+   1:    0  no-op
+   2:   34  
+   3:  128  unpack_args
+   4:    0  no-op
+   5:    0  no-op
+   6:  154  load "print"
+  13:  147  String "Hello"
+  20:  164  call args=1  kwargs=0
+  23:  130  pop
+  24:  146  ShimValue
+  25:    2  
+  26:    0  no-op
+  27:    0  no-op
+  28:    0  no-op
+  29:    0  no-op
+  30:    0  no-op
+  31:    0  no-op
+  32:    0  no-op
+  33:  167  return
+  34:  149  fn
+  35:    0  no-op
+  36:   31  
+  37:  152  let
+  38:    5  
+  39:  103  
+  40:  114  
+  41:  101  
+  42:  101  
+  43:  116  
+  44:  154  load "greet"
+  51:  164  call args=0  kwargs=0
+  54:  130  pop
+  55:  148  None
+
