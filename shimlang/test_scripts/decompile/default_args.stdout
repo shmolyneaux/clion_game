@@ -1,21 +1,5 @@
    0:  168  JMP -> 69
-   3:  128  unpack_args
-   4:    1  
-   5:    1  
-   6:    4  
-   7:  110  
-   8:   97  
-   9:  109  
-  10:  101  
-  11:    8  
-  12:  103  
-  13:  114  
-  14:  101  
-  15:  101  
-  16:  116  
-  17:  105  
-  18:  110  
-  19:  103  
+   3:  128  unpack_args required=1 optional=1 [name, greeting]
   20:  172  JmpInitArg -> 32
   23:  147  String "Hello"
   30:  129  assign arg
@@ -25,26 +9,12 @@
   49:  154  load "name"
   55:  164  call args=2  kwargs=0
   58:  130  pop
-  59:  146  ShimValue
-  60:    2  
-  61:    0  no-op
-  62:    0  no-op
-  63:    0  no-op
-  64:    0  no-op
-  65:    0  no-op
-  66:    0  no-op
-  67:    0  no-op
+  59:  146  ShimValue None
   68:  167  return
   69:  149  fn
   70:    0  no-op
   71:   66  
-  72:  152  let
-  73:    5  
-  74:  103  
-  75:  114  
-  76:  101  
-  77:  101  
-  78:  116  
+  72:  152  let "greet"
   79:  154  load "greet"
   86:  147  String "World"
   93:  164  call args=1  kwargs=0
