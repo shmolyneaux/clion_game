@@ -5791,18 +5791,10 @@ pub fn format_asm(bytes: &[u8]) -> String {
             out.push_str(&format!("JMP -> {}", target));
             idx += 2;
         } else if *b == ByteCode::VariableDeclaration as u8 {
-            if idx + 1 < bytes.len() {
-                let len = bytes[idx + 1] as usize;
-                if idx + 2 + len <= bytes.len() {
-                    let slice = &bytes[idx + 2..idx + 2 + len];
-                    out.push_str(&format!(r#"let "{}""#, debug_u8s(slice)));
-                    idx += len + 1;
-                } else {
-                    out.push_str(&format!("let [incomplete]"));
-                }
-            } else {
-                out.push_str(&format!("let [incomplete]"));
-            }
+            let len = bytes[idx + 1] as usize;
+            let slice = &bytes[idx + 2..idx + 2 + len];
+            out.push_str(&format!(r#"let "{}""#, debug_u8s(slice)));
+            idx += len + 1;
         } else if *b == ByteCode::NoOp as u8 {
             out.push_str(&format!("no-op"));
         } else if *b == ByteCode::Pop as u8 {
@@ -5851,40 +5843,21 @@ pub fn format_asm(bytes: &[u8]) -> String {
             out.push_str(&format!("JmpInitArg -> {}", target));
             idx += 2;
         } else if *b == ByteCode::UnpackArgs as u8 {
-            if idx + 2 < bytes.len() {
-                let required_arg_count = bytes[idx + 1] as usize;
-                let optional_arg_count = bytes[idx + 2] as usize;
-                
-                let mut param_names = Vec::new();
-                let mut param_idx = idx + 3;
-                let mut valid = true;
-                for _ in 0..(required_arg_count + optional_arg_count) {
-                    if param_idx < bytes.len() {
-                        let len = bytes[param_idx] as usize;
-                        if param_idx + 1 + len <= bytes.len() {
-                            let param_name = &bytes[param_idx + 1..param_idx + 1 + len];
-                            param_names.push(debug_u8s(param_name).to_string());
-                            param_idx += 1 + len;
-                        } else {
-                            valid = false;
-                            break;
-                        }
-                    } else {
-                        valid = false;
-                        break;
-                    }
-                }
-                
-                if valid {
-                    out.push_str(&format!("unpack_args required={} optional={} [{}]", 
-                        required_arg_count, optional_arg_count, param_names.join(", ")));
-                    idx = param_idx - 1;
-                } else {
-                    out.push_str(&format!("unpack_args [incomplete]"));
-                }
-            } else {
-                out.push_str(&format!("unpack_args [incomplete]"));
+            let required_arg_count = bytes[idx + 1] as usize;
+            let optional_arg_count = bytes[idx + 2] as usize;
+            
+            let mut param_names = Vec::new();
+            let mut param_idx = idx + 3;
+            for _ in 0..(required_arg_count + optional_arg_count) {
+                let len = bytes[param_idx] as usize;
+                let param_name = &bytes[param_idx + 1..param_idx + 1 + len];
+                param_names.push(debug_u8s(param_name).to_string());
+                param_idx += 1 + len;
             }
+            
+            out.push_str(&format!("unpack_args required={} optional={} [{}]", 
+                required_arg_count, optional_arg_count, param_names.join(", ")));
+            idx = param_idx - 1;
         } else if *b == ByteCode::AssignArg as u8 {
             out.push_str(&format!("assign arg"));
         } else if *b == ByteCode::CreateFn as u8 {
@@ -5892,31 +5865,15 @@ pub fn format_asm(bytes: &[u8]) -> String {
         } else if *b == ByteCode::CreateStruct as u8 {
             out.push_str(&format!("create struct"));
         } else if *b == ByteCode::GetAttr as u8 {
-            if idx + 1 < bytes.len() {
-                let len = bytes[idx + 1] as usize;
-                if idx + 2 + len <= bytes.len() {
-                    let slice = &bytes[idx + 2..idx + 2 + len];
-                    out.push_str(&format!(r#"get .{}"#, debug_u8s(slice)));
-                    idx += len + 1;
-                } else {
-                    out.push_str(&format!("get [incomplete]"));
-                }
-            } else {
-                out.push_str(&format!("get [incomplete]"));
-            }
+            let len = bytes[idx + 1] as usize;
+            let slice = &bytes[idx + 2..idx + 2 + len];
+            out.push_str(&format!(r#"get .{}"#, debug_u8s(slice)));
+            idx += len + 1;
         } else if *b == ByteCode::SetAttr as u8 {
-            if idx + 1 < bytes.len() {
-                let len = bytes[idx + 1] as usize;
-                if idx + 2 + len <= bytes.len() {
-                    let slice = &bytes[idx + 2..idx + 2 + len];
-                    out.push_str(&format!(r#"set .{}"#, debug_u8s(slice)));
-                    idx += len + 1;
-                } else {
-                    out.push_str(&format!("set [incomplete]"));
-                }
-            } else {
-                out.push_str(&format!("set [incomplete]"));
-            }
+            let len = bytes[idx + 1] as usize;
+            let slice = &bytes[idx + 2..idx + 2 + len];
+            out.push_str(&format!(r#"set .{}"#, debug_u8s(slice)));
+            idx += len + 1;
         } else if *b == ByteCode::VariableLoad as u8 {
             let len = bytes[idx+1] as usize;
             let slice = &bytes[idx+2..idx+2+len];
@@ -5927,32 +5884,19 @@ pub fn format_asm(bytes: &[u8]) -> String {
         } else if *b == ByteCode::Continue as u8 {
             out.push_str(&format!("continue"));
         } else if *b == ByteCode::LiteralShimValue as u8 {
-            if idx + 8 < bytes.len() {
-                let shim_bytes = [
-                    bytes[idx + 1],
-                    bytes[idx + 2],
-                    bytes[idx + 3],
-                    bytes[idx + 4],
-                    bytes[idx + 5],
-                    bytes[idx + 6],
-                    bytes[idx + 7],
-                    bytes[idx + 8],
-                ];
-                let val = ShimValue::from_bytes(shim_bytes);
-                let val_str = match val {
-                    ShimValue::Integer(i) => format!("{}", i),
-                    ShimValue::Float(f) => format_float(f),
-                    ShimValue::Bool(true) => "true".to_string(),
-                    ShimValue::Bool(false) => "false".to_string(),
-                    ShimValue::None => "None".to_string(),
-                    ShimValue::Unit => "Unit".to_string(),
-                    _ => format!("{:?}", val),
-                };
-                out.push_str(&format!("ShimValue {}", val_str));
-                idx += 8;
-            } else {
-                out.push_str(&format!("ShimValue [incomplete]"));
-            }
+            let shim_bytes: [u8; 8] = bytes[idx + 1..idx + 9].try_into().unwrap();
+            let val = ShimValue::from_bytes(shim_bytes);
+            let val_str = match val {
+                ShimValue::Integer(i) => format!("{}", i),
+                ShimValue::Float(f) => format_float(f),
+                ShimValue::Bool(true) => "true".to_string(),
+                ShimValue::Bool(false) => "false".to_string(),
+                ShimValue::None => "None".to_string(),
+                ShimValue::Unit => "Unit".to_string(),
+                _ => format!("{:?}", val),
+            };
+            out.push_str(&format!("ShimValue {}", val_str));
+            idx += 8;
         } else if *b == ByteCode::LiteralString as u8 {
             let len = bytes[idx+1] as usize;
             let slice = &bytes[idx+2..idx+2+len];

@@ -1,13 +1,5 @@
    0:  159  Loop Start -> 40
-   3:  146  ShimValue
-   4:    3  
-   5:    0  no-op
-   6:    0  no-op
-   7:    0  no-op
-   8:    1  
-   9:    0  no-op
-  10:    0  no-op
-  11:    0  no-op
+   3:  146  ShimValue 1
   12:  171  JMPZ -> 40
   15:  157  start_scope
   16:  154  load "print"

@@ -29,88 +29,34 @@
   28:  110  
   29:   99  
   30:  101  
-  31:  128  unpack_args
-  32:    2  
-  33:    0  no-op
-  34:    1  
-  35:  120  
-  36:    1  
-  37:  121  
+  31:  128  unpack_args required=2 optional=0 [x, y]
   38:  154  load "Point"
   45:  154  load "x"
   48:  154  load "y"
   51:  164  call args=2  kwargs=0
   54:  167  return
-  55:  128  unpack_args
-  56:    1  
-  57:    0  no-op
-  58:    4  
-  59:  115  
-  60:  101  
-  61:  108  
-  62:  102  
+  55:  128  unpack_args required=1 optional=0 [self]
   63:  154  load "self"
-  69:  155  get
-  70:    1  
-  71:  120  
+  69:  155  get .x
   72:  154  load "self"
-  78:  155  get
-  79:    1  
-  80:  120  
+  78:  155  get .x
   81:  135  
   82:  154  load "self"
-  88:  155  get
-  89:    1  
-  90:  121  
+  88:  155  get .y
   91:  154  load "self"
-  97:  155  get
-  98:    1  
-  99:  121  
+  97:  155  get .y
  100:  135  
  101:  131  add
  102:  167  return
- 103:  152  let
- 104:    5  
- 105:   80  
- 106:  111  
- 107:  105  
- 108:  110  
- 109:  116  
+ 103:  152  let "Point"
  110:  154  load "Point"
- 117:  146  ShimValue
- 118:    3  
- 119:    0  no-op
- 120:    0  no-op
- 121:    0  no-op
- 122:    3  
- 123:    0  no-op
- 124:    0  no-op
- 125:    0  no-op
- 126:  146  ShimValue
- 127:    3  
- 128:    0  no-op
- 129:    0  no-op
- 130:    0  no-op
- 131:    4  
- 132:    0  no-op
- 133:    0  no-op
- 134:    0  no-op
+ 117:  146  ShimValue 3
+ 126:  146  ShimValue 4
  135:  164  call args=2  kwargs=0
- 138:  152  let
- 139:    1  
- 140:  112  
+ 138:  152  let "p"
  141:  154  load "print"
  148:  154  load "p"
- 151:  155  get
- 152:    8  
- 153:  100  
- 154:  105  
- 155:  115  
- 156:  116  
- 157:   97  
- 158:  110  
- 159:   99  
- 160:  101  
+ 151:  155  get .distance
  161:  164  call args=0  kwargs=0
  164:  164  call args=1  kwargs=0
  167:  130  pop
