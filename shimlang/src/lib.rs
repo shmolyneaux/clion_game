@@ -3586,8 +3586,7 @@ fn shim_list_insert(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<S
     // Handle negative and out-of-bounds indices like Python
     let insert_idx = if idx < 0 {
         // Negative indices count from the end
-        let wrapped = (len as isize + idx).max(0) as usize;
-        wrapped
+        (len as isize + idx).max(0) as usize
     } else if idx as usize > len {
         // Positive indices beyond length append at the end
         len
