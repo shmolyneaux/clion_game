@@ -2500,14 +2500,13 @@ impl ShimNative for DictItemsIterator {
 }
 
 struct RangeNative {
-    start: i32,
-    end: i32,
-    step: i32,
+    start: ShimValue,
+    end: ShimValue,
 }
 
 impl ShimNative for RangeNative {
-    fn to_string(&self, _interpreter: &mut Interpreter) -> String {
-        format!("Range({}, {})", self.start, self.end)
+    fn to_string(&self, interpreter: &mut Interpreter) -> String {
+        format!("Range({}, {})", self.start.to_string(interpreter), self.end.to_string(interpreter))
     }
 
     fn get_attr(&self, self_as_val: &ShimValue, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
@@ -2519,21 +2518,24 @@ impl ShimNative for RangeNative {
                 unpacker.end()?;
 
                 let range: &RangeNative = obj.as_native(interpreter)?;
-                let step_int = match step {
-                    ShimValue::Integer(i) => i,
-                    _ => return Err(format!("Step must be an integer")),
+                
+                // Check for zero step
+                let is_zero = match step {
+                    ShimValue::Integer(0) => true,
+                    ShimValue::Float(f) if f == 0.0 => true,
+                    _ => false,
                 };
                 
-                if step_int == 0 {
+                if is_zero {
                     return Err(format!("Step cannot be zero"));
                 }
 
-                let new_range = RangeNative {
-                    start: range.start,
+                let iterator = RangeIterator {
+                    current: range.start,
                     end: range.end,
-                    step: step_int,
+                    step: step,
                 };
-                Ok(interpreter.mem.alloc_native(new_range))
+                Ok(interpreter.mem.alloc_native(iterator))
             }
 
             Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_range_step))
@@ -2547,7 +2549,7 @@ impl ShimNative for RangeNative {
                 let iterator = RangeIterator {
                     current: range.start,
                     end: range.end,
-                    step: range.step,
+                    step: ShimValue::Integer(1),
                 };
                 Ok(interpreter.mem.alloc_native(iterator))
             }
@@ -2563,14 +2565,14 @@ impl ShimNative for RangeNative {
     }
 
     fn gc_vals(&self) -> Vec<ShimValue> {
-        vec![]
+        vec![self.start, self.end]
     }
 }
 
 struct RangeIterator {
-    current: i32,
-    end: i32,
-    step: i32,
+    current: ShimValue,
+    end: ShimValue,
+    step: ShimValue,
 }
 
 impl ShimNative for RangeIterator {
@@ -2583,20 +2585,56 @@ impl ShimNative for RangeIterator {
 
                 let itr: &mut RangeIterator = args.args[0].as_native(interpreter)?;
                 
-                // Ranges are exclusive of the end value (Rust-like behavior)
+                // Determine if we've reached the end based on step direction
                 // For positive steps: iterate while current < end
                 // For negative steps: iterate while current > end
-                // Note: Zero step will cause infinite iteration
-                if (itr.step > 0 && itr.current >= itr.end) || (itr.step < 0 && itr.current <= itr.end) {
+                let step_is_positive = match itr.step.gt(interpreter, &ShimValue::Integer(0))? {
+                    ShimValue::Bool(b) => b,
+                    _ => return Err(format!("Step comparison failed")),
+                };
+                
+                let has_more = if step_is_positive {
+                    // current < end
+                    match itr.current.lt(interpreter, &itr.end)? {
+                        ShimValue::Bool(b) => b,
+                        _ => return Err(format!("Range comparison failed")),
+                    }
+                } else {
+                    // current > end
+                    match itr.current.gt(interpreter, &itr.end)? {
+                        ShimValue::Bool(b) => b,
+                        _ => return Err(format!("Range comparison failed")),
+                    }
+                };
+                
+                if !has_more {
                     Ok(ShimValue::None)
                 } else {
                     let result = itr.current;
-                    itr.current += itr.step;
-                    Ok(ShimValue::Integer(result))
+                    // current = current + step
+                    let mut pending_args = ArgBundle::new();
+                    match itr.current.add(interpreter, &itr.step, &mut pending_args)? {
+                        CallResult::ReturnValue(new_current) => {
+                            itr.current = new_current;
+                            Ok(result)
+                        }
+                        CallResult::PC(_) => {
+                            Err(format!("Unexpected function call in range iteration"))
+                        }
+                    }
                 }
             }
 
             Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_range_iter_next))
+        } else if ident == b"iter" {
+            fn shim_range_iterator_iter(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+                let mut unpacker = ArgUnpacker::new(args);
+                let obj = unpacker.required(b"obj")?;
+                unpacker.end()?;
+                Ok(obj)
+            }
+
+            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_range_iterator_iter))
         } else {
             Err(format!("Can't get_attr {} on {}", debug_u8s(ident), type_name::<Self>()))
         }
@@ -2607,7 +2645,7 @@ impl ShimNative for RangeIterator {
     }
 
     fn gc_vals(&self) -> Vec<ShimValue> {
-        vec![]
+        vec![self.current, self.end, self.step]
     }
 }
 
@@ -3347,19 +3385,9 @@ fn shim_range(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimVal
     let end = unpacker.required(b"end")?;
     unpacker.end()?;
 
-    let start_int = match start {
-        ShimValue::Integer(i) => i,
-        _ => return Err(format!("Range start must be an integer")),
-    };
-    let end_int = match end {
-        ShimValue::Integer(i) => i,
-        _ => return Err(format!("Range end must be an integer")),
-    };
-
     let range = RangeNative {
-        start: start_int,
-        end: end_int,
-        step: 1,
+        start: start,
+        end: end,
     };
     Ok(interpreter.mem.alloc_native(range))
 }
@@ -5026,7 +5054,6 @@ enum ByteCode {
     LT,
     LTE,
     In,
-    Range,
     Not,
     Negate,
     // And,
@@ -5062,6 +5089,7 @@ enum ByteCode {
     JmpNZ,
     JmpZ,
     JmpInitArg,
+    Range,
 }
 
 pub struct Program {
@@ -6298,28 +6326,9 @@ impl Interpreter {
                     let end = stack.pop().expect("Operand for ByteCode::Range");
                     let start = stack.pop().expect("Operand for ByteCode::Range");
                     
-                    // Both operands must be integers
-                    let start_int = match start {
-                        ShimValue::Integer(i) => i,
-                        _ => return Err(format_script_err(
-                            self.program.spans[pc],
-                            &self.program.script,
-                            "Range start must be an integer"
-                        )),
-                    };
-                    let end_int = match end {
-                        ShimValue::Integer(i) => i,
-                        _ => return Err(format_script_err(
-                            self.program.spans[pc],
-                            &self.program.script,
-                            "Range end must be an integer"
-                        )),
-                    };
-                    
                     let range = RangeNative {
-                        start: start_int,
-                        end: end_int,
-                        step: 1,
+                        start: start,
+                        end: end,
                     };
                     stack.push(self.mem.alloc_native(range));
                 }

@@ -1,4 +1,4 @@
-   0:  152  create struct
+   0:  151  create struct
    1:    0  no-op
    2:  109  
    3:    2  
@@ -36,35 +36,35 @@
   35:   99  
   36:  101  
   37:  128  unpack_args required=2 optional=0 [x, y]
-  44:  155  load "Point"
-  51:  155  load "x"
-  54:  155  load "y"
-  57:  165  call args=2  kwargs=0
-  60:  168  return
+  44:  154  load "Point"
+  51:  154  load "x"
+  54:  154  load "y"
+  57:  164  call args=2  kwargs=0
+  60:  167  return
   61:  128  unpack_args required=1 optional=0 [self]
-  69:  155  load "self"
-  75:  156  get .x
-  78:  155  load "self"
-  84:  156  get .x
+  69:  154  load "self"
+  75:  155  get .x
+  78:  154  load "self"
+  84:  155  get .x
   87:  135  
-  88:  155  load "self"
-  94:  156  get .y
-  97:  155  load "self"
- 103:  156  get .y
+  88:  154  load "self"
+  94:  155  get .y
+  97:  154  load "self"
+ 103:  155  get .y
  106:  135  
  107:  131  add
- 108:  168  return
- 109:  153  let "Point"
- 116:  155  load "Point"
- 123:  147  ShimValue 3
- 132:  147  ShimValue 4
- 141:  165  call args=2  kwargs=0
- 144:  153  let "p"
- 147:  155  load "print"
- 154:  155  load "p"
- 157:  156  get .distance
- 167:  165  call args=0  kwargs=0
- 170:  165  call args=1  kwargs=0
+ 108:  167  return
+ 109:  152  let "Point"
+ 116:  154  load "Point"
+ 123:  146  ShimValue 3
+ 132:  146  ShimValue 4
+ 141:  164  call args=2  kwargs=0
+ 144:  152  let "p"
+ 147:  154  load "print"
+ 154:  154  load "p"
+ 157:  155  get .distance
+ 167:  164  call args=0  kwargs=0
+ 170:  164  call args=1  kwargs=0
  173:  130  pop
- 174:  149  None
+ 174:  148  None
 

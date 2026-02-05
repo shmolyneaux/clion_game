@@ -1,17 +1,17 @@
-   0:  147  ShimValue 1
-   9:  172  JMPZ -> 36
-  12:  158  start_scope
-  13:  155  load "print"
-  20:  148  String "true"
-  26:  165  call args=1  kwargs=0
+   0:  146  ShimValue 1
+   9:  171  JMPZ -> 36
+  12:  157  start_scope
+  13:  154  load "print"
+  20:  147  String "true"
+  26:  164  call args=1  kwargs=0
   29:  130  pop
-  30:  149  None
+  30:  148  None
   31:  130  pop
-  32:  159  end_scope
-  33:  169  JMP -> 40
-  36:  158  start_scope
-  37:  149  None
+  32:  158  end_scope
+  33:  168  JMP -> 40
+  36:  157  start_scope
+  37:  148  None
   38:  130  pop
-  39:  159  end_scope
-  40:  149  None
+  39:  158  end_scope
+  40:  148  None
 

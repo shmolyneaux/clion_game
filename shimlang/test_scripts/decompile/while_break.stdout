@@ -1,16 +1,16 @@
-   0:  160  Loop Start -> 40
-   3:  147  ShimValue 1
-  12:  172  JMPZ -> 40
-  15:  158  start_scope
-  16:  155  load "print"
-  23:  148  String "loop"
-  29:  165  call args=1  kwargs=0
+   0:  159  Loop Start -> 40
+   3:  146  ShimValue 1
+  12:  171  JMPZ -> 40
+  15:  157  start_scope
+  16:  154  load "print"
+  23:  147  String "loop"
+  29:  164  call args=1  kwargs=0
   32:  130  pop
-  33:  163  break
-  34:  149  None
+  33:  162  break
+  34:  148  None
   35:  130  pop
-  36:  159  end_scope
-  37:  170  JMPUP -> 3
-  40:  161  Loop End
-  41:  149  None
+  36:  158  end_scope
+  37:  169  JMPUP -> 3
+  40:  160  Loop End
+  41:  148  None
 

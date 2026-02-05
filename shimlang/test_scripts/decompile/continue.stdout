@@ -1,39 +1,39 @@
-   0:  147  ShimValue 0
-   9:  153  let "i"
-  12:  160  Loop Start -> 96
-  15:  155  load "i"
-  18:  147  ShimValue 3
+   0:  146  ShimValue 0
+   9:  152  let "i"
+  12:  159  Loop Start -> 96
+  15:  154  load "i"
+  18:  146  ShimValue 3
   27:  140  LT
-  28:  172  JMPZ -> 96
-  31:  158  start_scope
-  32:  155  load "i"
-  35:  147  ShimValue 1
+  28:  171  JMPZ -> 96
+  31:  157  start_scope
+  32:  154  load "i"
+  35:  146  ShimValue 1
   44:  131  add
-  45:  154  assignment
+  45:  153  assignment
   46:    1  
   47:  105  
-  48:  155  load "i"
-  51:  147  ShimValue 2
+  48:  154  load "i"
+  51:  146  ShimValue 2
   60:  133  
-  61:  172  JMPZ -> 72
-  64:  158  start_scope
-  65:  164  continue
-  66:  149  None
+  61:  171  JMPZ -> 72
+  64:  157  start_scope
+  65:  163  continue
+  66:  148  None
   67:  130  pop
-  68:  159  end_scope
-  69:  169  JMP -> 76
-  72:  158  start_scope
-  73:  149  None
+  68:  158  end_scope
+  69:  168  JMP -> 76
+  72:  157  start_scope
+  73:  148  None
   74:  130  pop
-  75:  159  end_scope
-  76:  155  load "print"
-  83:  155  load "i"
-  86:  165  call args=1  kwargs=0
+  75:  158  end_scope
+  76:  154  load "print"
+  83:  154  load "i"
+  86:  164  call args=1  kwargs=0
   89:  130  pop
-  90:  149  None
+  90:  148  None
   91:  130  pop
-  92:  159  end_scope
-  93:  170  JMPUP -> 15
-  96:  161  Loop End
-  97:  149  None
+  92:  158  end_scope
+  93:  169  JMPUP -> 15
+  96:  160  Loop End
+  97:  148  None
 

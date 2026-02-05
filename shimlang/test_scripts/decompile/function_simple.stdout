@@ -1,17 +1,17 @@
-   0:  169  JMP -> 34
+   0:  168  JMP -> 34
    3:  128  unpack_args required=0 optional=0 []
-   6:  155  load "print"
-  13:  148  String "Hello"
-  20:  165  call args=1  kwargs=0
+   6:  154  load "print"
+  13:  147  String "Hello"
+  20:  164  call args=1  kwargs=0
   23:  130  pop
-  24:  147  ShimValue None
-  33:  168  return
-  34:  150  fn
+  24:  146  ShimValue None
+  33:  167  return
+  34:  149  fn
   35:    0  no-op
   36:   31  
-  37:  153  let "greet"
-  44:  155  load "greet"
-  51:  165  call args=0  kwargs=0
+  37:  152  let "greet"
+  44:  154  load "greet"
+  51:  164  call args=0  kwargs=0
   54:  130  pop
-  55:  149  None
+  55:  148  None
 

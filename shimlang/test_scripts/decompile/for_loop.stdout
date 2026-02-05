@@ -1,32 +1,32 @@
-   0:  147  ShimValue 1
-   9:  147  ShimValue 2
-  18:  147  ShimValue 3
-  27:  151  CreateList
+   0:  146  ShimValue 1
+   9:  146  ShimValue 2
+  18:  146  ShimValue 3
+  27:  150  CreateList
   28:    0  no-op
   29:    3  
-  30:  153  let "items"
-  37:  155  load "items"
-  44:  156  get .iter
-  50:  165  call args=0  kwargs=0
-  53:  156  get .next
-  59:  160  Loop Start -> 102
-  62:  146  Copy
-  63:  165  call args=0  kwargs=0
-  66:  146  Copy
-  67:  153  let "item"
-  73:  149  None
+  30:  152  let "items"
+  37:  154  load "items"
+  44:  155  get .iter
+  50:  164  call args=0  kwargs=0
+  53:  155  get .next
+  59:  159  Loop Start -> 102
+  62:  145  Copy
+  63:  164  call args=0  kwargs=0
+  66:  145  Copy
+  67:  152  let "item"
+  73:  148  None
   74:  133  
-  75:  171  JMPNZ -> 102
-  78:  158  start_scope
-  79:  155  load "print"
-  86:  155  load "item"
-  92:  165  call args=1  kwargs=0
+  75:  170  JMPNZ -> 102
+  78:  157  start_scope
+  79:  154  load "print"
+  86:  154  load "item"
+  92:  164  call args=1  kwargs=0
   95:  130  pop
-  96:  149  None
+  96:  148  None
   97:  130  pop
-  98:  159  end_scope
-  99:  170  JMPUP -> 62
- 102:  161  Loop End
+  98:  158  end_scope
+  99:  169  JMPUP -> 62
+ 102:  160  Loop End
  103:  130  pop
- 104:  149  None
+ 104:  148  None
 
