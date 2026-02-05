@@ -2577,6 +2577,10 @@ impl ShimNative for RangeIterator {
 
                 let itr: &mut RangeIterator = args.args[0].as_native(interpreter)?;
                 
+                // Ranges are exclusive of the end value (Rust-like behavior)
+                // For positive steps: iterate while current < end
+                // For negative steps: iterate while current > end
+                // Note: Zero step will cause infinite iteration
                 if (itr.step > 0 && itr.current >= itr.end) || (itr.step < 0 && itr.current <= itr.end) {
                     Ok(ShimValue::None)
                 } else {
