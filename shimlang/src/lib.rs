@@ -86,6 +86,7 @@ pub enum BinaryOp {
     LTE(Box<ExprNode>, Box<ExprNode>),
     Modulus(Box<ExprNode>, Box<ExprNode>),
     In(Box<ExprNode>, Box<ExprNode>),
+    Range(Box<ExprNode>, Box<ExprNode>),
 }
 
 #[derive(Debug)]
@@ -157,6 +158,7 @@ pub struct Ast {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Token {
     Dot,
+    DotDot,
     Bang,
     Comma,
     Colon,
@@ -652,7 +654,7 @@ pub fn parse_logical_or(tokens: &mut TokenStream) -> Result<ExprNode, String> {
 }
 
 pub fn parse_logical_and(tokens: &mut TokenStream) -> Result<ExprNode, String> {
-    let mut expr = parse_equality(tokens)?;
+    let mut expr = parse_range(tokens)?;
     while !tokens.is_empty() {
         let span = tokens.peek_span()?;
         match tokens.peek()? {
@@ -660,6 +662,27 @@ pub fn parse_logical_and(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                 tokens.advance()?;
                 expr = Node {
                     data: Expression::BooleanOp(BooleanOp::And(
+                        Box::new(expr),
+                        Box::new(parse_range(tokens)?),
+                    )),
+                    span: span,
+                };
+            }
+            _ => return Ok(expr),
+        }
+    }
+    Ok(expr)
+}
+
+pub fn parse_range(tokens: &mut TokenStream) -> Result<ExprNode, String> {
+    let mut expr = parse_equality(tokens)?;
+    while !tokens.is_empty() {
+        let span = tokens.peek_span()?;
+        match tokens.peek()? {
+            Token::DotDot => {
+                tokens.advance()?;
+                expr = Node {
+                    data: Expression::BinaryOp(BinaryOp::Range(
                         Box::new(expr),
                         Box::new(parse_equality(tokens)?),
                     )),
@@ -1227,6 +1250,7 @@ pub fn lex_identifier(text: &mut &[u8]) -> Result<Vec<u8>, String> {
             }
         }
     }
+    // End of string - consume all of text
     Ok(text.to_vec())
 }
 
@@ -1283,6 +1307,35 @@ pub fn lex_number(text: &mut &[u8]) -> Result<Token, String> {
         match c {
             b'0'..=b'9' => continue,
             b'.' => {
+                // Check if this is a range operator (..)
+                if idx + 1 < text.len() && text[idx + 1] == b'.' {
+                    // This is a range operator, stop here
+                    let token = if found_decimal {
+                        Token::Float(unsafe {
+                            let slice = &text[..idx];
+                            std::str::from_utf8_unchecked(slice).parse().map_err(|e| {
+                                let string_slice = match std::str::from_utf8(slice) {
+                                    Ok(s) => s,
+                                    Err(e) => return format!("Not utf-8 {:?}", e),
+                                };
+                                format!("Could not tokenize number '{}' {:?}", string_slice, e)
+                            })?
+                        })
+                    } else {
+                        Token::Integer(unsafe {
+                            let slice = &text[..idx];
+                            std::str::from_utf8_unchecked(slice).parse().map_err(|e| {
+                                let string_slice = match std::str::from_utf8(slice) {
+                                    Ok(s) => s,
+                                    Err(e) => return format!("Not utf-8 {:?}", e),
+                                };
+                                format!("Could not tokenize number '{}' {:?}", string_slice, e)
+                            })?
+                        })
+                    };
+                    *text = &text[(idx - 1)..];
+                    return Ok(token);
+                }
                 if found_decimal {
                     return Err(format!("Found multiple decimals in number"));
                 }
@@ -1317,6 +1370,7 @@ pub fn lex_number(text: &mut &[u8]) -> Result<Token, String> {
             }
         }
     }
+    // End of string - consume all of text
     let token = Token::Integer(unsafe {
         std::str::from_utf8_unchecked(text)
             .parse()
@@ -1586,7 +1640,14 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
             b'\r' => (),
             b':' => tokens.push(Token::Colon),
             b'!' => tokens.push(Token::Bang),
-            b'.' => tokens.push(Token::Dot),
+            b'.' => {
+                if text.len() > 1 && text[1] == b'.' {
+                    text = &text[1..];
+                    tokens.push(Token::DotDot);
+                } else {
+                    tokens.push(Token::Dot);
+                }
+            },
             b' ' => (),
             _ => return Err(format!("Unknown character '{}'", printable_byte(c))),
         }
@@ -2080,6 +2141,7 @@ impl Environment {
             (b"print", Box::new(shim_print)),
             (b"panic", Box::new(shim_panic)),
             (b"dict", Box::new(shim_dict)),
+            (b"Range", Box::new(shim_range)),
             (b"assert", Box::new(shim_assert)),
             (b"str", Box::new(shim_str)),
             (b"int", Box::new(shim_int)),
@@ -2434,6 +2496,162 @@ impl ShimNative for DictItemsIterator {
 
     fn gc_vals(&self) -> Vec<ShimValue> {
         vec![self.dict]
+    }
+}
+
+struct RangeNative {
+    start: ShimValue,
+    end: ShimValue,
+}
+
+impl ShimNative for RangeNative {
+    fn to_string(&self, interpreter: &mut Interpreter) -> String {
+        format!("Range({}, {})", self.start.to_string(interpreter), self.end.to_string(interpreter))
+    }
+
+    fn get_attr(&self, self_as_val: &ShimValue, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
+        if ident == b"step" {
+            fn shim_range_step(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+                let mut unpacker = ArgUnpacker::new(args);
+                let obj = unpacker.required(b"obj")?;
+                let step = unpacker.required(b"step")?;
+                unpacker.end()?;
+
+                let range: &RangeNative = obj.as_native(interpreter)?;
+                
+                // Check for zero step
+                let is_zero = match step {
+                    ShimValue::Integer(0) => true,
+                    ShimValue::Float(f) if f == 0.0 => true,
+                    _ => false,
+                };
+                
+                if is_zero {
+                    return Err(format!("Step cannot be zero"));
+                }
+
+                let iterator = RangeIterator {
+                    current: range.start,
+                    end: range.end,
+                    step: step,
+                };
+                Ok(interpreter.mem.alloc_native(iterator))
+            }
+
+            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_range_step))
+        } else if ident == b"iter" {
+            fn shim_range_iter(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+                let mut unpacker = ArgUnpacker::new(args);
+                let obj = unpacker.required(b"obj")?;
+                unpacker.end()?;
+
+                let range: &RangeNative = obj.as_native(interpreter)?;
+                let iterator = RangeIterator {
+                    current: range.start,
+                    end: range.end,
+                    step: ShimValue::Integer(1),
+                };
+                Ok(interpreter.mem.alloc_native(iterator))
+            }
+
+            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_range_iter))
+        } else {
+            Err(format!("Can't get_attr {} on {}", debug_u8s(ident), type_name::<Self>()))
+        }
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any where Self: Sized {
+        self
+    }
+
+    fn gc_vals(&self) -> Vec<ShimValue> {
+        vec![self.start, self.end]
+    }
+}
+
+struct RangeIterator {
+    current: ShimValue,
+    end: ShimValue,
+    step: ShimValue,
+}
+
+impl ShimNative for RangeIterator {
+    fn get_attr(&self, self_as_val: &ShimValue, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
+        if ident == b"next" {
+            fn shim_range_iter_next(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+                if args.args.len() != 1 {
+                    return Err(format!("Can't provide positional args to RangeIterator.next()"));
+                }
+
+                let itr: &mut RangeIterator = args.args[0].as_native(interpreter)?;
+                
+                // Determine if we've reached the end based on step direction
+                // For positive steps: iterate while current < end
+                // For negative steps: iterate while current > end
+                let step_is_positive = match itr.step.gt(interpreter, &ShimValue::Integer(0))? {
+                    ShimValue::Bool(b) => b,
+                    _ => return Err(format!("Step comparison failed")),
+                };
+                
+                let has_more = if step_is_positive {
+                    // current < end
+                    match itr.current.lt(interpreter, &itr.end)? {
+                        ShimValue::Bool(b) => b,
+                        _ => return Err(format!("Range comparison failed")),
+                    }
+                } else {
+                    // current > end
+                    match itr.current.gt(interpreter, &itr.end)? {
+                        ShimValue::Bool(b) => b,
+                        _ => return Err(format!("Range comparison failed")),
+                    }
+                };
+                
+                if !has_more {
+                    Ok(ShimValue::None)
+                } else {
+                    let result = itr.current;
+                    // current = current + step
+                    let mut pending_args = ArgBundle::new();
+                    match itr.current.add(interpreter, &itr.step, &mut pending_args)? {
+                        CallResult::ReturnValue(new_current) => {
+                            itr.current = new_current;
+                            Ok(result)
+                        }
+                        CallResult::PC(pc) => {
+                            let new_current = interpreter.execute_bytecode_extended(
+                                &mut (pc as usize),
+                                pending_args,
+                                &mut Environment::new(),
+                            )?;
+                            itr.current = new_current;
+                            Ok(result)
+                        }
+                    }
+                }
+            }
+
+            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_range_iter_next))
+        } else if ident == b"iter" {
+            fn shim_range_iterator_iter(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+                let mut unpacker = ArgUnpacker::new(args);
+                let obj = unpacker.required(b"obj")?;
+                unpacker.end()?;
+                Ok(obj)
+            }
+
+            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_range_iterator_iter))
+        } else {
+            Err(format!("Can't get_attr {} on {}", debug_u8s(ident), type_name::<Self>()))
+        }
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any where Self: Sized {
+        self
+    }
+
+    fn gc_vals(&self) -> Vec<ShimValue> {
+        vec![self.current, self.end, self.step]
     }
 }
 
@@ -3165,6 +3383,19 @@ fn shim_dict(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValu
     }
 
     Ok(retval)
+}
+
+fn shim_range(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let start = unpacker.required(b"start")?;
+    let end = unpacker.required(b"end")?;
+    unpacker.end()?;
+
+    let range = RangeNative {
+        start: start,
+        end: end,
+    };
+    Ok(interpreter.mem.alloc_native(range))
 }
 
 fn shim_print(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
@@ -4864,6 +5095,7 @@ enum ByteCode {
     JmpNZ,
     JmpZ,
     JmpInitArg,
+    Range,
 }
 
 pub struct Program {
@@ -5578,6 +5810,7 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
                 BinaryOp::LT(a, b) => (ByteCode::LT, a, b),
                 BinaryOp::LTE(a, b) => (ByteCode::LTE, a, b),
                 BinaryOp::In(a, b) => (ByteCode::In, a, b),
+                BinaryOp::Range(a, b) => (ByteCode::Range, a, b),
             };
             let mut res = compile_expression(&a)?;
             res.extend(compile_expression(&b)?);
@@ -6094,6 +6327,16 @@ impl Interpreter {
                     let b = stack.pop().expect("Operand for ByteCode::In");
                     let a = stack.pop().expect("Operand for ByteCode::In");
                     stack.push(a.contains(self, &b)?);
+                }
+                val if val == ByteCode::Range as u8 => {
+                    let end = stack.pop().expect("Operand for ByteCode::Range");
+                    let start = stack.pop().expect("Operand for ByteCode::Range");
+                    
+                    let range = RangeNative {
+                        start: start,
+                        end: end,
+                    };
+                    stack.push(self.mem.alloc_native(range));
                 }
                 val if val == ByteCode::Not as u8 => {
                     let a = stack.pop().expect("Operand for ByteCode::Not");
@@ -6759,6 +7002,8 @@ pub fn format_asm(bytes: &[u8]) -> String {
             out.push_str(&format!(""));
         } else if *b == ByteCode::Return as u8 {
             out.push_str(&format!("return"));
+        } else if *b == ByteCode::Range as u8 {
+            out.push_str(&format!("Range"));
         }
         out.push('\n');
         idx += 1;
