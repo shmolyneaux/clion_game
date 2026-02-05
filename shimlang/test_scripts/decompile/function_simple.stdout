@@ -6,9 +6,7 @@
   23:  pop
   24:  ShimValue None
   33:  return
-  34:  fn
-  35:  no-op
-  36:   31  
+  34:  CreateFn -> PC 3
   37:  let "greet"
   44:  load "greet"
   51:  call args=0  kwargs=0

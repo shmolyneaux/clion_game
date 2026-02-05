@@ -6843,7 +6843,10 @@ pub fn format_asm(bytes: &[u8]) -> String {
         } else if *b == ByteCode::Pop as u8 {
             out.push_str("pop");
         } else if *b == ByteCode::Assignment as u8 {
-            out.push_str("assignment");
+            let len = bytes[idx + 1] as usize;
+            let slice = &bytes[idx + 2..idx + 2 + len];
+            out.push_str(&format!(r#"assign "{}""#, debug_u8s(slice)));
+            idx += len + 1;
         } else if *b == ByteCode::Call as u8 {
             let arg_count = bytes[idx+1] as usize;
             let kwarg_count = bytes[idx+2] as usize;
@@ -6881,8 +6884,6 @@ pub fn format_asm(bytes: &[u8]) -> String {
             out.push_str("equal");
         } else if *b == ByteCode::NotEqual as u8 {
             out.push_str("not_equal");
-        } else if *b == ByteCode::CreateFn as u8 {
-            out.push_str("fn");
         } else if *b == ByteCode::JmpZ as u8 {
             let offset = ((bytes[idx + 1] as usize) << 8) + bytes[idx + 2] as usize;
             let target = idx + offset;
@@ -6922,9 +6923,52 @@ pub fn format_asm(bytes: &[u8]) -> String {
         } else if *b == ByteCode::AssignArg as u8 {
             out.push_str("assign arg");
         } else if *b == ByteCode::CreateFn as u8 {
-            out.push_str("fn");
+            let instruction_offset = ((bytes[idx + 1] as u16) << 8) + bytes[idx + 2] as u16;
+            // The function points backwards by this offset
+            let target_pc = idx.saturating_sub(instruction_offset as usize);
+            out.push_str(&format!("CreateFn -> PC {}", target_pc));
+            idx += 2;
         } else if *b == ByteCode::CreateStruct as u8 {
-            out.push_str("create struct");
+            let member_count = bytes[idx + 3];
+            let method_count = bytes[idx + 4];
+            
+            let mut parse_idx = idx + 5;
+            
+            // Read struct name
+            let name_len = bytes[parse_idx];
+            let name = &bytes[parse_idx + 1..parse_idx + 1 + name_len as usize];
+            parse_idx = parse_idx + 1 + name_len as usize;
+            
+            // Read member names
+            let mut member_names = Vec::new();
+            for _ in 0..member_count {
+                let ident_len = bytes[parse_idx];
+                let ident = &bytes[parse_idx + 1..parse_idx + 1 + ident_len as usize];
+                member_names.push(debug_u8s(ident).to_string());
+                parse_idx = parse_idx + 1 + ident_len as usize;
+            }
+            
+            // Read method names and PCs
+            let mut methods = Vec::new();
+            for _ in 0..method_count {
+                let method_pc = idx + ((bytes[parse_idx] as usize) << 8) + bytes[parse_idx + 1] as usize;
+                parse_idx += 2;
+                
+                let ident_len = bytes[parse_idx];
+                let ident = &bytes[parse_idx + 1..parse_idx + 1 + ident_len as usize];
+                methods.push(format!("{}@{}", debug_u8s(ident), method_pc));
+                parse_idx = parse_idx + 1 + ident_len as usize;
+            }
+            
+            out.push_str(&format!("CreateStruct \"{}\" members=[{}] methods=[{}]", 
+                                  debug_u8s(name), 
+                                  member_names.join(", "),
+                                  methods.join(", ")));
+            
+            // Skip to the end of the struct header (not the entire definition)
+            // This allows the method bodies to be disassembled normally
+            // Note: The outer loop will add 1, so we subtract 1 here
+            idx = parse_idx - 1;
         } else if *b == ByteCode::GetAttr as u8 {
             let len = bytes[idx + 1] as usize;
             let slice = &bytes[idx + 2..idx + 2 + len];
@@ -6966,7 +7010,9 @@ pub fn format_asm(bytes: &[u8]) -> String {
         } else if *b == ByteCode::LiteralNone as u8 {
             out.push_str("None");
         } else if *b == ByteCode::CreateList as u8 {
-            out.push_str("CreateList");
+            let list_size = ((bytes[idx + 1] as usize) << 8) + bytes[idx + 2] as usize;
+            out.push_str(&format!("CreateList size={}", list_size));
+            idx += 2;
         } else if *b == ByteCode::Copy as u8 {
             out.push_str("Copy");
         } else if *b == ByteCode::LoopStart as u8 {

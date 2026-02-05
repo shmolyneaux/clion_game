@@ -11,9 +11,7 @@
   58:  pop
   59:  ShimValue None
   68:  return
-  69:  fn
-  70:  no-op
-  71:   66  
+  69:  CreateFn -> PC 3
   72:  let "greet"
   79:  load "greet"
   86:  String "World"

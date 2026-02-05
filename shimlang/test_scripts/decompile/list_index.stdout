@@ -1,9 +1,7 @@
    0:  ShimValue 1
    9:  ShimValue 2
   18:  ShimValue 3
-  27:  CreateList
-  28:  no-op
-  29:    3  
+  27:  CreateList size=3
   30:  let "lst"
   35:  load "print"
   42:  load "lst"

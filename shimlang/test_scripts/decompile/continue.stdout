@@ -9,9 +9,7 @@
   32:  load "i"
   35:  ShimValue 1
   44:  add
-  45:  assignment
-  46:    1  
-  47:  105  
+  45:  assign "i"
   48:  load "i"
   51:  ShimValue 2
   60:  equal
