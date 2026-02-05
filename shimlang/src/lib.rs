@@ -6824,9 +6824,9 @@ pub fn format_asm(bytes: &[u8]) -> String {
     let mut idx = 0;
     while idx < bytes.len() {
         let b = &bytes[idx];
-        let start_idx = idx;  // Save the starting index
+        let start_idx = idx;
         
-        // Build the instruction text first
+        // Buffer instruction text to determine output format
         let mut instruction_text = String::new();
 
         if *b == ByteCode::Jmp as u8 {
