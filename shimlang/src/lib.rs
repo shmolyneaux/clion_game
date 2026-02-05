@@ -3313,7 +3313,9 @@ fn shim_list_sort(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shi
     Ok(ShimValue::None)
 }
 
-// Helper function to compare two ShimValues
+// Helper function to compare two ShimValues for sorting/ordering purposes.
+// This function returns an Ordering to determine relative position in a sorted sequence.
+// For equality checks, use ShimValue::equal_inner instead.
 fn compare_values(interpreter: &mut Interpreter, a: &ShimValue, b: &ShimValue) -> Result<std::cmp::Ordering, String> {
     use std::cmp::Ordering;
     
@@ -3483,6 +3485,223 @@ fn shim_list_iter(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shi
     unpacker.end()?;
 
     Ok(interpreter.mem.alloc_native(ListIterator {lst: obj, idx: 0}))
+}
+
+fn shim_list_clear(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let obj = unpacker.required(b"obj")?;
+    let lst = obj.list_mut(interpreter)?;
+    unpacker.end()?;
+
+    lst.len = 0.into();
+    
+    Ok(ShimValue::None)
+}
+
+fn shim_list_extend(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let obj = unpacker.required(b"obj")?;
+    let iterable = unpacker.required(b"iterable")?;
+    unpacker.end()?;
+
+    // Get the iterator for the iterable
+    let mut iter_args = ArgBundle::new();
+    let iterator = iterable.get_attr(interpreter, b"iter")?.call(interpreter, &mut iter_args)?;
+    let iterator = match iterator {
+        CallResult::ReturnValue(val) => val,
+        CallResult::PC(pc) => {
+            interpreter.execute_bytecode_extended(
+                &mut (pc as usize),
+                iter_args,
+                &mut Environment::new(),
+            )?
+        },
+    };
+
+    // Get the next method
+    let next_method = iterator.get_attr(interpreter, b"next")?;
+
+    // Iterate and append each item
+    loop {
+        let mut next_args = ArgBundle::new();
+        
+        let result = match next_method.call(interpreter, &mut next_args)? {
+            CallResult::ReturnValue(val) => val,
+            CallResult::PC(pc) => {
+                interpreter.execute_bytecode_extended(
+                    &mut (pc as usize),
+                    next_args,
+                    &mut Environment::new(),
+                )?
+            },
+        };
+
+        // Break if we get None (end of iteration)
+        if result.is_none() {
+            break;
+        }
+
+        // Append the item to the list
+        let lst = obj.list_mut(interpreter)?;
+        lst.push(&mut interpreter.mem, result);
+    }
+
+    Ok(ShimValue::None)
+}
+
+fn shim_list_index(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let obj = unpacker.required(b"obj")?;
+    let lst = obj.list(interpreter)?;
+    let value = unpacker.required(b"value")?;
+    let default = unpacker.optional(b"default");
+    unpacker.end()?;
+
+    for idx in 0..lst.len() {
+        let item = lst.get(&interpreter.mem, idx as isize)?;
+        if item.equal_inner(interpreter, &value)? {
+            return Ok(ShimValue::Integer(idx as i32));
+        }
+    }
+
+    Ok(default.unwrap_or(ShimValue::None))
+}
+
+fn shim_list_insert(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let obj = unpacker.required(b"obj")?;
+    let index = unpacker.required(b"index")?;
+    let value = unpacker.required(b"value")?;
+    unpacker.end()?;
+
+    let idx = index.integer()? as isize;
+
+    let lst = obj.list_mut(interpreter)?;
+    let len = lst.len();
+
+    // Handle negative and out-of-bounds indices like Python
+    let insert_idx = if idx < 0 {
+        // Negative indices count from the end
+        (len as isize + idx).max(0) as usize
+    } else if idx as usize > len {
+        // Positive indices beyond length append at the end
+        len
+    } else {
+        idx as usize
+    };
+
+    // Add a new element at the end (this will resize if needed)
+    lst.push(&mut interpreter.mem, ShimValue::None);
+
+    // Shift elements to make room
+    for i in (insert_idx..len).rev() {
+        let val = lst.get(&interpreter.mem, i as isize)?;
+        lst.set(&mut interpreter.mem, (i + 1) as isize, val)?;
+    }
+
+    // Insert the value
+    lst.set(&mut interpreter.mem, insert_idx as isize, value)?;
+
+    Ok(ShimValue::None)
+}
+
+fn shim_list_pop(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let obj = unpacker.required(b"obj")?;
+    let index = unpacker.optional(b"index");
+    let default = unpacker.optional(b"default");
+    unpacker.end()?;
+
+    let lst = obj.list_mut(interpreter)?;
+    
+    if lst.is_empty() {
+        return Ok(default.unwrap_or(ShimValue::None));
+    }
+
+    // Determine which index to pop
+    let pop_idx = if let Some(idx_val) = index {
+        let idx = idx_val.integer()? as isize;
+        lst.wrap_idx(idx)?
+    } else {
+        // Default to last element
+        lst.len() - 1
+    };
+
+    // Get the value at the index
+    let value = lst.get(&interpreter.mem, pop_idx as isize)?;
+
+    // Shift elements after pop_idx to the left
+    for i in pop_idx..(lst.len() - 1) {
+        let next_val = lst.get(&interpreter.mem, (i + 1) as isize)?;
+        lst.set(&mut interpreter.mem, i as isize, next_val)?;
+    }
+
+    // Decrease the length
+    lst.len = (lst.len() - 1).into();
+
+    Ok(value)
+}
+
+fn shim_list_sorted(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let obj = unpacker.required(b"obj")?;
+    let lst = obj.list(interpreter)?;
+    let key = unpacker.optional(b"key");
+    unpacker.end()?;
+
+    // Create a new list with the same elements
+    let new_lst_val = interpreter.mem.alloc_list();
+    let new_lst = new_lst_val.list_mut(interpreter)?;
+    
+    for idx in 0..lst.len() {
+        let item = lst.get(&interpreter.mem, idx as isize)?;
+        new_lst.push(&mut interpreter.mem, item);
+    }
+
+    // Sort the new list using the existing sort logic
+    let mut sort_args = ArgBundle::new();
+    sort_args.args.push(new_lst_val);
+    if let Some(k) = key {
+        sort_args.kwargs.push((b"key".to_vec(), k));
+    }
+    shim_list_sort(interpreter, &sort_args)?;
+
+    Ok(new_lst_val)
+}
+
+fn shim_list_reverse(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let obj = unpacker.required(b"obj")?;
+    let lst = obj.list_mut(interpreter)?;
+    unpacker.end()?;
+
+    let len = lst.len();
+    for i in 0..(len / 2) {
+        let left = lst.get(&interpreter.mem, i as isize)?;
+        let right = lst.get(&interpreter.mem, (len - 1 - i) as isize)?;
+        lst.set(&mut interpreter.mem, i as isize, right)?;
+        lst.set(&mut interpreter.mem, (len - 1 - i) as isize, left)?;
+    }
+
+    Ok(ShimValue::None)
+}
+
+fn shim_list_reversed(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let obj = unpacker.required(b"obj")?;
+    let lst = obj.list(interpreter)?;
+    unpacker.end()?;
+
+    // Create a new list with reversed elements
+    let new_lst_val = interpreter.mem.alloc_list();
+    let new_lst = new_lst_val.list_mut(interpreter)?;
+    
+    for idx in (0..lst.len()).rev() {
+        let item = lst.get(&interpreter.mem, idx as isize)?;
+        new_lst.push(&mut interpreter.mem, item);
+    }
+
+    Ok(new_lst_val)
 }
 
 fn shim_dict_iter(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
@@ -3836,6 +4055,10 @@ impl ShimValue {
         }
     }
 
+    fn is_none(&self) -> bool {
+        matches!(self, ShimValue::None)
+    }
+
     fn hash(&self, interpreter: &mut Interpreter) -> Result<u32, String> {
         let hashcode: u64 = match self {
             ShimValue::Integer(i) => fnv1a_hash(&i.to_be_bytes()),
@@ -4026,6 +4249,13 @@ impl ShimValue {
             _ => {
                 Err(format!("Not a string"))
             }
+        }
+    }
+
+    fn integer(&self) -> Result<i32, String> {
+        match self {
+            ShimValue::Integer(i) => Ok(*i),
+            _ => Err(format!("Not an integer")),
         }
     }
 
@@ -4500,6 +4730,14 @@ impl ShimValue {
                     b"iter" => shim_list_iter,
                     b"sort" => shim_list_sort,
                     b"append" => shim_list_append,
+                    b"clear" => shim_list_clear,
+                    b"extend" => shim_list_extend,
+                    b"index" => shim_list_index,
+                    b"insert" => shim_list_insert,
+                    b"pop" => shim_list_pop,
+                    b"sorted" => shim_list_sorted,
+                    b"reverse" => shim_list_reverse,
+                    b"reversed" => shim_list_reversed,
                     _ => return Err(format!("No ident {:?} on list", debug_u8s(ident))),
                 };
                 Ok(interpreter.mem.alloc_bound_native_fn(self, func))
