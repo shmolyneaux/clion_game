@@ -1,0 +1,3 @@
+// Test that range has lower precedence than logical and
+let result = true and false or 1..3;
+print(result);
