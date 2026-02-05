@@ -1250,6 +1250,7 @@ pub fn lex_identifier(text: &mut &[u8]) -> Result<Vec<u8>, String> {
             }
         }
     }
+    // End of string - consume all of text
     Ok(text.to_vec())
 }
 
@@ -1369,6 +1370,7 @@ pub fn lex_number(text: &mut &[u8]) -> Result<Token, String> {
             }
         }
     }
+    // End of string - consume all of text
     let token = Token::Integer(unsafe {
         std::str::from_utf8_unchecked(text)
             .parse()
@@ -2521,6 +2523,10 @@ impl ShimNative for RangeNative {
                     ShimValue::Integer(i) => i,
                     _ => return Err(format!("Step must be an integer")),
                 };
+                
+                if step_int == 0 {
+                    return Err(format!("Step cannot be zero"));
+                }
 
                 let new_range = RangeNative {
                     start: range.start,
