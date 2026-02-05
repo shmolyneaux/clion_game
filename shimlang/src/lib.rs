@@ -6836,7 +6836,7 @@ pub fn format_asm(bytes: &[u8]) -> String {
         } else if *b == ByteCode::VariableDeclaration as u8 {
             let len = bytes[idx + 1] as usize;
             let slice = &bytes[idx + 2..idx + 2 + len];
-            out.push_str(&format!("let \"{}\"", debug_u8s(slice)));
+            out.push_str(&format!(r#"let "{}""#, debug_u8s(slice)));
             idx += len + 1;
         } else if *b == ByteCode::NoOp as u8 {
             out.push_str("no-op");
@@ -6938,7 +6938,7 @@ pub fn format_asm(bytes: &[u8]) -> String {
         } else if *b == ByteCode::VariableLoad as u8 {
             let len = bytes[idx+1] as usize;
             let slice = &bytes[idx+2..idx+2+len];
-            out.push_str(&format!("load \"{}\"", debug_u8s(slice)));
+            out.push_str(&format!(r#"load "{}""#, debug_u8s(slice)));
             idx += len + 1;
         } else if *b == ByteCode::Break as u8 {
             out.push_str("break");
@@ -6961,7 +6961,7 @@ pub fn format_asm(bytes: &[u8]) -> String {
         } else if *b == ByteCode::LiteralString as u8 {
             let len = bytes[idx+1] as usize;
             let slice = &bytes[idx+2..idx+2+len];
-            out.push_str(&format!("String \"{}\"", debug_u8s(slice)));
+            out.push_str(&format!(r#"String "{}""#, debug_u8s(slice)));
             idx += len + 1;
         } else if *b == ByteCode::LiteralNone as u8 {
             out.push_str("None");
