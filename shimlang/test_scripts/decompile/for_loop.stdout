@@ -15,7 +15,7 @@
   66:  145  Copy
   67:  152  let "item"
   73:  148  None
-  74:  133  
+  74:  133  equal
   75:  170  JMPNZ -> 102
   78:  157  start_scope
   79:  154  load "print"
