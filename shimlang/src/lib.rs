@@ -6929,7 +6929,6 @@ pub fn format_asm(bytes: &[u8]) -> String {
             out.push_str(&format!("CreateFn -> PC {}", target_pc));
             idx += 2;
         } else if *b == ByteCode::CreateStruct as u8 {
-            let struct_size = ((bytes[idx + 1] as usize) << 8) + bytes[idx + 2] as usize;
             let member_count = bytes[idx + 3];
             let method_count = bytes[idx + 4];
             
@@ -6966,9 +6965,10 @@ pub fn format_asm(bytes: &[u8]) -> String {
                                   member_names.join(", "),
                                   methods.join(", ")));
             
-            // Skip to the end of the struct definition
+            // Skip to the end of the struct header (not the entire definition)
+            // This allows the method bodies to be disassembled normally
             // Note: The outer loop will add 1, so we subtract 1 here
-            idx += struct_size - 1;
+            idx = parse_idx - 1;
         } else if *b == ByteCode::GetAttr as u8 {
             let len = bytes[idx + 1] as usize;
             let slice = &bytes[idx + 2..idx + 2 + len];

@@ -1,4 +1,23 @@
    0:  CreateStruct "Point" members=[x, y] methods=[__init__@37, distance@61]
+  37:  unpack_args required=2 optional=0 [x, y]
+  44:  load "Point"
+  51:  load "x"
+  54:  load "y"
+  57:  call args=2  kwargs=0
+  60:  return
+  61:  unpack_args required=1 optional=0 [self]
+  69:  load "self"
+  75:  get .x
+  78:  load "self"
+  84:  get .x
+  87:  multiply
+  88:  load "self"
+  94:  get .y
+  97:  load "self"
+ 103:  get .y
+ 106:  multiply
+ 107:  add
+ 108:  return
  109:  let "Point"
  116:  load "Point"
  123:  ShimValue 3
