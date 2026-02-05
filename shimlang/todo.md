@@ -1,12 +1,3 @@
-- List methods
-    - clear
-    - extend
-    - index
-    - insert
-    - pop
-    - sorted
-    - reverse
-    - reversed
 - Tuple
 - Tuple unpacking
 - Anonymous functions (non-closures?)
@@ -41,3 +32,4 @@
 - Spans for statements
 - Adding ident cache to Fn bytecode
 - Closures
+

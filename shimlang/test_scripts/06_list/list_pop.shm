@@ -1,0 +1,26 @@
+// Test list pop method
+let lst = [1, 2, 3, 4, 5];
+
+let val1 = lst.pop();
+assert(val1 == 5);
+assert(lst.len() == 4);
+
+let val2 = lst.pop();
+assert(val2 == 4);
+assert(lst.len() == 3);
+
+// Pop all elements
+lst.pop();
+lst.pop();
+lst.pop();
+assert(lst.len() == 0);
+
+// Pop from empty list returns None
+let val_none = lst.pop();
+assert(val_none == None);
+
+// Pop from empty list with default
+let val_default = lst.pop(-1);
+assert(val_default == -1);
+
+print("List pop passed");
