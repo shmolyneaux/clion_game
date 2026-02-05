@@ -3313,7 +3313,9 @@ fn shim_list_sort(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shi
     Ok(ShimValue::None)
 }
 
-// Helper function to compare two ShimValues
+// Helper function to compare two ShimValues for sorting/ordering purposes.
+// This function returns an Ordering to determine relative position in a sorted sequence.
+// For equality checks, use ShimValue::equal_inner instead.
 fn compare_values(interpreter: &mut Interpreter, a: &ShimValue, b: &ShimValue) -> Result<std::cmp::Ordering, String> {
     use std::cmp::Ordering;
     
@@ -3557,11 +3559,8 @@ fn shim_list_index(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Sh
 
     for idx in 0..lst.len() {
         let item = lst.get(&interpreter.mem, idx as isize)?;
-        match compare_values(interpreter, &item, &value) {
-            Ok(std::cmp::Ordering::Equal) => {
-                return Ok(ShimValue::Integer(idx as i32));
-            }
-            _ => continue,
+        if item.equal_inner(interpreter, &value)? {
+            return Ok(ShimValue::Integer(idx as i32));
         }
     }
 
@@ -3575,10 +3574,7 @@ fn shim_list_insert(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<S
     let value = unpacker.required(b"value")?;
     unpacker.end()?;
 
-    let idx = match index {
-        ShimValue::Integer(i) => i as isize,
-        _ => return Err(format!("insert() index must be an integer")),
-    };
+    let idx = index.integer()? as isize;
 
     let lst = obj.list_mut(interpreter)?;
     let len = lst.len();
@@ -3624,13 +3620,8 @@ fn shim_list_pop(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shim
 
     // Determine which index to pop
     let pop_idx = if let Some(idx_val) = index {
-        match idx_val {
-            ShimValue::Integer(i) => {
-                let idx = lst.wrap_idx(i as isize)?;
-                idx
-            },
-            _ => return Err(format!("pop() index must be an integer")),
-        }
+        let idx = idx_val.integer()? as isize;
+        lst.wrap_idx(idx)?
     } else {
         // Default to last element
         lst.len() - 1
@@ -4258,6 +4249,13 @@ impl ShimValue {
             _ => {
                 Err(format!("Not a string"))
             }
+        }
+    }
+
+    fn integer(&self) -> Result<i32, String> {
+        match self {
+            ShimValue::Integer(i) => Ok(*i),
+            _ => Err(format!("Not an integer")),
         }
     }
 
