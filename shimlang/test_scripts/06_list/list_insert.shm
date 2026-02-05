@@ -18,10 +18,15 @@ lst.insert(6, 100);
 assert(lst.len() == 7);
 assert(lst[6] == 100);
 
-// Negative index
+// Negative index (insert before last element)
 lst.insert(-1, 88);
 assert(lst.len() == 8);
 assert(lst[6] == 88);
 assert(lst[7] == 100);
+
+// Very negative index (insert at beginning)
+lst.insert(-100, 77);
+assert(lst.len() == 9);
+assert(lst[0] == 77);
 
 print("List insert passed");

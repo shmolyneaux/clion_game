@@ -3507,7 +3507,13 @@ fn shim_list_extend(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<S
     let iterator = iterable.get_attr(interpreter, b"iter")?.call(interpreter, &mut iter_args)?;
     let iterator = match iterator {
         CallResult::ReturnValue(val) => val,
-        CallResult::PC(_) => return Err("Iterator creation returned PC".to_string()),
+        CallResult::PC(pc) => {
+            interpreter.execute_bytecode_extended(
+                &mut (pc as usize),
+                iter_args,
+                &mut Environment::new(),
+            )?
+        },
     };
 
     // Get the next method
@@ -3529,7 +3535,7 @@ fn shim_list_extend(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<S
         };
 
         // Break if we get None (end of iteration)
-        if matches!(result, ShimValue::None) {
+        if result.is_none() {
             break;
         }
 
@@ -3577,11 +3583,16 @@ fn shim_list_insert(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<S
     let lst = obj.list_mut(interpreter)?;
     let len = lst.len();
 
-    // Clamp index to valid range [0, len]
+    // Handle negative and out-of-bounds indices like Python
     let insert_idx = if idx < 0 {
-        0.max(len as isize + idx) as usize
+        // Negative indices count from the end
+        let wrapped = (len as isize + idx).max(0) as usize;
+        wrapped
+    } else if idx as usize > len {
+        // Positive indices beyond length append at the end
+        len
     } else {
-        (idx as usize).min(len)
+        idx as usize
     };
 
     // Add a new element at the end (this will resize if needed)
@@ -3602,6 +3613,7 @@ fn shim_list_insert(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<S
 fn shim_list_pop(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let obj = unpacker.required(b"obj")?;
+    let index = unpacker.optional(b"index");
     let default = unpacker.optional(b"default");
     unpacker.end()?;
 
@@ -3611,8 +3623,30 @@ fn shim_list_pop(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shim
         return Ok(default.unwrap_or(ShimValue::None));
     }
 
-    let last_idx = lst.len() - 1;
-    let value = lst.get(&interpreter.mem, last_idx as isize)?;
+    // Determine which index to pop
+    let pop_idx = if let Some(idx_val) = index {
+        match idx_val {
+            ShimValue::Integer(i) => {
+                let idx = lst.wrap_idx(i as isize)?;
+                idx
+            },
+            _ => return Err(format!("pop() index must be an integer")),
+        }
+    } else {
+        // Default to last element
+        lst.len() - 1
+    };
+
+    // Get the value at the index
+    let value = lst.get(&interpreter.mem, pop_idx as isize)?;
+
+    // Shift elements after pop_idx to the left
+    for i in pop_idx..(lst.len() - 1) {
+        let next_val = lst.get(&interpreter.mem, (i + 1) as isize)?;
+        lst.set(&mut interpreter.mem, i as isize, next_val)?;
+    }
+
+    // Decrease the length
     lst.len = (lst.len() - 1).into();
 
     Ok(value)
@@ -4029,6 +4063,10 @@ impl ShimValue {
         } else {
             false
         }
+    }
+
+    fn is_none(&self) -> bool {
+        matches!(self, ShimValue::None)
     }
 
     fn hash(&self, interpreter: &mut Interpreter) -> Result<u32, String> {
