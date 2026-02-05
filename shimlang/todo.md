@@ -1,15 +1,10 @@
 - List methods
-    - append
     - clear
-    - len
     - extend
     - index
     - insert
     - pop
-    - Sorting
-        - sort
-        - sorted
-        - Kind of needs anonymous functions even if not full closures?
+    - sorted
     - reverse
     - reversed
 - Tuple
