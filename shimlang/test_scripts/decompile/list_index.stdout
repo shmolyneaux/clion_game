@@ -1,25 +1,25 @@
-   0:  146  ShimValue 1
-   9:  146  ShimValue 2
-  18:  146  ShimValue 3
-  27:  150  CreateList
-  28:    0  no-op
+   0:  ShimValue 1
+   9:  ShimValue 2
+  18:  ShimValue 3
+  27:  CreateList
+  28:  no-op
   29:    3  
-  30:  152  let "lst"
-  35:  154  load "print"
-  42:  154  load "lst"
-  47:  146  ShimValue 0
-  56:  165  index
-  57:  164  call args=1  kwargs=0
-  60:  130  pop
-  61:  154  load "lst"
-  66:  146  ShimValue 1
-  75:  146  ShimValue 5
-  84:  166  set_index
-  85:  154  load "print"
-  92:  154  load "lst"
-  97:  146  ShimValue 1
- 106:  165  index
- 107:  164  call args=1  kwargs=0
- 110:  130  pop
- 111:  148  None
+  30:  let "lst"
+  35:  load "print"
+  42:  load "lst"
+  47:  ShimValue 0
+  56:  index
+  57:  call args=1  kwargs=0
+  60:  pop
+  61:  load "lst"
+  66:  ShimValue 1
+  75:  ShimValue 5
+  84:  set_index
+  85:  load "print"
+  92:  load "lst"
+  97:  ShimValue 1
+ 106:  index
+ 107:  call args=1  kwargs=0
+ 110:  pop
+ 111:  None
 

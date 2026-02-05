@@ -1,12 +1,12 @@
-   0:  146  ShimValue 1
-   9:  152  let "x"
-  12:  146  ShimValue 2
-  21:  153  assignment
+   0:  ShimValue 1
+   9:  let "x"
+  12:  ShimValue 2
+  21:  assignment
   22:    1  
   23:  120  
-  24:  154  load "print"
-  31:  154  load "x"
-  34:  164  call args=1  kwargs=0
-  37:  130  pop
-  38:  148  None
+  24:  load "print"
+  31:  load "x"
+  34:  call args=1  kwargs=0
+  37:  pop
+  38:  None
 
