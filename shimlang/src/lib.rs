@@ -3571,7 +3571,7 @@ fn shim_list_insert(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<S
 
     let idx = match index {
         ShimValue::Integer(i) => i as isize,
-        _ => return Err(format!("Index must be an integer")),
+        _ => return Err(format!("insert() index must be an integer")),
     };
 
     let lst = obj.list_mut(interpreter)?;
