@@ -1,4 +1,4 @@
-   0:  CreateStruct "Point" members=2 methods=2 size=109
+   0:  CreateStruct "Point" members=[x, y] methods=[__init__@37, distance@61]
  109:  let "Point"
  116:  load "Point"
  123:  ShimValue 3

@@ -6933,12 +6933,38 @@ pub fn format_asm(bytes: &[u8]) -> String {
             let member_count = bytes[idx + 3];
             let method_count = bytes[idx + 4];
             
-            // Read struct name
-            let name_len = bytes[idx + 5];
-            let name = &bytes[idx + 6..idx + 6 + name_len as usize];
+            let mut parse_idx = idx + 5;
             
-            out.push_str(&format!("CreateStruct \"{}\" members={} methods={} size={}", 
-                                  debug_u8s(name), member_count, method_count, struct_size));
+            // Read struct name
+            let name_len = bytes[parse_idx];
+            let name = &bytes[parse_idx + 1..parse_idx + 1 + name_len as usize];
+            parse_idx = parse_idx + 1 + name_len as usize;
+            
+            // Read member names
+            let mut member_names = Vec::new();
+            for _ in 0..member_count {
+                let ident_len = bytes[parse_idx];
+                let ident = &bytes[parse_idx + 1..parse_idx + 1 + ident_len as usize];
+                member_names.push(debug_u8s(ident).to_string());
+                parse_idx = parse_idx + 1 + ident_len as usize;
+            }
+            
+            // Read method names and PCs
+            let mut methods = Vec::new();
+            for _ in 0..method_count {
+                let method_pc = idx + ((bytes[parse_idx] as usize) << 8) + bytes[parse_idx + 1] as usize;
+                parse_idx += 2;
+                
+                let ident_len = bytes[parse_idx];
+                let ident = &bytes[parse_idx + 1..parse_idx + 1 + ident_len as usize];
+                methods.push(format!("{}@{}", debug_u8s(ident), method_pc));
+                parse_idx = parse_idx + 1 + ident_len as usize;
+            }
+            
+            out.push_str(&format!("CreateStruct \"{}\" members=[{}] methods=[{}]", 
+                                  debug_u8s(name), 
+                                  member_names.join(", "),
+                                  methods.join(", ")));
             
             // Skip to the end of the struct definition
             // Note: The outer loop will add 1, so we subtract 1 here
