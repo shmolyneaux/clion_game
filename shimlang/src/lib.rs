@@ -2285,6 +2285,193 @@ impl ShimNative for ListIterator {
     }
 }
 
+struct DictKeysIterator {
+    dict: ShimValue,
+    idx: usize,
+}
+impl ShimNative for DictKeysIterator {
+    fn get_attr(&self, self_as_val: &ShimValue, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
+        if ident == b"next" {
+            fn shim_dict_keys_iter_next(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+                if args.args.len() != 1 {
+                    return Err(format!("Can't provide positional args to DictKeysIterator.next()"));
+                }
+
+                let itr: &mut DictKeysIterator = args.args[0].as_native(interpreter)?;
+                let dict = itr.dict.dict(interpreter)?;
+                let entries = dict.entries_array(interpreter);
+                
+                // Skip invalid entries (tombstones)
+                while itr.idx < entries.len() {
+                    if entries[itr.idx].is_valid() {
+                        let result = entries[itr.idx].key;
+                        itr.idx += 1;
+                        return Ok(result);
+                    }
+                    itr.idx += 1;
+                }
+                
+                Ok(ShimValue::None)
+            }
+
+            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_dict_keys_iter_next))
+        } else if ident == b"iter" {
+            fn shim_dict_keys_iter_iter(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+                let mut unpacker = ArgUnpacker::new(args);
+                let obj = unpacker.required(b"obj")?;
+                unpacker.end()?;
+                Ok(obj)
+            }
+
+            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_dict_keys_iter_iter))
+        } else {
+            Err(format!("Can't get_attr {} on {}", debug_u8s(ident), type_name::<Self>() ))
+        }
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any where Self: Sized {
+        self
+    }
+
+    fn gc_vals(&self) -> Vec<ShimValue> {
+        vec![self.dict]
+    }
+}
+
+struct DictValuesIterator {
+    dict: ShimValue,
+    idx: usize,
+}
+impl ShimNative for DictValuesIterator {
+    fn get_attr(&self, self_as_val: &ShimValue, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
+        if ident == b"next" {
+            fn shim_dict_values_iter_next(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+                if args.args.len() != 1 {
+                    return Err(format!("Can't provide positional args to DictValuesIterator.next()"));
+                }
+
+                let itr: &mut DictValuesIterator = args.args[0].as_native(interpreter)?;
+                let dict = itr.dict.dict(interpreter)?;
+                let entries = dict.entries_array(interpreter);
+                
+                // Skip invalid entries (tombstones)
+                while itr.idx < entries.len() {
+                    if entries[itr.idx].is_valid() {
+                        let result = entries[itr.idx].value;
+                        itr.idx += 1;
+                        return Ok(result);
+                    }
+                    itr.idx += 1;
+                }
+                
+                Ok(ShimValue::None)
+            }
+
+            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_dict_values_iter_next))
+        } else if ident == b"iter" {
+            fn shim_dict_values_iter_iter(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+                let mut unpacker = ArgUnpacker::new(args);
+                let obj = unpacker.required(b"obj")?;
+                unpacker.end()?;
+                Ok(obj)
+            }
+
+            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_dict_values_iter_iter))
+        } else {
+            Err(format!("Can't get_attr {} on {}", debug_u8s(ident), type_name::<Self>() ))
+        }
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any where Self: Sized {
+        self
+    }
+
+    fn gc_vals(&self) -> Vec<ShimValue> {
+        vec![self.dict]
+    }
+}
+
+struct DictEntryNative {
+    key: ShimValue,
+    value: ShimValue,
+}
+impl ShimNative for DictEntryNative {
+    fn get_attr(&self, _self_as_val: &ShimValue, _interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
+        if ident == b"key" {
+            Ok(self.key)
+        } else if ident == b"value" {
+            Ok(self.value)
+        } else {
+            Err(format!("Can't get_attr {} on {}", debug_u8s(ident), type_name::<Self>() ))
+        }
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any where Self: Sized {
+        self
+    }
+
+    fn gc_vals(&self) -> Vec<ShimValue> {
+        vec![self.key, self.value]
+    }
+}
+
+struct DictItemsIterator {
+    dict: ShimValue,
+    idx: usize,
+}
+impl ShimNative for DictItemsIterator {
+    fn get_attr(&self, self_as_val: &ShimValue, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
+        if ident == b"next" {
+            fn shim_dict_items_iter_next(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+                if args.args.len() != 1 {
+                    return Err(format!("Can't provide positional args to DictItemsIterator.next()"));
+                }
+
+                let itr: &mut DictItemsIterator = args.args[0].as_native(interpreter)?;
+                let dict = itr.dict.dict(interpreter)?;
+                let entries = dict.entries_array(interpreter);
+                
+                // Skip invalid entries (tombstones)
+                while itr.idx < entries.len() {
+                    if entries[itr.idx].is_valid() {
+                        let entry = &entries[itr.idx];
+                        let result = interpreter.mem.alloc_native(DictEntryNative {
+                            key: entry.key,
+                            value: entry.value,
+                        });
+                        itr.idx += 1;
+                        return Ok(result);
+                    }
+                    itr.idx += 1;
+                }
+                
+                Ok(ShimValue::None)
+            }
+
+            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_dict_items_iter_next))
+        } else if ident == b"iter" {
+            fn shim_dict_items_iter_iter(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+                let mut unpacker = ArgUnpacker::new(args);
+                let obj = unpacker.required(b"obj")?;
+                unpacker.end()?;
+                Ok(obj)
+            }
+
+            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_dict_items_iter_iter))
+        } else {
+            Err(format!("Can't get_attr {} on {}", debug_u8s(ident), type_name::<Self>() ))
+        }
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any where Self: Sized {
+        self
+    }
+
+    fn gc_vals(&self) -> Vec<ShimValue> {
+        vec![self.dict]
+    }
+}
+
 type NativeFn = fn(&mut Interpreter, &ArgBundle) -> Result<ShimValue, String>;
 const _: () = {
     assert!(std::mem::size_of::<NativeFn>() == 8);
@@ -3298,6 +3485,38 @@ fn shim_list_iter(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shi
     Ok(interpreter.mem.alloc_native(ListIterator {lst: obj, idx: 0}))
 }
 
+fn shim_dict_iter(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let obj = unpacker.required(b"obj")?;
+    unpacker.end()?;
+
+    Ok(interpreter.mem.alloc_native(DictKeysIterator {dict: obj, idx: 0}))
+}
+
+fn shim_dict_keys(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let obj = unpacker.required(b"obj")?;
+    unpacker.end()?;
+
+    Ok(interpreter.mem.alloc_native(DictKeysIterator {dict: obj, idx: 0}))
+}
+
+fn shim_dict_values(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let obj = unpacker.required(b"obj")?;
+    unpacker.end()?;
+
+    Ok(interpreter.mem.alloc_native(DictValuesIterator {dict: obj, idx: 0}))
+}
+
+fn shim_dict_items(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let obj = unpacker.required(b"obj")?;
+    unpacker.end()?;
+
+    Ok(interpreter.mem.alloc_native(DictItemsIterator {dict: obj, idx: 0}))
+}
+
 fn shim_dict_pop(
     interpreter: &mut Interpreter,
     args: &ArgBundle,
@@ -3720,6 +3939,20 @@ impl ShimValue {
             ShimValue::Dict(position) => {
                 let dict: &mut NewShimDict = unsafe {
                     std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)])
+                };
+                Ok(dict)
+            },
+            _ => {
+                Err(format!("Not a dict"))
+            }
+        }
+    }
+
+    fn dict(&self, interpreter: &Interpreter) -> Result<&NewShimDict, String> {
+        match self {
+            ShimValue::Dict(position) => {
+                let dict: &NewShimDict = unsafe {
+                    std::mem::transmute(&interpreter.mem.mem[usize::from(position.0)])
                 };
                 Ok(dict)
             },
@@ -4278,6 +4511,10 @@ impl ShimValue {
                     b"has" => shim_dict_index_has,
                     b"len" => shim_dict_len,
                     b"pop" => shim_dict_pop,
+                    b"iter" => shim_dict_iter,
+                    b"keys" => shim_dict_keys,
+                    b"values" => shim_dict_values,
+                    b"items" => shim_dict_items,
                     _ => return Err(format!("No ident {:?} on dict", debug_u8s(ident))),
                 };
                 Ok(interpreter.mem.alloc_bound_native_fn(self, func))
