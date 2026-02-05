@@ -2618,8 +2618,14 @@ impl ShimNative for RangeIterator {
                             itr.current = new_current;
                             Ok(result)
                         }
-                        CallResult::PC(_) => {
-                            Err(format!("Unexpected function call in range iteration"))
+                        CallResult::PC(pc) => {
+                            let new_current = interpreter.execute_bytecode_extended(
+                                &mut (pc as usize),
+                                pending_args,
+                                &mut Environment::new(),
+                            )?;
+                            itr.current = new_current;
+                            Ok(result)
                         }
                     }
                 }
@@ -6976,6 +6982,8 @@ pub fn format_asm(bytes: &[u8]) -> String {
             out.push_str(&format!(""));
         } else if *b == ByteCode::Return as u8 {
             out.push_str(&format!("return"));
+        } else if *b == ByteCode::Range as u8 {
+            out.push_str(&format!("Range"));
         }
         out.push('\n');
         idx += 1;
