@@ -14,7 +14,7 @@
   47:  105  
   48:  154  load "i"
   51:  146  ShimValue 2
-  60:  133  
+  60:  133  equal
   61:  171  JMPZ -> 72
   64:  157  start_scope
   65:  163  continue

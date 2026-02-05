@@ -14,7 +14,7 @@
   61:  154  load "lst"
   66:  146  ShimValue 1
   75:  146  ShimValue 5
-  84:  166  
+  84:  166  set_index
   85:  154  load "print"
   92:  154  load "lst"
   97:  146  ShimValue 1

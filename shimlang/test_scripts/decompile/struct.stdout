@@ -46,12 +46,12 @@
   75:  155  get .x
   78:  154  load "self"
   84:  155  get .x
-  87:  135  
+  87:  135  multiply
   88:  154  load "self"
   94:  155  get .y
   97:  154  load "self"
  103:  155  get .y
- 106:  135  
+ 106:  135  multiply
  107:  131  add
  108:  167  return
  109:  152  let "Point"

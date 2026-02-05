@@ -6614,10 +6614,28 @@ pub fn format_asm(bytes: &[u8]) -> String {
             out.push_str(&format!("LT"));
         } else if *b == ByteCode::LTE as u8 {
             out.push_str(&format!("LTE"));
+        } else if *b == ByteCode::In as u8 {
+            out.push_str(&format!("In"));
+        } else if *b == ByteCode::Negate as u8 {
+            out.push_str(&format!("negate"));
         } else if *b == ByteCode::Index as u8 {
             out.push_str(&format!("index"));
+        } else if *b == ByteCode::SetIndex as u8 {
+            out.push_str(&format!("set_index"));
         } else if *b == ByteCode::Add as u8 {
             out.push_str(&format!("add"));
+        } else if *b == ByteCode::Sub as u8 {
+            out.push_str(&format!("sub"));
+        } else if *b == ByteCode::Multiply as u8 {
+            out.push_str(&format!("multiply"));
+        } else if *b == ByteCode::Divide as u8 {
+            out.push_str(&format!("divide"));
+        } else if *b == ByteCode::Modulus as u8 {
+            out.push_str(&format!("modulus"));
+        } else if *b == ByteCode::Equal as u8 {
+            out.push_str(&format!("equal"));
+        } else if *b == ByteCode::NotEqual as u8 {
+            out.push_str(&format!("not_equal"));
         } else if *b == ByteCode::CreateFn as u8 {
             out.push_str(&format!("fn"));
         } else if *b == ByteCode::JmpZ as u8 {
@@ -6713,6 +6731,8 @@ pub fn format_asm(bytes: &[u8]) -> String {
             idx += 2;
         } else if *b == ByteCode::LoopEnd as u8 {
             out.push_str(&format!("Loop End"));
+        } else if *b == ByteCode::Stringify as u8 {
+            out.push_str(&format!("stringify"));
         } else if *b == ByteCode::StartScope as u8 {
             out.push_str(&format!("start_scope"));
         } else if *b == ByteCode::EndScope as u8 {
