@@ -3528,7 +3528,7 @@ fn shim_list_sort(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shi
                     // Load captures into the environment
                     if u32::from(captures_pos.0) != 0 {
                         let captures_val = ShimValue::Dict(captures_pos);
-                        let dict = captures_val.dict(interpreter)?;
+                    let dict = captures_val.dict(interpreter)?;
                         for entry_idx in 0..dict.len() {
                             let entry = &dict.entries_array(interpreter)[entry_idx];
                             if entry.is_valid() {
@@ -3672,7 +3672,7 @@ fn shim_list_filter(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<S
                     // Load captures into the environment
                     if u32::from(captures_pos.0) != 0 {
                         let captures_val = ShimValue::Dict(captures_pos);
-                        let dict = captures_val.dict(interpreter)?;
+                    let dict = captures_val.dict(interpreter)?;
                         for entry_idx in 0..dict.len() {
                             let entry = &dict.entries_array(interpreter)[entry_idx];
                             if entry.is_valid() {
@@ -3725,7 +3725,7 @@ fn shim_list_map(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shim
                 // Load captures into the environment
                 if u32::from(captures_pos.0) != 0 {
                     let captures_val = ShimValue::Dict(captures_pos);
-                        let dict = captures_val.dict(interpreter)?;
+                    let dict = captures_val.dict(interpreter)?;
                     for entry_idx in 0..dict.len() {
                         let entry = &dict.entries_array(interpreter)[entry_idx];
                         if entry.is_valid() {
@@ -3806,7 +3806,7 @@ fn shim_list_extend(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<S
             // Load captures into the environment
             if u32::from(captures_pos.0) != 0 {
                 let captures_val = ShimValue::Dict(captures_pos);
-                        let dict = captures_val.dict(interpreter)?;
+                    let dict = captures_val.dict(interpreter)?;
                 for entry_idx in 0..dict.len() {
                     let entry = &dict.entries_array(interpreter)[entry_idx];
                     if entry.is_valid() {
@@ -3839,7 +3839,7 @@ fn shim_list_extend(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<S
                 // Load captures into the environment
                 if u32::from(captures_pos.0) != 0 {
                     let captures_val = ShimValue::Dict(captures_pos);
-                        let dict = captures_val.dict(interpreter)?;
+                    let dict = captures_val.dict(interpreter)?;
                     for entry_idx in 0..dict.len() {
                         let entry = &dict.entries_array(interpreter)[entry_idx];
                         if entry.is_valid() {
