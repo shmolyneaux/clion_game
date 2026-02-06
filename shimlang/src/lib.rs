@@ -1932,7 +1932,7 @@ impl MMU {
         }
     }
 
-    unsafe fn alloc_and_set<T>(&mut self, value: T, _debug_name: &str) -> Word {
+    fn alloc_and_set<T>(&mut self, value: T, _debug_name: &str) -> Word {
         let word_count = Word((std::mem::size_of::<T>() as u32).div_ceil(8).into());
         let position = alloc!(self, word_count, _debug_name);
         unsafe {
@@ -2197,9 +2197,7 @@ impl Environment {
         let dict_word = mem.alloc_dict_raw();
         
         // Allocate an EnvScope wrapper
-        let scope_pos = unsafe {
-            mem.alloc_and_set(EnvScope::new(dict_word), "EnvScope")
-        };
+        let scope_pos = mem.alloc_and_set(EnvScope::new(dict_word), "EnvScope");
         
         Self {
             current_scope: scope_pos.0.into(),
@@ -2222,12 +2220,7 @@ impl Environment {
         ];
 
         for (name, func) in builtins {
-            let position = alloc!(interpreter.mem, Word(1.into()), &format!("builtin func {}", debug_u8s(name)));
-            unsafe {
-                let ptr: *mut NativeFn = std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
-                ptr.write(**func);
-            }
-
+            let position = interpreter.mem.alloc_and_set(**func, &format!("builtin func {}", debug_u8s(name)));
             env.insert_new(interpreter, name.to_vec(), ShimValue::NativeFn(position));
         }
 
@@ -2335,12 +2328,10 @@ impl Environment {
         let dict_word = mem.alloc_dict_raw();
         
         // Allocate a new EnvScope with parent pointing to current scope
-        let scope_pos = unsafe {
-            mem.alloc_and_set(
-                EnvScope::new_with_parent(dict_word, self.current_scope.into(), current_depth),
-                "EnvScope"
-            )
-        };
+        let scope_pos = mem.alloc_and_set(
+            EnvScope::new_with_parent(dict_word, self.current_scope.into(), current_depth),
+            "EnvScope"
+        );
         
         // Update current scope to the new one
         self.current_scope = scope_pos.0.into();
