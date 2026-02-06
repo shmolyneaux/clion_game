@@ -1932,6 +1932,15 @@ impl MMU {
         }
     }
 
+    unsafe fn set<T>(&mut self, word: Word, value: T) {
+        let word_count = Word((std::mem::size_of::<T>() as u32).div_ceil(8).into());
+        // Ensure we have enough space (this assumes word was allocated with sufficient space)
+        unsafe {
+            let ptr: *mut T = std::mem::transmute(&mut self.mem[usize::from(word.0)]);
+            ptr.write(value);
+        }
+    }
+
     fn alloc_str_raw(&mut self, contents: &[u8]) -> Word {
         // Length + contents + padding
         let total_len = 1 + contents.len().div_ceil(8);
@@ -1962,7 +1971,7 @@ impl MMU {
         ShimValue::String(self.alloc_str_raw(contents))
     }
 
-    fn alloc_dict(&mut self) -> ShimValue {
+    fn alloc_dict_raw(&mut self) -> Word {
         let word_count = Word((std::mem::size_of::<NewShimDict>() as u32).div_ceil(8).into());
         let position = alloc!(self, word_count, "Dict");
         unsafe {
@@ -1970,7 +1979,11 @@ impl MMU {
                 std::mem::transmute(&mut self.mem[usize::from(position.0)]);
             ptr.write(NewShimDict::new());
         }
-        ShimValue::Dict(position)
+        position
+    }
+
+    fn alloc_dict(&mut self) -> ShimValue {
+        ShimValue::Dict(self.alloc_dict_raw())
     }
 
     fn alloc_list(&mut self) -> ShimValue {
@@ -2148,6 +2161,8 @@ struct EnvScope {
     dict: Word,
     // Pointer to the parent scope in MMU (0 means no parent)
     parent: u24,
+    // Depth of this scope in the chain (root is 1)
+    depth: u32,
 }
 
 impl EnvScope {
@@ -2155,13 +2170,15 @@ impl EnvScope {
         Self {
             dict: dict_word,
             parent: 0.into(),
+            depth: 1,
         }
     }
 
-    fn new_with_parent(dict_word: Word, parent_pos: u24) -> Self {
+    fn new_with_parent(dict_word: Word, parent_pos: u24, parent_depth: u32) -> Self {
         Self {
             dict: dict_word,
             parent: parent_pos,
+            depth: parent_depth + 1,
         }
     }
 }
@@ -2176,22 +2193,17 @@ pub struct Environment {
 impl Environment {
     pub fn new(mem: &mut MMU) -> Self {
         // Allocate a new dict in MMU for the root scope
-        let dict_val = mem.alloc_dict();
-        if let ShimValue::Dict(word) = dict_val {
-            // Allocate an EnvScope wrapper
-            let word_count = Word((std::mem::size_of::<EnvScope>() as u32).div_ceil(8).into());
-            let scope_pos = alloc!(mem, word_count, "EnvScope");
-            unsafe {
-                let ptr: *mut EnvScope =
-                    std::mem::transmute(&mut mem.mem[usize::from(scope_pos.0)]);
-                ptr.write(EnvScope::new(word));
-            }
-            
-            Self {
-                current_scope: scope_pos.0.into(),
-            }
-        } else {
-            panic!("alloc_dict should return a Dict variant");
+        let dict_word = mem.alloc_dict_raw();
+        
+        // Allocate an EnvScope wrapper
+        let word_count = Word((std::mem::size_of::<EnvScope>() as u32).div_ceil(8).into());
+        let scope_pos = alloc!(mem, word_count, "EnvScope");
+        unsafe {
+            mem.set(scope_pos, EnvScope::new(dict_word));
+        }
+        
+        Self {
+            current_scope: scope_pos.0.into(),
         }
     }
 
@@ -2225,68 +2237,75 @@ impl Environment {
 
 
     fn insert_new(&mut self, interpreter: &mut Interpreter, key: Vec<u8>, val: ShimValue) {
-        // Get the current EnvScope
-        let scope: &EnvScope = unsafe {
-            std::mem::transmute(&interpreter.mem.mem[self.current_scope as usize])
+        // Get the dict word from current EnvScope
+        let dict_word = unsafe {
+            let scope: &EnvScope = interpreter.mem.get(Word(self.current_scope.into()));
+            scope.dict
         };
         
-        // Get the dict from the scope
-        let dict: &mut NewShimDict = unsafe {
-            std::mem::transmute(&mut interpreter.mem.mem[usize::from(scope.dict.0)])
-        };
-        
-        // Allocate key string and insert
+        // Allocate key string
         let key_val = interpreter.mem.alloc_str(key.as_slice());
-        // This should always succeed for new insertions in environment
-        if let Err(e) = dict.set(interpreter, key_val, val) {
-            panic!("Failed to insert key into environment: {}", e);
+        
+        // Get the dict and insert using raw pointer to avoid double borrow
+        unsafe {
+            let dict_ptr: *mut NewShimDict = interpreter.mem.mem[usize::from(dict_word.0)..].as_mut_ptr() as *mut NewShimDict;
+            (*dict_ptr).set(interpreter, key_val, val)
+                .expect("Failed to insert key into environment");
         }
+    }
+
+    // Helper to traverse scope chain and find a key, returns (scope_pos, dict_word)
+    fn find_key_scope(&self, interpreter: &mut Interpreter, key_val: ShimValue) -> Option<(u32, Word)> {
+        let mut current_scope_pos = self.current_scope;
+        
+        loop {
+            if current_scope_pos == 0 {
+                break;
+            }
+            
+            // Get the EnvScope and extract necessary data
+            let (dict_word, parent) = unsafe {
+                let scope: &EnvScope = interpreter.mem.get(Word(current_scope_pos.into()));
+                (scope.dict, scope.parent)
+            };
+            
+            // Try to get the key from this dict using raw pointer
+            let found = unsafe {
+                let dict_ptr: *const NewShimDict = interpreter.mem.mem[usize::from(dict_word.0)..].as_ptr() as *const NewShimDict;
+                (*dict_ptr).get(interpreter, key_val).is_ok()
+            };
+            
+            if found {
+                return Some((current_scope_pos, dict_word));
+            } else {
+                // Not in this dict, try parent
+                current_scope_pos = parent.into();
+            }
+        }
+        
+        None
     }
 
     fn update(&mut self, interpreter: &mut Interpreter, key: &[u8], val: ShimValue) -> Result<(), String> {
         // Search through the scope chain starting from current
         let key_val = interpreter.mem.alloc_str(key);
-        let mut current_scope_pos = self.current_scope;
         
-        loop {
-            if current_scope_pos == 0 {
-                break;
+        if let Some((_, dict_word)) = self.find_key_scope(interpreter, key_val) {
+            // Get the dict to update using raw pointer to avoid double borrow
+            unsafe {
+                let dict_ptr: *mut NewShimDict = interpreter.mem.mem[usize::from(dict_word.0)..].as_mut_ptr() as *mut NewShimDict;
+                (*dict_ptr).set(interpreter, key_val, val)?;
             }
-            
-            // Get the EnvScope
-            let scope: &EnvScope = unsafe {
-                std::mem::transmute(&interpreter.mem.mem[current_scope_pos as usize])
-            };
-            
-            // Get the dict from the scope
-            let dict: &mut NewShimDict = unsafe {
-                std::mem::transmute(&mut interpreter.mem.mem[usize::from(scope.dict.0)])
-            };
-            
-            // Try to get the key from this dict
-            match dict.get(interpreter, key_val) {
-                Ok(_) => {
-                    // Found it, update it
-                    dict.set(interpreter, key_val, val)?;
-                    return Ok(());
-                },
-                Err(_) => {
-                    // Not in this dict, try parent
-                    let parent: u32 = scope.parent.into();
-                    if parent == 0 {
-                        break;
-                    }
-                    current_scope_pos = parent;
-                }
-            }
+            Ok(())
+        } else {
+            Err(format!("Key {:?} not found in environment", key))
         }
-
-        Err(format!("Key {:?} not found in environment", key))
     }
 
     fn get(&self, interpreter: &mut Interpreter, key: &[u8]) -> Option<ShimValue> {
         let key_val = interpreter.mem.alloc_str(key);
         
+        // Find the scope and get the value
         let mut current_scope_pos = self.current_scope;
         
         loop {
@@ -2294,28 +2313,25 @@ impl Environment {
                 break;
             }
             
-            // Get the EnvScope
-            let scope: &EnvScope = unsafe {
-                std::mem::transmute(&interpreter.mem.mem[current_scope_pos as usize])
+            // Get the EnvScope and extract necessary data
+            let (dict_word, parent) = unsafe {
+                let scope: &EnvScope = interpreter.mem.get(Word(current_scope_pos.into()));
+                (scope.dict, scope.parent)
             };
             
-            // Get the dict from the scope
-            let dict: &NewShimDict = unsafe {
-                std::mem::transmute(&interpreter.mem.mem[usize::from(scope.dict.0)])
+            // Try to get the key from this dict using raw pointer
+            let result = unsafe {
+                let dict_ptr: *const NewShimDict = interpreter.mem.mem[usize::from(dict_word.0)..].as_ptr() as *const NewShimDict;
+                (*dict_ptr).get(interpreter, key_val)
             };
             
-            // Try to get the key from this dict
-            match dict.get(interpreter, key_val) {
+            match result {
                 Ok(value) => {
                     return Some(value);
                 },
                 Err(_) => {
                     // Not in this dict, try parent
-                    let parent: u32 = scope.parent.into();
-                    if parent == 0 {
-                        break;
-                    }
-                    current_scope_pos = parent;
+                    current_scope_pos = parent.into();
                 }
             }
         }
@@ -2328,23 +2344,28 @@ impl Environment {
     }
 
     fn push_scope(&mut self, mem: &mut MMU) {
-        // Allocate a new dict for the new scope
-        let dict_val = mem.alloc_dict();
-        if let ShimValue::Dict(word) = dict_val {
-            // Allocate a new EnvScope with parent pointing to current scope
-            let word_count = Word((std::mem::size_of::<EnvScope>() as u32).div_ceil(8).into());
-            let scope_pos = alloc!(mem, word_count, "EnvScope");
-            unsafe {
-                let ptr: *mut EnvScope =
-                    std::mem::transmute(&mut mem.mem[usize::from(scope_pos.0)]);
-                ptr.write(EnvScope::new_with_parent(word, self.current_scope.into()));
-            }
-            
-            // Update current scope to the new one
-            self.current_scope = scope_pos.0.into();
+        // Get current scope depth
+        let current_depth = if self.current_scope == 0 {
+            0
         } else {
-            panic!("alloc_dict should return a Dict variant");
+            let current: &EnvScope = unsafe {
+                mem.get(Word(self.current_scope.into()))
+            };
+            current.depth
+        };
+        
+        // Allocate a new dict for the new scope
+        let dict_word = mem.alloc_dict_raw();
+        
+        // Allocate a new EnvScope with parent pointing to current scope
+        let word_count = Word((std::mem::size_of::<EnvScope>() as u32).div_ceil(8).into());
+        let scope_pos = alloc!(mem, word_count, "EnvScope");
+        unsafe {
+            mem.set(scope_pos, EnvScope::new_with_parent(dict_word, self.current_scope.into(), current_depth));
         }
+        
+        // Update current scope to the new one
+        self.current_scope = scope_pos.0.into();
     }
 
     fn pop_scope(&mut self, mem: &MMU) -> Result<(), String> {
@@ -2354,7 +2375,7 @@ impl Environment {
         
         // Get the current EnvScope
         let scope: &EnvScope = unsafe {
-            std::mem::transmute(&mem.mem[self.current_scope as usize])
+            mem.get(Word(self.current_scope.into()))
         };
         
         // Move to parent scope
@@ -2367,32 +2388,16 @@ impl Environment {
         Ok(())
     }
     
-    // Helper to count the depth of the scope chain
+    // Helper to get the depth of the current scope
     fn scope_depth(&self, mem: &MMU) -> usize {
-        let mut depth = 0;
-        let mut current_scope_pos = self.current_scope;
-        
-        loop {
-            if current_scope_pos == 0 {
-                break;
-            }
-            
-            depth += 1;
-            
-            // Get the EnvScope
-            let scope: &EnvScope = unsafe {
-                std::mem::transmute(&mem.mem[current_scope_pos as usize])
-            };
-            
-            // Move to parent scope
-            let parent: u32 = scope.parent.into();
-            if parent == 0 {
-                break;
-            }
-            current_scope_pos = parent;
+        if self.current_scope == 0 {
+            return 0;
         }
         
-        depth
+        let scope: &EnvScope = unsafe {
+            mem.get(Word(self.current_scope.into()))
+        };
+        scope.depth as usize
     }
 }
 
@@ -6366,12 +6371,12 @@ impl Interpreter {
             
             // Get the EnvScope
             let scope: &EnvScope = unsafe {
-                std::mem::transmute(&self.mem.mem[current_scope_pos as usize])
+                self.mem.get(Word(current_scope_pos.into()))
             };
             
             // Get the dict from the scope
             let dict: &NewShimDict = unsafe {
-                std::mem::transmute(&self.mem.mem[usize::from(scope.dict.0)])
+                self.mem.get(scope.dict)
             };
             
             // Print entries in the dict
@@ -6452,12 +6457,12 @@ impl Interpreter {
             
             // Get the EnvScope
             let scope: &EnvScope = unsafe {
-                std::mem::transmute(&self.mem.mem[current_scope_pos as usize])
+                self.mem.get(Word(current_scope_pos.into()))
             };
             
             // Get the dict from the scope
             let dict: &NewShimDict = unsafe {
-                std::mem::transmute(&self.mem.mem[usize::from(scope.dict.0)])
+                self.mem.get(scope.dict)
             };
             
             // Add all values in the dict as roots
