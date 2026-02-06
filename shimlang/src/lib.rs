@@ -1932,7 +1932,7 @@ impl MMU {
         }
     }
 
-    fn alloc_str(&mut self, contents: &[u8]) -> ShimValue {
+    fn alloc_str_raw(&mut self, contents: &[u8]) -> Word {
         // Length + contents + padding
         let total_len = 1 + contents.len().div_ceil(8);
         let word_count = Word(total_len.into());
@@ -1955,7 +1955,11 @@ impl MMU {
             bytes[idx] = *b;
         }
 
-        ShimValue::String(position)
+        position
+    }
+
+    fn alloc_str(&mut self, contents: &[u8]) -> ShimValue {
+        ShimValue::String(self.alloc_str_raw(contents))
     }
 
     fn alloc_dict(&mut self) -> ShimValue {
@@ -1978,6 +1982,21 @@ impl MMU {
             ptr.write(ShimList::new());
         }
         ShimValue::List(position)
+    }
+
+    fn alloc_fn(&mut self, pc: u32, name: &[u8]) -> ShimValue {
+        let word_count = Word((std::mem::size_of::<ShimFn>() as u32).div_ceil(8).into());
+        let position = alloc!(self, word_count, &format!("Fn `{}`", debug_u8s(name)));
+        
+        // Allocate the name string
+        let name_pos = self.alloc_str_raw(name);
+        
+        unsafe {
+            let ptr: *mut ShimFn =
+                std::mem::transmute(&mut self.mem[usize::from(position.0)]);
+            ptr.write(ShimFn { pc, name: name_pos });
+        }
+        ShimValue::Fn(position)
     }
 
     fn alloc_native<T: ShimNative>(&mut self, val: T) -> ShimValue {
@@ -2223,13 +2242,13 @@ pub enum ShimValue {
     Integer(i32),
     Float(f32),
     Bool(bool),
-    // This is a program counter, TODO should be a memory position?
-    Fn(u32),
+    // Memory position pointing to ShimFn structure
+    Fn(Word),
     BoundMethod(
         // Object
         Word,
-        // Fn, TODO: should be a memory position instead of PC
-        u32,
+        // Fn memory position pointing to ShimFn structure
+        Word,
     ),
     BoundNativeMethod(
         // ShimValue followed by NativeFn
@@ -2672,7 +2691,7 @@ fn format_float(val: f32) -> String {
 #[derive(Debug, Clone, Copy)]
 enum StructAttribute {
     MemberInstanceOffset(u8),
-    MethodDefPC(u32),
+    MethodDef(Word),
 }
 
 #[derive(Debug)]
@@ -3342,6 +3361,18 @@ impl ShimList {
     }
 }
 const _: () = { assert!(std::mem::size_of::<ShimList>() == 8); };
+
+// Stores function information in interpreter memory
+struct ShimFn {
+    // Program counter where the function code begins
+    pc: u32,
+    // Memory position of the function name (stored as string)
+    name: Word,
+}
+
+const _: () = {
+    assert!(std::mem::size_of::<ShimFn>() == 8);
+};
 
 impl StructDef {
     fn find(&self, ident: &[u8]) -> Option<StructAttribute> {
@@ -4298,11 +4329,15 @@ impl ShimValue {
     ) -> Result<CallResult, String> {
         match self {
             ShimValue::None => Err(format!("Can't call None as a function")),
-            ShimValue::Fn(pc) => Ok(CallResult::PC(*pc)),
-            ShimValue::BoundMethod(pos, pc) => {
+            ShimValue::Fn(fn_pos) => {
+                let shim_fn: &ShimFn = unsafe { interpreter.mem.get(*fn_pos) };
+                Ok(CallResult::PC(shim_fn.pc))
+            }
+            ShimValue::BoundMethod(pos, fn_pos) => {
                 // push struct pos to start of arg list then return the pc of the method
                 args.args.insert(0, ShimValue::Struct(*pos));
-                Ok(CallResult::PC(*pc))
+                let shim_fn: &ShimFn = unsafe { interpreter.mem.get(*fn_pos) };
+                Ok(CallResult::PC(shim_fn.pc))
             }
             ShimValue::BoundNativeMethod(pos) => {
                 let obj: &ShimValue = unsafe { interpreter.mem.get(*pos) };
@@ -4317,8 +4352,9 @@ impl ShimValue {
                     // Call the internal __init__ to handle default/kw arguments
                     // If we're not using defaults we could handle kw arguments here,
                     // but for now it simplifies things to push all the special cases to __init__
-                    if let Some(StructAttribute::MethodDefPC(pc)) = struct_def.find(b"__init__") {
-                        return Ok(CallResult::PC(pc));
+                    if let Some(StructAttribute::MethodDef(fn_pos)) = struct_def.find(b"__init__") {
+                        let shim_fn: &ShimFn = unsafe { interpreter.mem.get(fn_pos) };
+                        return Ok(CallResult::PC(shim_fn.pc));
                     } else {
                         return Err(format!("INTERNAL: no __init__ on StructDef"));
                     }
@@ -4873,8 +4909,9 @@ impl ShimValue {
                                 StructAttribute::MemberInstanceOffset(offset) => {
                                     Ok(*interpreter.mem.get(*pos + *offset as u32 + 1))
                                 }
-                                StructAttribute::MethodDefPC(pc) => {
-                                    Ok(ShimValue::BoundMethod(*pos, *pc))
+                                StructAttribute::MethodDef(fn_pos) => {
+                                    // Return the bound method with the pre-allocated function
+                                    Ok(ShimValue::BoundMethod(*pos, *fn_pos))
                                 }
                             };
                         }
@@ -4901,9 +4938,9 @@ impl ShimValue {
                                     "Can't access member {:?} on StructDef {:?}",
                                     ident, self
                                 )),
-                                StructAttribute::MethodDefPC(pc) => {
-                                    // Return the method
-                                    Ok(ShimValue::Fn(*pc))
+                                StructAttribute::MethodDef(fn_pos) => {
+                                    // Return the pre-allocated method function
+                                    Ok(ShimValue::Fn(*fn_pos))
                                 }
                             };
                         }
@@ -4981,7 +5018,7 @@ impl ShimValue {
                                     *slot = val;
                                     Ok(())
                                 }
-                                StructAttribute::MethodDefPC(_) => Err(format!(
+                                StructAttribute::MethodDef(_) => Err(format!(
                                     "Can't assign to struct method {:?} for {:?}",
                                     ident, self
                                 )),
@@ -5971,7 +6008,19 @@ impl<'a> GC<'a> {
         unsafe {
             while !vals.is_empty() {
                 match vals.pop().unwrap() {
-                    ShimValue::Integer(_) | ShimValue::Float(_) | ShimValue::Bool(_) | ShimValue::Unit | ShimValue::None | ShimValue::Fn(_) | ShimValue::Uninitialized => (),
+                    ShimValue::Integer(_) | ShimValue::Float(_) | ShimValue::Bool(_) | ShimValue::Unit | ShimValue::None | ShimValue::Uninitialized => (),
+                    ShimValue::Fn(fn_pos) => {
+                        let pos: usize = fn_pos.into();
+                        if self.mask.is_set(pos) {
+                            continue;
+                        }
+                        // Mark the ShimFn struct (8 bytes = 1 word: u32 pc + Word name)
+                        self.mask.set(pos);
+                        
+                        // Mark the function name string
+                        let shim_fn: &ShimFn = self.mem.get(fn_pos);
+                        vals.push(ShimValue::String(shim_fn.name));
+                    },
                     ShimValue::List(pos) => {
                         let pos: usize = pos.into();
                         let lst: &ShimList = self.mem.get(pos.into());
@@ -6075,9 +6124,12 @@ impl<'a> GC<'a> {
 
                         vals.extend(ptr.gc_vals());
                     },
-                    ShimValue::BoundMethod(pos, _pc) => {
+                    ShimValue::BoundMethod(pos, fn_pos) => {
+                        // Mark the bound struct
                         let val = ShimValue::Struct(pos);
                         vals.push(val);
+                        // Mark the function
+                        vals.push(ShimValue::Fn(fn_pos));
                     },
                     ShimValue::BoundNativeMethod(pos) => {
                         let pos: usize = pos.into();
@@ -6145,7 +6197,7 @@ impl Interpreter {
                                         let val: ShimValue = *self.mem.get(pos + *offset as u32 + 1);
                                         println!("                - {} = {:?}", debug_u8s(&attr), val);
                                     },
-                                    StructAttribute::MethodDefPC(_) => (),
+                                    StructAttribute::MethodDef(_) => (),
                                 };
                             }
                         }
@@ -6158,7 +6210,7 @@ impl Interpreter {
                                     StructAttribute::MemberInstanceOffset(_) => {
                                         println!("                - {}", debug_u8s(&attr));
                                     },
-                                    StructAttribute::MethodDefPC(_) => {
+                                    StructAttribute::MethodDef(_) => {
                                         println!("                - {}()", debug_u8s(&attr));
                                     }
                                 };
@@ -6729,7 +6781,10 @@ impl Interpreter {
                 }
                 val if val == ByteCode::CreateFn as u8 => {
                     let instruction_offset = ((bytes[pc + 1] as u32) << 8) + bytes[pc + 2] as u32;
-                    stack.push(ShimValue::Fn(pc as u32 - instruction_offset));
+                    let fn_pc = pc as u32 - instruction_offset;
+                    // Use descriptive name for anonymous functions
+                    let fn_val = self.mem.alloc_fn(fn_pc, b"<anonymous>");
+                    stack.push(fn_val);
                     pc += 2;
                 }
                 val if val == ByteCode::CreateStruct as u8 => {
@@ -6766,9 +6821,17 @@ impl Interpreter {
 
                         let ident_len = bytes[idx];
                         let ident = &bytes[idx + 1..idx + 1 + ident_len as usize];
+                        
+                        // Allocate a function object for this method
+                        let fn_val = self.mem.alloc_fn(method_pc as u32, ident);
+                        let fn_pos = match fn_val {
+                            ShimValue::Fn(pos) => pos,
+                            _ => panic!("alloc_fn should return Fn"),
+                        };
+                        
                         struct_table.push((
                             ident.to_vec(),
-                            StructAttribute::MethodDefPC(method_pc as u32),
+                            StructAttribute::MethodDef(fn_pos),
                         ));
                         idx = idx + 1 + ident_len as usize;
                     }
