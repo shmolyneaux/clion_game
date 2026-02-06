@@ -1,0 +1,7 @@
+fn outer(x) {
+    let y = 10;
+    return fn() { x + y };
+}
+
+let f = outer(5);
+print(f());

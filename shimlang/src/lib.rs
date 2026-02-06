@@ -1985,6 +1985,10 @@ impl MMU {
     }
 
     fn alloc_fn(&mut self, pc: u32, name: &[u8]) -> ShimValue {
+        self.alloc_fn_with_captures(pc, name, Word(0u32.into()))
+    }
+
+    fn alloc_fn_with_captures(&mut self, pc: u32, name: &[u8], captures: Word) -> ShimValue {
         let word_count = Word((std::mem::size_of::<ShimFn>() as u32).div_ceil(8).into());
         let position = alloc!(self, word_count, &format!("Fn `{}`", debug_u8s(name)));
         
@@ -1994,7 +1998,7 @@ impl MMU {
         unsafe {
             let ptr: *mut ShimFn =
                 std::mem::transmute(&mut self.mem[usize::from(position.0)]);
-            ptr.write(ShimFn { pc, name: name_pos });
+            ptr.write(ShimFn { pc, name: name_pos, captures });
         }
         ShimValue::Fn(position)
     }
@@ -2637,11 +2641,26 @@ impl ShimNative for RangeIterator {
                             itr.current = new_current;
                             Ok(result)
                         }
-                        CallResult::PC(pc) => {
+                        CallResult::PC(pc, captures_pos) => {
+                            let mut env = Environment::new();
+                            
+                            // Load captures into the environment
+                            if u32::from(captures_pos.0) != 0 {
+                                let captures_val = ShimValue::Dict(captures_pos);
+                                let dict = captures_val.dict(interpreter)?;
+                                for entry_idx in 0..dict.len() {
+                                    let entry = &dict.entries_array(interpreter)[entry_idx];
+                                    if entry.is_valid() {
+                                        let key_bytes = entry.key.string(interpreter)?.to_vec();
+                                        env.insert_new(key_bytes, entry.value);
+                                    }
+                                }
+                            }
+                            
                             let new_current = interpreter.execute_bytecode_extended(
                                 &mut (pc as usize),
                                 pending_args,
-                                &mut Environment::new(),
+                                &mut env,
                             )?;
                             itr.current = new_current;
                             Ok(result)
@@ -3368,10 +3387,12 @@ struct ShimFn {
     pc: u32,
     // Memory position of the function name (stored as string)
     name: Word,
+    // Memory position of captured variables (stored as Dict), or Word(0) if none
+    captures: Word,
 }
 
 const _: () = {
-    assert!(std::mem::size_of::<ShimFn>() == 8);
+    assert!(std::mem::size_of::<ShimFn>() == 12);
 };
 
 impl StructDef {
@@ -3397,7 +3418,7 @@ impl StructDef {
 #[derive(Debug)]
 enum CallResult {
     ReturnValue(ShimValue),
-    PC(u32),
+    PC(u32, Word), // PC and captures dict position (Word(0) if no captures)
 }
 
 fn shim_dict(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
@@ -3501,11 +3522,26 @@ fn shim_list_sort(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shi
             args.args.push(item);
             match key.call(interpreter, &mut args)? {
                 CallResult::ReturnValue(val) => val,
-                CallResult::PC(pc) => {
+                CallResult::PC(pc, captures_pos) => {
+                    let mut env = Environment::new();
+                    
+                    // Load captures into the environment
+                    if u32::from(captures_pos.0) != 0 {
+                        let captures_val = ShimValue::Dict(captures_pos);
+                        let dict = captures_val.dict(interpreter)?;
+                        for entry_idx in 0..dict.len() {
+                            let entry = &dict.entries_array(interpreter)[entry_idx];
+                            if entry.is_valid() {
+                                let key_bytes = entry.key.string(interpreter)?.to_vec();
+                                env.insert_new(key_bytes, entry.value);
+                            }
+                        }
+                    }
+                    
                     interpreter.execute_bytecode_extended(
                         &mut (pc as usize),
                         args,
-                        &mut Environment::new(),
+                        &mut env,
                     )?
                 },
             }
@@ -3630,12 +3666,26 @@ fn shim_list_filter(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<S
                 CallResult::ReturnValue(val) => {
                     val
                 },
-                CallResult::PC(pc) => {
+                CallResult::PC(pc, captures_pos) => {
+                    let mut env = Environment::new();
+                    
+                    // Load captures into the environment
+                    if u32::from(captures_pos.0) != 0 {
+                        let captures_val = ShimValue::Dict(captures_pos);
+                        let dict = captures_val.dict(interpreter)?;
+                        for entry_idx in 0..dict.len() {
+                            let entry = &dict.entries_array(interpreter)[entry_idx];
+                            if entry.is_valid() {
+                                let key_bytes = entry.key.string(interpreter)?.to_vec();
+                                env.insert_new(key_bytes, entry.value);
+                            }
+                        }
+                    }
+                    
                     let val = interpreter.execute_bytecode_extended(
                         &mut (pc as usize),
                         args,
-                        // TODO: this doesn't even have print...
-                        &mut Environment::new(),
+                        &mut env,
                     )?;
                     val
                 },
@@ -3669,12 +3719,26 @@ fn shim_list_map(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shim
             CallResult::ReturnValue(val) => {
                 val
             },
-            CallResult::PC(pc) => {
+            CallResult::PC(pc, captures_pos) => {
+                let mut env = Environment::new();
+                
+                // Load captures into the environment
+                if u32::from(captures_pos.0) != 0 {
+                    let captures_val = ShimValue::Dict(captures_pos);
+                        let dict = captures_val.dict(interpreter)?;
+                    for entry_idx in 0..dict.len() {
+                        let entry = &dict.entries_array(interpreter)[entry_idx];
+                        if entry.is_valid() {
+                            let key_bytes = entry.key.string(interpreter)?.to_vec();
+                            env.insert_new(key_bytes, entry.value);
+                        }
+                    }
+                }
+                
                 let val = interpreter.execute_bytecode_extended(
                     &mut (pc as usize),
                     args,
-                    // TODO: this doesn't even have print...
-                    &mut Environment::new(),
+                    &mut env,
                 )?;
                 val
             },
@@ -3736,11 +3800,26 @@ fn shim_list_extend(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<S
     let iterator = iterable.get_attr(interpreter, b"iter")?.call(interpreter, &mut iter_args)?;
     let iterator = match iterator {
         CallResult::ReturnValue(val) => val,
-        CallResult::PC(pc) => {
+        CallResult::PC(pc, captures_pos) => {
+            let mut env = Environment::new();
+            
+            // Load captures into the environment
+            if u32::from(captures_pos.0) != 0 {
+                let captures_val = ShimValue::Dict(captures_pos);
+                        let dict = captures_val.dict(interpreter)?;
+                for entry_idx in 0..dict.len() {
+                    let entry = &dict.entries_array(interpreter)[entry_idx];
+                    if entry.is_valid() {
+                        let key_bytes = entry.key.string(interpreter)?.to_vec();
+                        env.insert_new(key_bytes, entry.value);
+                    }
+                }
+            }
+            
             interpreter.execute_bytecode_extended(
                 &mut (pc as usize),
                 iter_args,
-                &mut Environment::new(),
+                &mut env,
             )?
         },
     };
@@ -3754,11 +3833,26 @@ fn shim_list_extend(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<S
         
         let result = match next_method.call(interpreter, &mut next_args)? {
             CallResult::ReturnValue(val) => val,
-            CallResult::PC(pc) => {
+            CallResult::PC(pc, captures_pos) => {
+                let mut env = Environment::new();
+                
+                // Load captures into the environment
+                if u32::from(captures_pos.0) != 0 {
+                    let captures_val = ShimValue::Dict(captures_pos);
+                        let dict = captures_val.dict(interpreter)?;
+                    for entry_idx in 0..dict.len() {
+                        let entry = &dict.entries_array(interpreter)[entry_idx];
+                        if entry.is_valid() {
+                            let key_bytes = entry.key.string(interpreter)?.to_vec();
+                            env.insert_new(key_bytes, entry.value);
+                        }
+                    }
+                }
+                
                 interpreter.execute_bytecode_extended(
                     &mut (pc as usize),
                     next_args,
-                    &mut Environment::new(),
+                    &mut env,
                 )?
             },
         };
@@ -4331,13 +4425,13 @@ impl ShimValue {
             ShimValue::None => Err(format!("Can't call None as a function")),
             ShimValue::Fn(fn_pos) => {
                 let shim_fn: &ShimFn = unsafe { interpreter.mem.get(*fn_pos) };
-                Ok(CallResult::PC(shim_fn.pc))
+                Ok(CallResult::PC(shim_fn.pc, shim_fn.captures))
             }
             ShimValue::BoundMethod(pos, fn_pos) => {
                 // push struct pos to start of arg list then return the pc of the method
                 args.args.insert(0, ShimValue::Struct(*pos));
                 let shim_fn: &ShimFn = unsafe { interpreter.mem.get(*fn_pos) };
-                Ok(CallResult::PC(shim_fn.pc))
+                Ok(CallResult::PC(shim_fn.pc, shim_fn.captures))
             }
             ShimValue::BoundNativeMethod(pos) => {
                 let obj: &ShimValue = unsafe { interpreter.mem.get(*pos) };
@@ -4354,7 +4448,7 @@ impl ShimValue {
                     // but for now it simplifies things to push all the special cases to __init__
                     if let Some(StructAttribute::MethodDef(fn_pos)) = struct_def.find(b"__init__") {
                         let shim_fn: &ShimFn = unsafe { interpreter.mem.get(fn_pos) };
-                        return Ok(CallResult::PC(shim_fn.pc));
+                        return Ok(CallResult::PC(shim_fn.pc, shim_fn.captures));
                     } else {
                         return Err(format!("INTERNAL: no __init__ on StructDef"));
                     }
@@ -5133,6 +5227,7 @@ enum ByteCode {
     JmpZ,
     JmpInitArg,
     Range,
+    CreateClosure,
 }
 
 pub struct Program {
@@ -5245,10 +5340,226 @@ pub fn compile_fn_body_inner(
     Ok(asm)
 }
 
+// Find free variables in a function (variables used but not defined in the function)
+fn find_free_variables(
+    pos_args_required: &Vec<Vec<u8>>,
+    pos_args_optional: &Vec<(Vec<u8>, ExprNode)>,
+    body: &Block,
+) -> Vec<Vec<u8>> {
+    find_free_variables_with_name(pos_args_required, pos_args_optional, body, None)
+}
+
+fn find_free_variables_with_name(
+    pos_args_required: &Vec<Vec<u8>>,
+    pos_args_optional: &Vec<(Vec<u8>, ExprNode)>,
+    body: &Block,
+    function_name: Option<&Vec<u8>>,
+) -> Vec<Vec<u8>> {
+    use std::collections::HashSet;
+    
+    // Track defined variables (parameters and optionally the function name itself)
+    let mut defined: HashSet<Vec<u8>> = HashSet::new();
+    for param in pos_args_required {
+        defined.insert(param.clone());
+    }
+    for (param, _) in pos_args_optional {
+        defined.insert(param.clone());
+    }
+    // Add the function's own name to defined variables (for recursion)
+    if let Some(name) = function_name {
+        defined.insert(name.clone());
+    }
+    
+    // Find all used variables
+    let mut used: HashSet<Vec<u8>> = HashSet::new();
+    find_used_variables_in_block(body, &mut used, &mut defined);
+    
+    // Free variables are used but not originally defined (excluding function params and name)
+    let originally_defined: HashSet<Vec<u8>> = {
+        let mut orig = HashSet::new();
+        for param in pos_args_required {
+            orig.insert(param.clone());
+        }
+        for (param, _) in pos_args_optional {
+            orig.insert(param.clone());
+        }
+        if let Some(name) = function_name {
+            orig.insert(name.clone());
+        }
+        orig
+    };
+    
+    let mut free_vars: Vec<Vec<u8>> = used.difference(&originally_defined).cloned().collect();
+    free_vars.sort(); // For consistent ordering
+    free_vars
+}
+
+fn find_used_variables_in_block(
+    block: &Block,
+    used: &mut std::collections::HashSet<Vec<u8>>,
+    defined: &mut std::collections::HashSet<Vec<u8>>,
+) {
+    // Make a copy of currently defined variables to restore later
+    let defined_before = defined.clone();
+    
+    for stmt in &block.stmts {
+        find_used_variables_in_statement(stmt, used, defined);
+    }
+    
+    if let Some(expr) = &block.last_expr {
+        find_used_variables_in_expression(&expr, used, defined);
+    }
+    
+    // Restore to the variables that were defined before entering this block
+    *defined = defined_before;
+}
+
+fn find_used_variables_in_statement(
+    stmt: &Statement,
+    used: &mut std::collections::HashSet<Vec<u8>>,
+    defined: &mut std::collections::HashSet<Vec<u8>>,
+) {
+    match stmt {
+        Statement::Let(ident, expr) => {
+            find_used_variables_in_expression(expr, used, defined);
+            defined.insert(ident.clone());
+        }
+        Statement::Assignment(ident, expr) => {
+            used.insert(ident.clone());
+            find_used_variables_in_expression(expr, used, defined);
+        }
+        Statement::AttributeAssignment(obj_expr, _ident, expr) => {
+            find_used_variables_in_expression(obj_expr, used, defined);
+            find_used_variables_in_expression(expr, used, defined);
+        }
+        Statement::IndexAssignment(obj_expr, index_expr, expr) => {
+            find_used_variables_in_expression(obj_expr, used, defined);
+            find_used_variables_in_expression(index_expr, used, defined);
+            find_used_variables_in_expression(expr, used, defined);
+        }
+        Statement::If(cond_expr, then_block, else_block) => {
+            find_used_variables_in_expression(cond_expr, used, defined);
+            find_used_variables_in_block(then_block, used, defined);
+            find_used_variables_in_block(else_block, used, defined);
+        }
+        Statement::For(ident, iter_expr, body_block) => {
+            find_used_variables_in_expression(iter_expr, used, defined);
+            defined.insert(ident.clone());
+            find_used_variables_in_block(body_block, used, defined);
+        }
+        Statement::While(cond_expr, body_block) => {
+            find_used_variables_in_expression(cond_expr, used, defined);
+            find_used_variables_in_block(body_block, used, defined);
+        }
+        Statement::Break | Statement::Continue => {}
+        Statement::Fn(_func) => {
+            // Functions define their own scope, don't traverse into them
+        }
+        Statement::Struct(_struct_def) => {
+            // Structs define their own scope, don't traverse into them
+        }
+        Statement::Expression(expr) => {
+            find_used_variables_in_expression(expr, used, defined);
+        }
+        Statement::Return(opt_expr) => {
+            if let Some(expr) = opt_expr {
+                find_used_variables_in_expression(expr, used, defined);
+            }
+        }
+    }
+}
+
+fn find_used_variables_in_expression(
+    expr_node: &ExprNode,
+    used: &mut std::collections::HashSet<Vec<u8>>,
+    defined: &mut std::collections::HashSet<Vec<u8>>,
+) {
+    match &expr_node.data {
+        Expression::Primary(primary) => match primary {
+            Primary::Identifier(ident) => {
+                if !defined.contains(ident) {
+                    used.insert(ident.clone());
+                }
+            }
+            Primary::List(items) => {
+                for item in items {
+                    find_used_variables_in_expression(item, used, defined);
+                }
+            }
+            Primary::Expression(boxed_expr) => {
+                find_used_variables_in_expression(boxed_expr, used, defined);
+            }
+            _ => {}
+        },
+        Expression::BooleanOp(op) => match op {
+            BooleanOp::And(a, b) | BooleanOp::Or(a, b) => {
+                find_used_variables_in_expression(a, used, defined);
+                find_used_variables_in_expression(b, used, defined);
+            }
+        },
+        Expression::BinaryOp(op) => {
+            let (a, b) = match op {
+                BinaryOp::Add(a, b) | BinaryOp::Subtract(a, b) | BinaryOp::Multiply(a, b)
+                | BinaryOp::Divide(a, b) | BinaryOp::Equal(a, b) | BinaryOp::NotEqual(a, b)
+                | BinaryOp::GT(a, b) | BinaryOp::GTE(a, b) | BinaryOp::LT(a, b)
+                | BinaryOp::LTE(a, b) | BinaryOp::Modulus(a, b) | BinaryOp::In(a, b)
+                | BinaryOp::Range(a, b) => (a, b),
+            };
+            find_used_variables_in_expression(a, used, defined);
+            find_used_variables_in_expression(b, used, defined);
+        }
+        Expression::UnaryOp(op) => {
+            let a = match op {
+                UnaryOp::Not(a) | UnaryOp::Negate(a) => a,
+            };
+            find_used_variables_in_expression(a, used, defined);
+        }
+        Expression::Stringify(expr) => {
+            find_used_variables_in_expression(expr, used, defined);
+        }
+        Expression::Call(func_expr, args, kwargs) => {
+            find_used_variables_in_expression(func_expr, used, defined);
+            for arg in args {
+                find_used_variables_in_expression(arg, used, defined);
+            }
+            for (_name, arg) in kwargs {
+                find_used_variables_in_expression(arg, used, defined);
+            }
+        }
+        Expression::Index(obj_expr, index_expr) => {
+            find_used_variables_in_expression(obj_expr, used, defined);
+            find_used_variables_in_expression(index_expr, used, defined);
+        }
+        Expression::Attribute(obj_expr, _attr) => {
+            find_used_variables_in_expression(obj_expr, used, defined);
+        }
+        Expression::Block(block) => {
+            find_used_variables_in_block(block, used, defined);
+        }
+        Expression::If(cond_expr, then_block, else_block) => {
+            find_used_variables_in_expression(cond_expr, used, defined);
+            find_used_variables_in_block(then_block, used, defined);
+            find_used_variables_in_block(else_block, used, defined);
+        }
+        Expression::Fn(_func) => {
+            // Functions define their own scope, don't traverse into them
+        }
+    }
+}
+
 pub fn compile_fn_expression(
     pos_args_required: &Vec<Vec<u8>>,
     pos_args_optional: &Vec<(Vec<u8>, ExprNode)>,
     body: &Block,
+) -> Result<Vec<(u8, Span)>, String> {
+    compile_fn_expression_with_name(pos_args_required, pos_args_optional, body, None)
+}
+
+fn compile_fn_expression_with_name(
+    pos_args_required: &Vec<Vec<u8>>,
+    pos_args_optional: &Vec<(Vec<u8>, ExprNode)>,
+    body: &Block,
+    function_name: Option<&Vec<u8>>,
 ) -> Result<Vec<(u8, Span)>, String> {
     // This will be replaced with a relative jump to after the function
     // declaration
@@ -5271,11 +5582,32 @@ pub fn compile_fn_expression(
     asm[1].0 = (pc_offset >> 8) as u8;
     asm[2].0 = (pc_offset & 0xff) as u8;
 
+    // Analyze free variables for closure support
+    let free_vars = find_free_variables_with_name(pos_args_required, pos_args_optional, body, function_name);
+    
     // Assign the value to the ident
     let pc_offset = asm.len() as u16 - 3;
-    asm.push((ByteCode::CreateFn as u8, Span { start: 0, end: 1 }));
-    asm.push(((pc_offset >> 8) as u8, Span { start: 0, end: 1 }));
-    asm.push(((pc_offset & 0xff) as u8, Span { start: 0, end: 1 }));
+    
+    if free_vars.is_empty() {
+        // No closures needed - use CreateFn
+        asm.push((ByteCode::CreateFn as u8, Span { start: 0, end: 1 }));
+        asm.push(((pc_offset >> 8) as u8, Span { start: 0, end: 1 }));
+        asm.push(((pc_offset & 0xff) as u8, Span { start: 0, end: 1 }));
+    } else {
+        // Has free variables - use CreateClosure
+        asm.push((ByteCode::CreateClosure as u8, Span { start: 0, end: 1 }));
+        asm.push(((pc_offset >> 8) as u8, Span { start: 0, end: 1 }));
+        asm.push(((pc_offset & 0xff) as u8, Span { start: 0, end: 1 }));
+        asm.push((free_vars.len() as u8, Span { start: 0, end: 1 }));
+        
+        // Emit the captured variable identifiers
+        for var in free_vars {
+            asm.push((var.len() as u8, Span { start: 0, end: 1 }));
+            for byte in var {
+                asm.push((byte, Span { start: 0, end: 1 }));
+            }
+        }
+    }
 
     Ok(asm)
 }
@@ -5287,10 +5619,11 @@ pub fn compile_fn(func: &Fn) -> Result<Vec<(u8, Span)>, String> {
         return Err(format!("No ident for function declaration!"));
     };
 
-    let mut asm = compile_fn_expression(
+    let mut asm = compile_fn_expression_with_name(
         &func.pos_args_required,
         &func.pos_args_optional,
         &func.body,
+        Some(ident),
     )?;
 
     asm.push((
@@ -6310,7 +6643,7 @@ impl Interpreter {
                         format_script_err(self.program.spans[pc], &self.program.script, &err_str)
                     })? {
                         CallResult::ReturnValue(res) => stack.push(res),
-                        CallResult::PC(new_pc) => {
+                        CallResult::PC(new_pc, captures_pos) => {
                             stack_frame.push((
                                 pc + 1,
                                 loop_info.clone(),
@@ -6320,6 +6653,20 @@ impl Interpreter {
                             ));
                             loop_info = Vec::new();
                             env.push_scope();
+                            
+                            // Load captures into the environment
+                            if u32::from(captures_pos.0) != 0 {
+                                let captures_val = ShimValue::Dict(captures_pos);
+                                let dict = captures_val.dict(self)?;
+                                for entry_idx in 0..dict.len() {
+                                    let entry = &dict.entries_array(self)[entry_idx];
+                                    if entry.is_valid() {
+                                        let key_bytes = entry.key.string(self)?.to_vec();
+                                        env.insert_new(key_bytes, entry.value);
+                                    }
+                                }
+                            }
+                            
                             pc = new_pc as usize;
                             continue;
                         }
@@ -6681,7 +7028,7 @@ impl Interpreter {
                         format_script_err(self.program.spans[pc], &self.program.script, &err_str)
                     })? {
                         CallResult::ReturnValue(res) => stack.push(res),
-                        CallResult::PC(new_pc) => {
+                        CallResult::PC(new_pc, captures_pos) => {
                             stack_frame.push((
                                 pc + 3,
                                 loop_info.clone(),
@@ -6691,6 +7038,20 @@ impl Interpreter {
                             ));
                             loop_info = Vec::new();
                             env.push_scope();
+                            
+                            // Load captures into the environment
+                            if u32::from(captures_pos.0) != 0 {
+                                let captures_val = ShimValue::Dict(captures_pos);
+                                let dict = captures_val.dict(self)?;
+                                for entry_idx in 0..dict.len() {
+                                    let entry = &dict.entries_array(self)[entry_idx];
+                                    if entry.is_valid() {
+                                        let key_bytes = entry.key.string(self)?.to_vec();
+                                        env.insert_new(key_bytes, entry.value);
+                                    }
+                                }
+                            }
+                            
                             pc = new_pc as usize;
                             continue;
                         }
@@ -6786,6 +7147,44 @@ impl Interpreter {
                     let fn_val = self.mem.alloc_fn(fn_pc, b"<anonymous>");
                     stack.push(fn_val);
                     pc += 2;
+                }
+                val if val == ByteCode::CreateClosure as u8 => {
+                    let instruction_offset = ((bytes[pc + 1] as u32) << 8) + bytes[pc + 2] as u32;
+                    let fn_pc = pc as u32 - instruction_offset;
+                    let capture_count = bytes[pc + 3] as usize;
+                    
+                    // Create a dict to store captured variables
+                    let captures_dict_val = self.mem.alloc_dict();
+                    let captures_pos = match captures_dict_val {
+                        ShimValue::Dict(pos) => pos,
+                        _ => panic!("alloc_dict should return Dict"),
+                    };
+                    let dict = captures_dict_val.dict_mut(self)?;
+                    
+                    // Read capture identifiers and get their values from env
+                    let mut byte_idx = pc + 4;
+                    for _ in 0..capture_count {
+                        let ident_len = bytes[byte_idx] as usize;
+                        byte_idx += 1;
+                        let ident = &bytes[byte_idx..byte_idx + ident_len];
+                        byte_idx += ident_len;
+                        
+                        // Get the value from the environment
+                        if let Some(val) = env.get(ident) {
+                            let key_val = self.mem.alloc_str(ident);
+                            dict.set(self, key_val, val)?;
+                        } else {
+                            return Err(format_script_err(
+                                self.program.spans[pc],
+                                &self.program.script,
+                                &format!("Unknown identifier \"{}\"", debug_u8s(ident))
+                            ));
+                        }
+                    }
+                    
+                    let fn_val = self.mem.alloc_fn_with_captures(fn_pc, b"<anonymous>", captures_pos);
+                    stack.push(fn_val);
+                    pc = byte_idx - 1;
                 }
                 val if val == ByteCode::CreateStruct as u8 => {
                     // Everything after the first two bytes is data for the

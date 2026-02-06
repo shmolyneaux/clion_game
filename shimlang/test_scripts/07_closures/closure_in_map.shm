@@ -1,0 +1,7 @@
+let lst = [1, 2, 3, 4, 5];
+let multiplier = 3;
+
+let result = lst.map(fn(x) { x * multiplier });
+for item in result {
+    print(item);
+}

@@ -1,0 +1,10 @@
+fn make_operation(a, b) {
+    return fn(x) { a * x + b };
+}
+
+let linear = make_operation(2, 3);
+print(linear(5));
+print(linear(10));
+
+let another = make_operation(3, 7);
+print(another(2));
