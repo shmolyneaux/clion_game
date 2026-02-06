@@ -126,7 +126,7 @@ fn run() -> Result<(), String> {
                 };
                 let program = shimlang::compile_ast(&ast)?;
                 let mut interpreter = shimlang::Interpreter::create(&Config::default(), program);
-                let mut env = shimlang::Environment::new_with_builtins(&mut interpreter.mem);
+                let mut env = shimlang::Environment::new_with_builtins(&mut interpreter);
                 let mut pc = 0;
                 match interpreter.execute_bytecode_extended(&mut pc, shimlang::ArgBundle::new(), &mut env) {
                     Ok(_) => {
@@ -175,7 +175,7 @@ fn run() -> Result<(), String> {
         let ast = shimlang::ast_from_text(b"").unwrap();
         let program = shimlang::compile_ast(&ast)?;
         let mut interpreter = shimlang::Interpreter::create(&Config::default(), program);
-        let mut env = shimlang::Environment::new_with_builtins(&mut interpreter.mem);
+        let mut env = shimlang::Environment::new_with_builtins(&mut interpreter);
 
         let mut pc = 0;
 
