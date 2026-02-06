@@ -6,6 +6,8 @@ edition = "2024"
 [dependencies]
 facet = { version = "0.27.14", optional = true}
 facet-reflect = { version = "0.27.14", optional = true }
+tree-sitter = "0.25"
+tree-sitter-shimlang = { path = "../tree-sitter-shimlang" }
 
 
 [patch.crates-io]

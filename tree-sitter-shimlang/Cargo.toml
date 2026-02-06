@@ -1,0 +1,13 @@
+[package]
+name = "tree-sitter-shimlang"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+path = "rust_src/lib.rs"
+
+[build-dependencies]
+cc = "1"
+
+[dependencies]
+tree-sitter-language = "0.1"

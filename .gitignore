@@ -4,3 +4,5 @@
 /ignore
 build/
 imgui.ini
+tree-sitter-shimlang/node_modules/
+tree-sitter-shimlang/target/

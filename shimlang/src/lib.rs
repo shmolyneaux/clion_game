@@ -12,6 +12,8 @@ use std::any::{Any, type_name, type_name_of_val};
 use std::mem::size_of;
 use std::rc::Rc;
 
+use tree_sitter;
+
 #[derive(Debug, Clone, Copy)]
 pub struct Span {
     pub start: u32,
@@ -1673,8 +1675,716 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
 }
 
 pub fn ast_from_text(text: &[u8]) -> Result<Ast, String> {
-    let mut tokens = lex(text)?;
-    parse_ast(&mut tokens)
+    let mut parser = tree_sitter::Parser::new();
+    parser.set_language(&tree_sitter_shimlang::LANGUAGE.into())
+        .map_err(|e| format!("Failed to set tree-sitter language: {:?}", e))?;
+
+    let tree = parser.parse(text, None)
+        .ok_or_else(|| "Failed to parse with tree-sitter".to_string())?;
+
+    let root = tree.root_node();
+
+    if root.has_error() {
+        // Find the error node and provide a good error message
+        fn find_error<'a>(node: tree_sitter::Node<'a>, text: &[u8]) -> Option<String> {
+            if node.is_error() || node.is_missing() {
+                let start = node.start_byte() as u32;
+                let end = (node.end_byte() as u32).max(start + 1);
+                let span = Span { start, end };
+                return Some(format_script_err(span, text, &format!(
+                    "Unexpected syntax"
+                )));
+            }
+            for i in 0..node.child_count() {
+                if let Some(child) = node.child(i) {
+                    if let Some(err) = find_error(child, text) {
+                        return Some(err);
+                    }
+                }
+            }
+            None
+        }
+        if let Some(err) = find_error(root, text) {
+            return Err(err);
+        }
+        return Err("Parse error".to_string());
+    }
+
+    let block = ts_convert_block_inner(&root, text)?;
+    Ok(Ast {
+        block,
+        script: text.to_vec(),
+    })
+}
+
+fn ts_span(node: &tree_sitter::Node) -> Span {
+    Span {
+        start: node.start_byte() as u32,
+        end: node.end_byte() as u32,
+    }
+}
+
+fn ts_node_text<'a>(node: &tree_sitter::Node, text: &'a [u8]) -> &'a [u8] {
+    &text[node.start_byte()..node.end_byte()]
+}
+
+fn ts_named_children<'a>(node: &tree_sitter::Node<'a>) -> Vec<tree_sitter::Node<'a>> {
+    let mut children = Vec::new();
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        // Skip comment nodes (they are extras that can appear anywhere)
+        match child.kind() {
+            "line_comment" | "block_comment" => continue,
+            _ => children.push(child),
+        }
+    }
+    children
+}
+
+/// Convert the root source_file or a block's inner content to a Block
+fn ts_convert_block_inner(node: &tree_sitter::Node, text: &[u8]) -> Result<Block, String> {
+    let mut stmts = Vec::new();
+    let mut last_expr: Option<Box<ExprNode>> = None;
+
+    let children = ts_named_children(node);
+
+    for (i, child) in children.iter().enumerate() {
+        let kind = child.kind();
+        let is_last = i == children.len() - 1;
+
+        match kind {
+            // Statements
+            "let_statement" => stmts.push(ts_convert_let_statement(child, text)?),
+            "assignment_statement" => stmts.push(ts_convert_assignment_statement(child, text)?),
+            "attribute_assignment_statement" => stmts.push(ts_convert_attribute_assignment_statement(child, text)?),
+            "index_assignment_statement" => stmts.push(ts_convert_index_assignment_statement(child, text)?),
+            "if_statement" => {
+                if is_last && node.kind() == "block" {
+                    // Last if in a block may be a trailing expression
+                    let cond = ts_convert_if(child, text)?;
+                    let expr = Expression::If(Box::new(cond.conditional), cond.if_body, cond.else_body);
+                    last_expr = Some(Box::new(ExprNode {
+                        data: expr,
+                        span: ts_span(child),
+                    }));
+                } else {
+                    let cond = ts_convert_if(child, text)?;
+                    stmts.push(Statement::If(cond.conditional, cond.if_body, cond.else_body));
+                }
+            }
+            "for_statement" => stmts.push(ts_convert_for_statement(child, text)?),
+            "while_statement" => stmts.push(ts_convert_while_statement(child, text)?),
+            "break_statement" => stmts.push(Statement::Break),
+            "continue_statement" => stmts.push(Statement::Continue),
+            "function_definition" => stmts.push(Statement::Fn(ts_convert_function(child, text)?)),
+            "struct_definition" => stmts.push(Statement::Struct(ts_convert_struct(child, text)?)),
+            "return_statement" => stmts.push(ts_convert_return_statement(child, text)?),
+            "expression_statement" => {
+                let expr_node = child.named_child(0)
+                    .ok_or_else(|| "expression_statement has no child".to_string())?;
+                let expr = ts_convert_expression(&expr_node, text)?;
+                stmts.push(Statement::Expression(expr));
+            }
+
+            // Trailing expression (last element in block without semicolon)
+            _ if is_last && ts_is_expression_kind(kind) => {
+                let expr = ts_convert_expression(child, text)?;
+                last_expr = Some(Box::new(expr));
+            }
+
+            // Skip comments
+            "line_comment" | "block_comment" => continue,
+
+            _ => {
+                // Might be an expression in statement position for non-last elements
+                if ts_is_expression_kind(kind) {
+                    let expr = ts_convert_expression(child, text)?;
+                    stmts.push(Statement::Expression(expr));
+                } else {
+                    return Err(format!("Unexpected node kind in block: {}", kind));
+                }
+            }
+        }
+    }
+
+    Ok(Block { stmts, last_expr })
+}
+
+fn ts_is_expression_kind(kind: &str) -> bool {
+    matches!(kind,
+        "identifier" | "integer" | "float" | "string" | "boolean" | "none"
+        | "add_expression" | "subtract_expression" | "multiply_expression"
+        | "divide_expression" | "modulus_expression" | "equal_expression"
+        | "not_equal_expression" | "gt_expression" | "gte_expression"
+        | "lt_expression" | "lte_expression" | "in_expression"
+        | "and_expression" | "or_expression" | "range_expression"
+        | "not_expression" | "negate_expression"
+        | "call_expression" | "index_expression" | "attribute_expression"
+        | "if_expression" | "block" | "list" | "parenthesized_expression"
+        | "anonymous_function"
+    )
+}
+
+fn ts_convert_expression(node: &tree_sitter::Node, text: &[u8]) -> Result<ExprNode, String> {
+    let span = ts_span(node);
+    let kind = node.kind();
+
+    let expr = match kind {
+        "identifier" => {
+            let name = ts_node_text(node, text).to_vec();
+            Expression::Primary(Primary::Identifier(name))
+        }
+        "integer" => {
+            let s = std::str::from_utf8(ts_node_text(node, text))
+                .map_err(|e| format!("Invalid UTF-8 in integer: {:?}", e))?;
+            let val: i32 = s.parse()
+                .map_err(|e| format!("Failed to parse integer '{}': {:?}", s, e))?;
+            Expression::Primary(Primary::Integer(val))
+        }
+        "float" => {
+            let s = std::str::from_utf8(ts_node_text(node, text))
+                .map_err(|e| format!("Invalid UTF-8 in float: {:?}", e))?;
+            let val: f32 = s.parse()
+                .map_err(|e| format!("Failed to parse float '{}': {:?}", s, e))?;
+            Expression::Primary(Primary::Float(val))
+        }
+        "boolean" => {
+            let s = ts_node_text(node, text);
+            Expression::Primary(Primary::Bool(s == b"true"))
+        }
+        "none" => {
+            Expression::Primary(Primary::None)
+        }
+        "string" => {
+            ts_convert_string(node, text)?
+        }
+        "list" => {
+            let children = ts_named_children(node);
+            let mut items = Vec::new();
+            for child in &children {
+                items.push(ts_convert_expression(child, text)?);
+            }
+            Expression::Primary(Primary::List(items))
+        }
+        "parenthesized_expression" => {
+            let inner = node.named_child(0)
+                .ok_or_else(|| "parenthesized_expression has no child".to_string())?;
+            return ts_convert_expression(&inner, text);
+        }
+        "block" => {
+            let block = ts_convert_block(node, text)?;
+            Expression::Block(block)
+        }
+
+        // Binary operations - use operator span to match original parser behavior
+        "add_expression" => { let op_span = ts_find_operator_span(node); return Ok(ExprNode { data: ts_convert_binary_op(node, text, |l, r| BinaryOp::Add(l, r))?, span: op_span }); }
+        "subtract_expression" => { let op_span = ts_find_operator_span(node); return Ok(ExprNode { data: ts_convert_binary_op(node, text, |l, r| BinaryOp::Subtract(l, r))?, span: op_span }); }
+        "multiply_expression" => { let op_span = ts_find_operator_span(node); return Ok(ExprNode { data: ts_convert_binary_op(node, text, |l, r| BinaryOp::Multiply(l, r))?, span: op_span }); }
+        "divide_expression" => { let op_span = ts_find_operator_span(node); return Ok(ExprNode { data: ts_convert_binary_op(node, text, |l, r| BinaryOp::Divide(l, r))?, span: op_span }); }
+        "modulus_expression" => { let op_span = ts_find_operator_span(node); return Ok(ExprNode { data: ts_convert_binary_op(node, text, |l, r| BinaryOp::Modulus(l, r))?, span: op_span }); }
+        "equal_expression" => { let op_span = ts_find_operator_span(node); return Ok(ExprNode { data: ts_convert_binary_op(node, text, |l, r| BinaryOp::Equal(l, r))?, span: op_span }); }
+        "not_equal_expression" => { let op_span = ts_find_operator_span(node); return Ok(ExprNode { data: ts_convert_binary_op(node, text, |l, r| BinaryOp::NotEqual(l, r))?, span: op_span }); }
+        "gt_expression" => { let op_span = ts_find_operator_span(node); return Ok(ExprNode { data: ts_convert_binary_op(node, text, |l, r| BinaryOp::GT(l, r))?, span: op_span }); }
+        "gte_expression" => { let op_span = ts_find_operator_span(node); return Ok(ExprNode { data: ts_convert_binary_op(node, text, |l, r| BinaryOp::GTE(l, r))?, span: op_span }); }
+        "lt_expression" => { let op_span = ts_find_operator_span(node); return Ok(ExprNode { data: ts_convert_binary_op(node, text, |l, r| BinaryOp::LT(l, r))?, span: op_span }); }
+        "lte_expression" => { let op_span = ts_find_operator_span(node); return Ok(ExprNode { data: ts_convert_binary_op(node, text, |l, r| BinaryOp::LTE(l, r))?, span: op_span }); }
+        "in_expression" => { let op_span = ts_find_operator_span(node); return Ok(ExprNode { data: ts_convert_binary_op(node, text, |l, r| BinaryOp::In(l, r))?, span: op_span }); }
+        "range_expression" => { let op_span = ts_find_operator_span(node); return Ok(ExprNode { data: ts_convert_binary_op(node, text, |l, r| BinaryOp::Range(l, r))?, span: op_span }); }
+
+        // Boolean operations - use operator span
+        "and_expression" => {
+            let op_span = ts_find_operator_span(node);
+            let (left, right) = ts_get_binary_children(node, text)?;
+            return Ok(ExprNode { data: Expression::BooleanOp(BooleanOp::And(Box::new(left), Box::new(right))), span: op_span });
+        }
+        "or_expression" => {
+            let op_span = ts_find_operator_span(node);
+            let (left, right) = ts_get_binary_children(node, text)?;
+            return Ok(ExprNode { data: Expression::BooleanOp(BooleanOp::Or(Box::new(left), Box::new(right))), span: op_span });
+        }
+
+        // Unary operations
+        "not_expression" => {
+            let operand = ts_get_unary_child(node, text)?;
+            Expression::UnaryOp(UnaryOp::Not(Box::new(operand)))
+        }
+        "negate_expression" => {
+            let operand = ts_get_unary_child(node, text)?;
+            Expression::UnaryOp(UnaryOp::Negate(Box::new(operand)))
+        }
+
+        // Call, index, attribute
+        "call_expression" => {
+            return ts_convert_call_expression(node, text);
+        }
+        "index_expression" => {
+            let op_span = ts_find_operator_span(node);
+            let children = ts_named_children(node);
+            if children.len() < 2 {
+                return Err("index_expression needs at least 2 children".to_string());
+            }
+            let obj = ts_convert_expression(&children[0], text)?;
+            let index = ts_convert_expression(&children[1], text)?;
+            return Ok(ExprNode { data: Expression::Index(Box::new(obj), Box::new(index)), span: op_span });
+        }
+        "attribute_expression" => {
+            let children = ts_named_children(node);
+            if children.len() < 2 {
+                return Err("attribute_expression needs at least 2 children".to_string());
+            }
+            // Find the dot operator span and the attribute identifier span
+            let dot_span = ts_find_operator_span(node);
+            let attr_span = ts_span(&children[1]);
+            let combined_span = dot_span + attr_span;
+            let obj = ts_convert_expression(&children[0], text)?;
+            let attr = ts_node_text(&children[1], text).to_vec();
+            return Ok(ExprNode { data: Expression::Attribute(Box::new(obj), attr), span: combined_span });
+        }
+
+        // If expression
+        "if_expression" => {
+            let cond = ts_convert_if(node, text)?;
+            Expression::If(Box::new(cond.conditional), cond.if_body, cond.else_body)
+        }
+
+        // Anonymous function
+        "anonymous_function" => {
+            let f = ts_convert_anon_function(node, text)?;
+            Expression::Fn(f)
+        }
+
+        _ => {
+            return Err(format!("Unknown expression kind: {} at {}..{}",
+                kind, node.start_byte(), node.end_byte()));
+        }
+    };
+
+    Ok(ExprNode { data: expr, span })
+}
+
+fn ts_convert_binary_op(
+    node: &tree_sitter::Node,
+    text: &[u8],
+    constructor: impl FnOnce(Box<ExprNode>, Box<ExprNode>) -> BinaryOp,
+) -> Result<Expression, String> {
+    let (left, right) = ts_get_binary_children(node, text)?;
+    Ok(Expression::BinaryOp(constructor(Box::new(left), Box::new(right))))
+}
+
+/// Find the operator token span in a binary expression node.
+/// The operator is the unnamed child between the two named operand children.
+fn ts_find_operator_span(node: &tree_sitter::Node) -> Span {
+    for i in 0..node.child_count() {
+        if let Some(child) = node.child(i) {
+            if !child.is_named() {
+                let kind = child.kind();
+                // Skip parentheses, brackets, and other structural tokens
+                match kind {
+                    "(" | ")" | "[" | "]" | "{" | "}" | "," | ";" => continue,
+                    _ => {
+                        return ts_span(&child);
+                    }
+                }
+            }
+        }
+    }
+    // Fallback to node span
+    ts_span(node)
+}
+
+fn ts_convert_call_expression(node: &tree_sitter::Node, text: &[u8]) -> Result<ExprNode, String> {
+    let children = ts_named_children(node);
+    let func = &children[0];
+    let func_expr = ts_convert_expression(func, text)?;
+
+    let mut args = Vec::new();
+    let mut kwargs = Vec::new();
+
+    for child in &children[1..] {
+        if child.kind() == "argument_list" {
+            ts_convert_argument_list_into(child, text, &mut args, &mut kwargs)?;
+        }
+    }
+
+    // For call span, use from the function expr start to the closing paren
+    let call_span = Span {
+        start: func_expr.span.start,
+        end: node.end_byte() as u32,
+    };
+
+    Ok(ExprNode {
+        data: Expression::Call(Box::new(func_expr), args, kwargs),
+        span: call_span,
+    })
+}
+
+fn ts_get_binary_children(
+    node: &tree_sitter::Node,
+    text: &[u8],
+) -> Result<(ExprNode, ExprNode), String> {
+    let children = ts_named_children(node);
+    if children.len() < 2 {
+        return Err(format!("{} needs at least 2 children, got {}", node.kind(), children.len()));
+    }
+    let left = ts_convert_expression(&children[0], text)?;
+    let right = ts_convert_expression(&children[1], text)?;
+    Ok((left, right))
+}
+
+fn ts_get_unary_child(
+    node: &tree_sitter::Node,
+    text: &[u8],
+) -> Result<ExprNode, String> {
+    let children = ts_named_children(node);
+    if children.is_empty() {
+        return Err(format!("{} has no children", node.kind()));
+    }
+    ts_convert_expression(&children[0], text)
+}
+
+fn ts_convert_string(node: &tree_sitter::Node, text: &[u8]) -> Result<Expression, String> {
+    let children = ts_named_children(node);
+
+    // Start with an empty string if no children, or the first content
+    let mut result_expr: Option<Expression> = None;
+
+    // Iterate through string children
+    for child in &children {
+        match child.kind() {
+            "string_content" => {
+                let content = ts_node_text(child, text).to_vec();
+                let str_expr = Expression::Primary(Primary::String(content));
+                result_expr = Some(match result_expr {
+                    None => str_expr,
+                    Some(prev) => Expression::BinaryOp(BinaryOp::Add(
+                        Box::new(Node::lazy(prev)),
+                        Box::new(Node::lazy(str_expr)),
+                    )),
+                });
+            }
+            "escape_sequence" => {
+                let raw = ts_node_text(child, text);
+                let byte = match raw {
+                    b"\\n" => b'\n',
+                    b"\\t" => b'\t',
+                    b"\\'" => b'\'',
+                    b"\\\\" => b'\\',
+                    b"\\\"" => b'"',
+                    _ => return Err(format!("Unknown escape sequence: {:?}", std::str::from_utf8(raw))),
+                };
+                let str_expr = Expression::Primary(Primary::String(vec![byte]));
+                result_expr = Some(match result_expr {
+                    None => str_expr,
+                    Some(prev) => Expression::BinaryOp(BinaryOp::Add(
+                        Box::new(Node::lazy(prev)),
+                        Box::new(Node::lazy(str_expr)),
+                    )),
+                });
+            }
+            "string_interpolation" => {
+                // The interpolation has one expression child
+                let interp_children = ts_named_children(child);
+                if interp_children.is_empty() {
+                    return Err("string_interpolation has no children".to_string());
+                }
+                let interp_expr = ts_convert_expression(&interp_children[0], text)?;
+                let stringify = Expression::Stringify(Box::new(interp_expr));
+
+                result_expr = Some(match result_expr {
+                    None => stringify,
+                    Some(prev) => Expression::BinaryOp(BinaryOp::Add(
+                        Box::new(Node::lazy(prev)),
+                        Box::new(Node::lazy(stringify)),
+                    )),
+                });
+            }
+            _ => {}
+        }
+    }
+
+    Ok(result_expr.unwrap_or(Expression::Primary(Primary::String(Vec::new()))))
+}
+
+fn ts_convert_argument_list_into(
+    node: &tree_sitter::Node,
+    text: &[u8],
+    args: &mut Vec<ExprNode>,
+    kwargs: &mut Vec<(Ident, ExprNode)>,
+) -> Result<(), String> {
+    let children = ts_named_children(node);
+    for child in &children {
+        if child.kind() == "keyword_argument" {
+            let kw_children = ts_named_children(child);
+            if kw_children.len() < 2 {
+                return Err("keyword_argument needs ident and expression".to_string());
+            }
+            let ident = ts_node_text(&kw_children[0], text).to_vec();
+            let expr = ts_convert_expression(&kw_children[1], text)?;
+            kwargs.push((ident, expr));
+        } else {
+            let expr = ts_convert_expression(child, text)?;
+            args.push(expr);
+        }
+    }
+    Ok(())
+}
+
+fn ts_convert_block(node: &tree_sitter::Node, text: &[u8]) -> Result<Block, String> {
+    // A block is { _block_inner }
+    // _block_inner is inlined, so the block node directly contains statements and expressions
+    ts_convert_block_inner(node, text)
+}
+
+fn ts_convert_if(node: &tree_sitter::Node, text: &[u8]) -> Result<Conditional, String> {
+    let condition_node = node.child_by_field_name("condition")
+        .ok_or_else(|| "if has no condition".to_string())?;
+    let consequence_node = node.child_by_field_name("consequence")
+        .ok_or_else(|| "if has no consequence".to_string())?;
+
+    let conditional = ts_convert_expression(&condition_node, text)?;
+    let if_body = ts_convert_block(&consequence_node, text)?;
+
+    let else_body = if let Some(alternative_node) = node.child_by_field_name("alternative") {
+        ts_convert_block(&alternative_node, text)?
+    } else {
+        Block {
+            stmts: Vec::new(),
+            last_expr: None,
+        }
+    };
+
+    Ok(Conditional::new(conditional, if_body, else_body))
+}
+
+fn ts_convert_let_statement(node: &tree_sitter::Node, text: &[u8]) -> Result<Statement, String> {
+    let children = ts_named_children(node);
+    if children.len() < 2 {
+        return Err("let statement needs identifier and expression".to_string());
+    }
+    let ident = ts_node_text(&children[0], text).to_vec();
+    let expr = ts_convert_expression(&children[1], text)?;
+    Ok(Statement::Let(ident, expr))
+}
+
+fn ts_convert_assignment_statement(node: &tree_sitter::Node, text: &[u8]) -> Result<Statement, String> {
+    let children = ts_named_children(node);
+    if children.len() < 2 {
+        return Err("assignment statement needs identifier and expression".to_string());
+    }
+    let ident = ts_node_text(&children[0], text).to_vec();
+    let expr = ts_convert_expression(&children[1], text)?;
+    Ok(Statement::Assignment(ident, expr))
+}
+
+fn ts_convert_attribute_assignment_statement(node: &tree_sitter::Node, text: &[u8]) -> Result<Statement, String> {
+    let children = ts_named_children(node);
+    if children.len() < 2 {
+        return Err("attribute assignment needs attribute_expression and expression".to_string());
+    }
+    // First child is the attribute_expression
+    let attr_node = &children[0];
+    let attr_children = ts_named_children(attr_node);
+    if attr_children.len() < 2 {
+        return Err("attribute_expression needs object and attribute".to_string());
+    }
+    let obj = ts_convert_expression(&attr_children[0], text)?;
+    let attr = ts_node_text(&attr_children[1], text).to_vec();
+    // Second child is the value expression
+    let value = ts_convert_expression(&children[1], text)?;
+    Ok(Statement::AttributeAssignment(obj, attr, value))
+}
+
+fn ts_convert_index_assignment_statement(node: &tree_sitter::Node, text: &[u8]) -> Result<Statement, String> {
+    let children = ts_named_children(node);
+    if children.len() < 2 {
+        return Err("index assignment needs index_expression and expression".to_string());
+    }
+    // First child is the index_expression
+    let idx_node = &children[0];
+    let idx_children = ts_named_children(idx_node);
+    if idx_children.len() < 2 {
+        return Err("index_expression needs object and index".to_string());
+    }
+    let obj = ts_convert_expression(&idx_children[0], text)?;
+    let index = ts_convert_expression(&idx_children[1], text)?;
+    // Second child is the value expression
+    let value = ts_convert_expression(&children[1], text)?;
+    Ok(Statement::IndexAssignment(obj, index, value))
+}
+
+fn ts_convert_for_statement(node: &tree_sitter::Node, text: &[u8]) -> Result<Statement, String> {
+    let children = ts_named_children(node);
+    if children.len() < 3 {
+        return Err("for statement needs identifier, expression, and block".to_string());
+    }
+    let ident = ts_node_text(&children[0], text).to_vec();
+    let expr = ts_convert_expression(&children[1], text)?;
+    let body = ts_convert_block(&children[2], text)?;
+    Ok(Statement::For(ident, expr, body))
+}
+
+fn ts_convert_while_statement(node: &tree_sitter::Node, text: &[u8]) -> Result<Statement, String> {
+    let children = ts_named_children(node);
+    if children.len() < 2 {
+        return Err("while statement needs expression and block".to_string());
+    }
+    let expr = ts_convert_expression(&children[0], text)?;
+    let body = ts_convert_block(&children[1], text)?;
+    Ok(Statement::While(expr, body))
+}
+
+fn ts_convert_return_statement(node: &tree_sitter::Node, text: &[u8]) -> Result<Statement, String> {
+    let children = ts_named_children(node);
+    if children.is_empty() {
+        Ok(Statement::Return(None))
+    } else {
+        let expr = ts_convert_expression(&children[0], text)?;
+        Ok(Statement::Return(Some(expr)))
+    }
+}
+
+fn ts_convert_function(node: &tree_sitter::Node, text: &[u8]) -> Result<Fn, String> {
+    let name_node = node.child_by_field_name("name")
+        .ok_or_else(|| "function_definition has no name".to_string())?;
+    let ident = Some(ts_node_text(&name_node, text).to_vec());
+
+    let (params, optional_params) = ts_convert_parameters(node, text)?;
+
+    // Find the block child
+    let block = ts_find_child_by_kind(node, "block")
+        .ok_or_else(|| "function_definition has no block".to_string())?;
+    let body = ts_convert_block(&block, text)?;
+
+    Ok(Fn {
+        ident,
+        pos_args_required: params,
+        pos_args_optional: optional_params,
+        body,
+    })
+}
+
+fn ts_convert_anon_function(node: &tree_sitter::Node, text: &[u8]) -> Result<Fn, String> {
+    let (params, optional_params) = ts_convert_parameters(node, text)?;
+
+    let block = ts_find_child_by_kind(node, "block")
+        .ok_or_else(|| "anonymous_function has no block".to_string())?;
+    let body = ts_convert_block(&block, text)?;
+
+    Ok(Fn {
+        ident: None,
+        pos_args_required: params,
+        pos_args_optional: optional_params,
+        body,
+    })
+}
+
+fn ts_convert_parameters(node: &tree_sitter::Node, text: &[u8]) -> Result<(Vec<Vec<u8>>, Vec<(Vec<u8>, ExprNode)>), String> {
+    let mut params = Vec::new();
+    let mut optional_params = Vec::new();
+
+    if let Some(param_list) = ts_find_child_by_kind(node, "parameter_list") {
+        let children = ts_named_children(&param_list);
+        for child in &children {
+            match child.kind() {
+                "required_parameter" => {
+                    let inner = child.named_child(0)
+                        .ok_or_else(|| "required_parameter has no identifier".to_string())?;
+                    params.push(ts_node_text(&inner, text).to_vec());
+                }
+                "optional_parameter" => {
+                    let opt_children = ts_named_children(child);
+                    if opt_children.len() < 2 {
+                        return Err("optional_parameter needs ident and default".to_string());
+                    }
+                    let ident = ts_node_text(&opt_children[0], text).to_vec();
+                    let default_expr = ts_convert_expression(&opt_children[1], text)?;
+                    optional_params.push((ident, default_expr));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    Ok((params, optional_params))
+}
+
+fn ts_convert_struct(node: &tree_sitter::Node, text: &[u8]) -> Result<Struct, String> {
+    let name_node = node.child_by_field_name("name")
+        .ok_or_else(|| "struct_definition has no name".to_string())?;
+    let ident = ts_node_text(&name_node, text).to_vec();
+
+    let mut members_required = Vec::new();
+    let mut members_optional = Vec::new();
+    let mut methods = Vec::new();
+
+    let children = ts_named_children(node);
+    for child in &children {
+        match child.kind() {
+            "member_list" => {
+                let member_children = ts_named_children(child);
+                for mc in &member_children {
+                    match mc.kind() {
+                        "required_member" => {
+                            let inner = mc.named_child(0)
+                                .ok_or_else(|| "required_member has no identifier".to_string())?;
+                            members_required.push(ts_node_text(&inner, text).to_vec());
+                        }
+                        "optional_member" => {
+                            let opt_children = ts_named_children(mc);
+                            if opt_children.len() < 2 {
+                                return Err("optional_member needs ident and default".to_string());
+                            }
+                            let mident = ts_node_text(&opt_children[0], text).to_vec();
+                            let default_expr = ts_convert_expression(&opt_children[1], text)?;
+                            members_optional.push((mident, default_expr));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            "method_definition" => {
+                methods.push(ts_convert_method(child, text)?);
+            }
+            _ => {} // skip name identifier etc.
+        }
+    }
+
+    Ok(Struct {
+        ident,
+        members_required,
+        members_optional,
+        methods,
+    })
+}
+
+fn ts_convert_method(node: &tree_sitter::Node, text: &[u8]) -> Result<Fn, String> {
+    let name_node = node.child_by_field_name("name")
+        .ok_or_else(|| "method_definition has no name".to_string())?;
+    let ident = Some(ts_node_text(&name_node, text).to_vec());
+
+    let (params, optional_params) = ts_convert_parameters(node, text)?;
+
+    let block = ts_find_child_by_kind(node, "block")
+        .ok_or_else(|| "method_definition has no block".to_string())?;
+    let body = ts_convert_block(&block, text)?;
+
+    Ok(Fn {
+        ident,
+        pos_args_required: params,
+        pos_args_optional: optional_params,
+        body,
+    })
+}
+
+fn ts_find_child_by_kind<'a>(node: &tree_sitter::Node<'a>, kind: &str) -> Option<tree_sitter::Node<'a>> {
+    for i in 0..node.named_child_count() {
+        if let Some(child) = node.named_child(i) {
+            if child.kind() == kind {
+                return Some(child);
+            }
+        }
+    }
+    None
 }
 
 #[derive(Debug)]

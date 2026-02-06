@@ -1,0 +1,12 @@
+{
+  "name": "tree-sitter-shimlang",
+  "version": "0.1.0",
+  "description": "Tree-sitter grammar for the Shimlang scripting language",
+  "main": "bindings/node",
+  "dependencies": {
+    "nan": "^2.20.0"
+  },
+  "devDependencies": {
+    "tree-sitter-cli": "^0.25.3"
+  }
+}
