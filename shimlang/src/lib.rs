@@ -6018,7 +6018,7 @@ impl<'a> GC<'a> {
                         if self.mask.is_set(pos) {
                             continue;
                         }
-                        // Mark the ShimFn struct (1 word for pc + name Word)
+                        // Mark the ShimFn struct (8 bytes = 1 word: u32 pc + Word name)
                         self.mask.set(pos);
                         
                         // Mark the function name string
@@ -6786,8 +6786,8 @@ impl Interpreter {
                 val if val == ByteCode::CreateFn as u8 => {
                     let instruction_offset = ((bytes[pc + 1] as u32) << 8) + bytes[pc + 2] as u32;
                     let fn_pc = pc as u32 - instruction_offset;
-                    // Use empty name for anonymous functions
-                    let fn_val = self.mem.alloc_fn(fn_pc, b"");
+                    // Use descriptive name for anonymous functions
+                    let fn_val = self.mem.alloc_fn(fn_pc, b"<anonymous>");
                     stack.push(fn_val);
                     pc += 2;
                 }
