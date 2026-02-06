@@ -1932,13 +1932,14 @@ impl MMU {
         }
     }
 
-    unsafe fn set<T>(&mut self, word: Word, value: T) {
+    unsafe fn alloc_and_set<T>(&mut self, value: T, _debug_name: &str) -> Word {
         let word_count = Word((std::mem::size_of::<T>() as u32).div_ceil(8).into());
-        // Ensure we have enough space (this assumes word was allocated with sufficient space)
+        let position = alloc!(self, word_count, _debug_name);
         unsafe {
-            let ptr: *mut T = std::mem::transmute(&mut self.mem[usize::from(word.0)]);
+            let ptr: *mut T = std::mem::transmute(&mut self.mem[usize::from(position.0)]);
             ptr.write(value);
         }
+        position
     }
 
     fn alloc_str_raw(&mut self, contents: &[u8]) -> Word {
@@ -2196,11 +2197,9 @@ impl Environment {
         let dict_word = mem.alloc_dict_raw();
         
         // Allocate an EnvScope wrapper
-        let word_count = Word((std::mem::size_of::<EnvScope>() as u32).div_ceil(8).into());
-        let scope_pos = alloc!(mem, word_count, "EnvScope");
-        unsafe {
-            mem.set(scope_pos, EnvScope::new(dict_word));
-        }
+        let scope_pos = unsafe {
+            mem.alloc_and_set(EnvScope::new(dict_word), "EnvScope")
+        };
         
         Self {
             current_scope: scope_pos.0.into(),
@@ -2305,38 +2304,16 @@ impl Environment {
     fn get(&self, interpreter: &mut Interpreter, key: &[u8]) -> Option<ShimValue> {
         let key_val = interpreter.mem.alloc_str(key);
         
-        // Find the scope and get the value
-        let mut current_scope_pos = self.current_scope;
-        
-        loop {
-            if current_scope_pos == 0 {
-                break;
-            }
-            
-            // Get the EnvScope and extract necessary data
-            let (dict_word, parent) = unsafe {
-                let scope: &EnvScope = interpreter.mem.get(Word(current_scope_pos.into()));
-                (scope.dict, scope.parent)
-            };
-            
-            // Try to get the key from this dict using raw pointer
-            let result = unsafe {
+        // Use find_key_scope to locate the key
+        if let Some((_, dict_word)) = self.find_key_scope(interpreter, key_val) {
+            // Get the value from the dict using raw pointer
+            unsafe {
                 let dict_ptr: *const NewShimDict = interpreter.mem.mem[usize::from(dict_word.0)..].as_ptr() as *const NewShimDict;
-                (*dict_ptr).get(interpreter, key_val)
-            };
-            
-            match result {
-                Ok(value) => {
-                    return Some(value);
-                },
-                Err(_) => {
-                    // Not in this dict, try parent
-                    current_scope_pos = parent.into();
-                }
+                (*dict_ptr).get(interpreter, key_val).ok()
             }
+        } else {
+            None
         }
-        
-        None
     }
 
     fn contains_key(&self, interpreter: &mut Interpreter, key: &[u8]) -> bool {
@@ -2358,11 +2335,12 @@ impl Environment {
         let dict_word = mem.alloc_dict_raw();
         
         // Allocate a new EnvScope with parent pointing to current scope
-        let word_count = Word((std::mem::size_of::<EnvScope>() as u32).div_ceil(8).into());
-        let scope_pos = alloc!(mem, word_count, "EnvScope");
-        unsafe {
-            mem.set(scope_pos, EnvScope::new_with_parent(dict_word, self.current_scope.into(), current_depth));
-        }
+        let scope_pos = unsafe {
+            mem.alloc_and_set(
+                EnvScope::new_with_parent(dict_word, self.current_scope.into(), current_depth),
+                "EnvScope"
+            )
+        };
         
         // Update current scope to the new one
         self.current_scope = scope_pos.0.into();
