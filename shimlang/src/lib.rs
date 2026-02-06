@@ -2237,7 +2237,10 @@ impl Environment {
         
         // Allocate key string and insert
         let key_val = interpreter.mem.alloc_str(key.as_slice());
-        dict.set(interpreter, key_val, val).unwrap();
+        // This should always succeed for new insertions in environment
+        if let Err(e) = dict.set(interpreter, key_val, val) {
+            panic!("Failed to insert key into environment: {}", e);
+        }
     }
 
     fn update(&mut self, interpreter: &mut Interpreter, key: &[u8], val: ShimValue) -> Result<(), String> {
@@ -6428,9 +6431,6 @@ impl Interpreter {
             
             // Move to parent scope
             let parent: u32 = scope.parent.into();
-            if parent == 0 {
-                break;
-            }
             current_scope_pos = parent;
             idx += 1;
         }
@@ -6470,9 +6470,6 @@ impl Interpreter {
             
             // Move to parent scope
             let parent: u32 = scope.parent.into();
-            if parent == 0 {
-                break;
-            }
             current_scope_pos = parent;
         }
         
