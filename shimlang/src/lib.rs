@@ -3267,6 +3267,56 @@ impl NewShimDict {
         self.entry_count += 1;
         entry_idx as usize
     }
+
+    fn shrink_to_fit(&mut self, interpreter: &mut Interpreter) {
+        if self.used == 0 {
+            // Empty dict - reset to minimal size
+            let old_size = self.index_size();
+            let old_capacity = self.capacity();
+            
+            if old_size == 0 {
+                return; // Already minimal
+            }
+            
+            self.size_pow = 0;
+            self.clear_and_alloc_indices(interpreter, old_size);
+            
+            // Free the old entries
+            let free_word_count = Word((old_capacity * 3).into());
+            interpreter.mem.free(Word(self.entries), free_word_count);
+            self.entries = 0.into();
+            self.entry_count = 0;
+            return;
+        }
+        
+        // Calculate the optimal size_pow for the current number of used entries
+        // We want capacity to be at least used, and index_size = capacity * 3 / 2
+        // Since index_size must be a power of 2, we find the smallest power of 2
+        // such that (2^size_pow * 2 / 3) >= used
+        let min_capacity = self.used as usize;
+        let mut optimal_size_pow = 3; // Start with minimum non-zero size_pow
+        
+        while optimal_size_pow < 32 {
+            let test_index_size = 1 << optimal_size_pow;
+            let test_capacity = (test_index_size * 2) / 3;
+            if test_capacity >= min_capacity {
+                break;
+            }
+            optimal_size_pow += 1;
+        }
+        
+        // If the optimal size is the same or larger than current, no need to shrink
+        if optimal_size_pow >= self.size_pow {
+            return;
+        }
+        
+        let old_size = self.index_size();
+        let old_capacity = self.capacity();
+        self.size_pow = optimal_size_pow;
+        
+        self.clear_and_alloc_indices(interpreter, old_size);
+        self.realloc_entries(interpreter, old_capacity);
+    }
 }
 
 struct ShimList {
@@ -4029,6 +4079,19 @@ fn shim_dict_len(
     unpacker.end()?;
 
     Ok(ShimValue::Integer(dict.len() as i32))
+}
+
+fn shim_dict_shrink_to_fit(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let binding = unpacker.required(b"obj")?;
+    let dict = binding.dict_mut(interpreter)?;
+    unpacker.end()?;
+
+    dict.shrink_to_fit(interpreter);
+    Ok(ShimValue::None)
 }
 
 fn shim_str_len(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
@@ -4986,6 +5049,7 @@ impl ShimValue {
                     b"keys" => shim_dict_keys,
                     b"values" => shim_dict_values,
                     b"items" => shim_dict_items,
+                    b"shrink_to_fit" => shim_dict_shrink_to_fit,
                     _ => return Err(format!("No ident {:?} on dict", debug_u8s(ident))),
                 };
                 Ok(interpreter.mem.alloc_bound_native_fn(self, func))
