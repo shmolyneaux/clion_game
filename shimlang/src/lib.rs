@@ -1980,6 +1980,25 @@ impl MMU {
         ShimValue::List(position)
     }
 
+    fn alloc_fn(&mut self, pc: u32, name: &[u8]) -> ShimValue {
+        let word_count = Word((std::mem::size_of::<ShimFn>() as u32).div_ceil(8).into());
+        let position = alloc!(self, word_count, &format!("Fn `{}`", debug_u8s(name)));
+        
+        // Allocate the name string first
+        let name_val = self.alloc_str(name);
+        let name_pos = match name_val {
+            ShimValue::String(pos) => pos,
+            _ => panic!("alloc_str should return String"),
+        };
+        
+        unsafe {
+            let ptr: *mut ShimFn =
+                std::mem::transmute(&mut self.mem[usize::from(position.0)]);
+            ptr.write(ShimFn { pc, name: name_pos });
+        }
+        ShimValue::Fn(position)
+    }
+
     fn alloc_native<T: ShimNative>(&mut self, val: T) -> ShimValue {
         assert!(std::mem::size_of::<Box<dyn ShimNative>>() == 16);
         let word_count = Word(2.into());
@@ -2223,13 +2242,13 @@ pub enum ShimValue {
     Integer(i32),
     Float(f32),
     Bool(bool),
-    // This is a program counter, TODO should be a memory position?
-    Fn(u32),
+    // Memory position pointing to ShimFn structure
+    Fn(Word),
     BoundMethod(
         // Object
         Word,
-        // Fn, TODO: should be a memory position instead of PC
-        u32,
+        // Fn memory position pointing to ShimFn structure
+        Word,
     ),
     BoundNativeMethod(
         // ShimValue followed by NativeFn
@@ -3343,6 +3362,18 @@ impl ShimList {
 }
 const _: () = { assert!(std::mem::size_of::<ShimList>() == 8); };
 
+// Stores function information in interpreter memory
+struct ShimFn {
+    // Program counter where the function code begins
+    pc: u32,
+    // Memory position of the function name (stored as string)
+    name: Word,
+}
+
+const _: () = {
+    assert!(std::mem::size_of::<ShimFn>() == 8);
+};
+
 impl StructDef {
     fn find(&self, ident: &[u8]) -> Option<StructAttribute> {
         for (attr, loc) in self.lookup.iter() {
@@ -4298,11 +4329,15 @@ impl ShimValue {
     ) -> Result<CallResult, String> {
         match self {
             ShimValue::None => Err(format!("Can't call None as a function")),
-            ShimValue::Fn(pc) => Ok(CallResult::PC(*pc)),
-            ShimValue::BoundMethod(pos, pc) => {
+            ShimValue::Fn(fn_pos) => {
+                let shim_fn: &ShimFn = unsafe { interpreter.mem.get(*fn_pos) };
+                Ok(CallResult::PC(shim_fn.pc))
+            }
+            ShimValue::BoundMethod(pos, fn_pos) => {
                 // push struct pos to start of arg list then return the pc of the method
                 args.args.insert(0, ShimValue::Struct(*pos));
-                Ok(CallResult::PC(*pc))
+                let shim_fn: &ShimFn = unsafe { interpreter.mem.get(*fn_pos) };
+                Ok(CallResult::PC(shim_fn.pc))
             }
             ShimValue::BoundNativeMethod(pos) => {
                 let obj: &ShimValue = unsafe { interpreter.mem.get(*pos) };
@@ -4874,7 +4909,13 @@ impl ShimValue {
                                     Ok(*interpreter.mem.get(*pos + *offset as u32 + 1))
                                 }
                                 StructAttribute::MethodDefPC(pc) => {
-                                    Ok(ShimValue::BoundMethod(*pos, *pc))
+                                    // Create a function object for the method
+                                    let fn_val = interpreter.mem.alloc_fn(*pc, ident);
+                                    let fn_pos = match fn_val {
+                                        ShimValue::Fn(pos) => pos,
+                                        _ => panic!("alloc_fn should return Fn"),
+                                    };
+                                    Ok(ShimValue::BoundMethod(*pos, fn_pos))
                                 }
                             };
                         }
@@ -4902,8 +4943,8 @@ impl ShimValue {
                                     ident, self
                                 )),
                                 StructAttribute::MethodDefPC(pc) => {
-                                    // Return the method
-                                    Ok(ShimValue::Fn(*pc))
+                                    // Return the method as a function object
+                                    Ok(interpreter.mem.alloc_fn(*pc, ident))
                                 }
                             };
                         }
@@ -5971,7 +6012,19 @@ impl<'a> GC<'a> {
         unsafe {
             while !vals.is_empty() {
                 match vals.pop().unwrap() {
-                    ShimValue::Integer(_) | ShimValue::Float(_) | ShimValue::Bool(_) | ShimValue::Unit | ShimValue::None | ShimValue::Fn(_) | ShimValue::Uninitialized => (),
+                    ShimValue::Integer(_) | ShimValue::Float(_) | ShimValue::Bool(_) | ShimValue::Unit | ShimValue::None | ShimValue::Uninitialized => (),
+                    ShimValue::Fn(fn_pos) => {
+                        let pos: usize = fn_pos.into();
+                        if self.mask.is_set(pos) {
+                            continue;
+                        }
+                        // Mark the ShimFn struct (1 word for pc + name Word)
+                        self.mask.set(pos);
+                        
+                        // Mark the function name string
+                        let shim_fn: &ShimFn = self.mem.get(fn_pos);
+                        vals.push(ShimValue::String(shim_fn.name));
+                    },
                     ShimValue::List(pos) => {
                         let pos: usize = pos.into();
                         let lst: &ShimList = self.mem.get(pos.into());
@@ -6075,9 +6128,12 @@ impl<'a> GC<'a> {
 
                         vals.extend(ptr.gc_vals());
                     },
-                    ShimValue::BoundMethod(pos, _pc) => {
+                    ShimValue::BoundMethod(pos, fn_pos) => {
+                        // Mark the bound struct
                         let val = ShimValue::Struct(pos);
                         vals.push(val);
+                        // Mark the function
+                        vals.push(ShimValue::Fn(fn_pos));
                     },
                     ShimValue::BoundNativeMethod(pos) => {
                         let pos: usize = pos.into();
@@ -6729,7 +6785,10 @@ impl Interpreter {
                 }
                 val if val == ByteCode::CreateFn as u8 => {
                     let instruction_offset = ((bytes[pc + 1] as u32) << 8) + bytes[pc + 2] as u32;
-                    stack.push(ShimValue::Fn(pc as u32 - instruction_offset));
+                    let fn_pc = pc as u32 - instruction_offset;
+                    // Use empty name for anonymous functions
+                    let fn_val = self.mem.alloc_fn(fn_pc, b"");
+                    stack.push(fn_val);
                     pc += 2;
                 }
                 val if val == ByteCode::CreateStruct as u8 => {
