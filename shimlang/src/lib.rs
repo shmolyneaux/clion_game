@@ -2804,6 +2804,10 @@ impl DictEntry {
     }
 }
 
+// Minimum non-zero size_pow for NewShimDict. When the dict grows from empty,
+// it starts with this size_pow value (2^3 = 8 index slots, capacity of ~5 entries).
+const MIN_NON_ZERO_SIZE_POW: u8 = 3;
+
 struct NewShimDict {
     // Size of the index array, always a power of 2
     size_pow: u8,
@@ -2928,7 +2932,7 @@ impl NewShimDict {
         let old_size = self.index_size();
         let old_capacity = self.capacity();
         self.size_pow = if old_size == 0 {
-            3
+            MIN_NON_ZERO_SIZE_POW
         } else {
             self.size_pow + 1
         };
@@ -3294,9 +3298,12 @@ impl NewShimDict {
         // Since index_size must be a power of 2, we find the smallest power of 2
         // such that (2^size_pow * 2 / 3) >= used
         let min_capacity = self.used as usize;
-        let mut optimal_size_pow = 3; // Start with minimum non-zero size_pow
+        // Start with MIN_NON_ZERO_SIZE_POW, which matches expand_capacity's initial size
+        let mut optimal_size_pow = MIN_NON_ZERO_SIZE_POW;
         
-        while optimal_size_pow < 32 {
+        // Upper bound of 31 prevents undefined behavior from 1 << 32 and ensures
+        // we stay within u32 limits for entry_count/used fields
+        while optimal_size_pow < 31 {
             let test_index_size = 1 << optimal_size_pow;
             let test_capacity = (test_index_size * 2) / 3;
             if test_capacity >= min_capacity {
