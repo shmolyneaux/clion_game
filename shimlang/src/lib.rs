@@ -3044,7 +3044,16 @@ impl NewShimDict {
     }
 
     fn capacity(&self) -> usize {
-        ((self.index_size() * 2) / 3) as usize
+        Self::capacity_for_size_pow(self.size_pow)
+    }
+
+    fn capacity_for_size_pow(size_pow: u8) -> usize {
+        if size_pow == 0 {
+            0
+        } else {
+            let index_size = 1 << size_pow;
+            ((index_size * 2) / 3) as usize
+        }
     }
 
     fn index_size(&self) -> usize {
@@ -3302,10 +3311,10 @@ impl NewShimDict {
         let mut optimal_size_pow = MIN_NON_ZERO_SIZE_POW;
         
         // Upper bound of 31 prevents undefined behavior from 1 << 32 and ensures
-        // we stay within u32 limits for entry_count/used fields
-        while optimal_size_pow < 31 {
-            let test_index_size = 1 << optimal_size_pow;
-            let test_capacity = (test_index_size * 2) / 3;
+        // we stay within u32 limits for entry_count/used fields.
+        // Loop condition is <= 31 to allow checking if size_pow=31 is sufficient.
+        while optimal_size_pow <= 31 {
+            let test_capacity = Self::capacity_for_size_pow(optimal_size_pow);
             if test_capacity >= min_capacity {
                 break;
             }
