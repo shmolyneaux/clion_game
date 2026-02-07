@@ -1998,7 +1998,7 @@ impl MMU {
         ShimValue::List(position)
     }
 
-    fn alloc_fn(&mut self, pc: u32, name: &[u8]) -> ShimValue {
+    fn alloc_fn(&mut self, pc: u32, name: &[u8], captured_scope: u32) -> ShimValue {
         let word_count = Word((std::mem::size_of::<ShimFn>() as u32).div_ceil(8).into());
         let position = alloc!(self, word_count, &format!("Fn `{}`", debug_u8s(name)));
         
@@ -2008,7 +2008,7 @@ impl MMU {
         unsafe {
             let ptr: *mut ShimFn =
                 std::mem::transmute(&mut self.mem[usize::from(position.0)]);
-            ptr.write(ShimFn { pc, name: name_pos });
+            ptr.write(ShimFn { pc, name: name_pos, captured_scope });
         }
         ShimValue::Fn(position)
     }
@@ -2201,6 +2201,12 @@ impl Environment {
         
         Self {
             current_scope: scope_pos.0.into(),
+        }
+    }
+
+    pub fn with_scope(captured_scope: u32) -> Self {
+        Self {
+            current_scope: captured_scope,
         }
     }
 
@@ -2774,8 +2780,8 @@ impl ShimNative for RangeIterator {
                             itr.current = new_current;
                             Ok(result)
                         }
-                        CallResult::PC(pc) => {
-                            let mut new_env = Environment::new(&mut interpreter.mem);
+                        CallResult::PC(pc, captured_scope) => {
+                            let mut new_env = Environment::with_scope(captured_scope);
                             let new_current = interpreter.execute_bytecode_extended(
                                 &mut (pc as usize),
                                 pending_args,
@@ -3577,10 +3583,12 @@ struct ShimFn {
     pc: u32,
     // Memory position of the function name (stored as string)
     name: Word,
+    // The environment scope where this function was defined (for closures)
+    captured_scope: u32,
 }
 
 const _: () = {
-    assert!(std::mem::size_of::<ShimFn>() == 8);
+    assert!(std::mem::size_of::<ShimFn>() == 12);
 };
 
 impl StructDef {
@@ -3606,7 +3614,7 @@ impl StructDef {
 #[derive(Debug)]
 enum CallResult {
     ReturnValue(ShimValue),
-    PC(u32),
+    PC(u32, u32), // PC and captured_scope
 }
 
 fn shim_dict(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
@@ -3710,8 +3718,8 @@ fn shim_list_sort(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shi
             args.args.push(item);
             match key.call(interpreter, &mut args)? {
                 CallResult::ReturnValue(val) => val,
-                CallResult::PC(pc) => {
-                    let mut new_env = Environment::new(&mut interpreter.mem);
+                CallResult::PC(pc, captured_scope) => {
+                    let mut new_env = Environment::with_scope(captured_scope);
                     interpreter.execute_bytecode_extended(
                         &mut (pc as usize),
                         args,
@@ -3840,8 +3848,8 @@ fn shim_list_filter(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<S
                 CallResult::ReturnValue(val) => {
                     val
                 },
-                CallResult::PC(pc) => {
-                    let mut new_env = Environment::new(&mut interpreter.mem);
+                CallResult::PC(pc, captured_scope) => {
+                    let mut new_env = Environment::with_scope(captured_scope);
                     let val = interpreter.execute_bytecode_extended(
                         &mut (pc as usize),
                         args,
@@ -3880,8 +3888,8 @@ fn shim_list_map(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shim
             CallResult::ReturnValue(val) => {
                 val
             },
-            CallResult::PC(pc) => {
-                let mut new_env = Environment::new(&mut interpreter.mem);
+            CallResult::PC(pc, captured_scope) => {
+                let mut new_env = Environment::with_scope(captured_scope);
                 let val = interpreter.execute_bytecode_extended(
                     &mut (pc as usize),
                     args,
@@ -3948,8 +3956,8 @@ fn shim_list_extend(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<S
     let iterator = iterable.get_attr(interpreter, b"iter")?.call(interpreter, &mut iter_args)?;
     let iterator = match iterator {
         CallResult::ReturnValue(val) => val,
-        CallResult::PC(pc) => {
-            let mut new_env = Environment::new(&mut interpreter.mem);
+        CallResult::PC(pc, captured_scope) => {
+            let mut new_env = Environment::with_scope(captured_scope);
             interpreter.execute_bytecode_extended(
                 &mut (pc as usize),
                 iter_args,
@@ -3967,8 +3975,8 @@ fn shim_list_extend(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<S
         
         let result = match next_method.call(interpreter, &mut next_args)? {
             CallResult::ReturnValue(val) => val,
-            CallResult::PC(pc) => {
-                let mut new_env = Environment::new(&mut interpreter.mem);
+            CallResult::PC(pc, captured_scope) => {
+                let mut new_env = Environment::with_scope(captured_scope);
                 interpreter.execute_bytecode_extended(
                     &mut (pc as usize),
                     next_args,
@@ -4558,13 +4566,13 @@ impl ShimValue {
             ShimValue::None => Err(format!("Can't call None as a function")),
             ShimValue::Fn(fn_pos) => {
                 let shim_fn: &ShimFn = unsafe { interpreter.mem.get(*fn_pos) };
-                Ok(CallResult::PC(shim_fn.pc))
+                Ok(CallResult::PC(shim_fn.pc, shim_fn.captured_scope))
             }
             ShimValue::BoundMethod(pos, fn_pos) => {
                 // push struct pos to start of arg list then return the pc of the method
                 args.args.insert(0, ShimValue::Struct(*pos));
                 let shim_fn: &ShimFn = unsafe { interpreter.mem.get(*fn_pos) };
-                Ok(CallResult::PC(shim_fn.pc))
+                Ok(CallResult::PC(shim_fn.pc, shim_fn.captured_scope))
             }
             ShimValue::BoundNativeMethod(pos) => {
                 let obj: &ShimValue = unsafe { interpreter.mem.get(*pos) };
@@ -4581,7 +4589,7 @@ impl ShimValue {
                     // but for now it simplifies things to push all the special cases to __init__
                     if let Some(StructAttribute::MethodDef(fn_pos)) = struct_def.find(b"__init__") {
                         let shim_fn: &ShimFn = unsafe { interpreter.mem.get(fn_pos) };
-                        return Ok(CallResult::PC(shim_fn.pc));
+                        return Ok(CallResult::PC(shim_fn.pc, shim_fn.captured_scope));
                     } else {
                         return Err(format!("INTERNAL: no __init__ on StructDef"));
                     }
@@ -6569,7 +6577,7 @@ impl Interpreter {
         let mut stack: Vec<ShimValue> = Vec::new();
 
 
-        // This is the (PC, loop_info, scope_count, fn_optional_param_names,
+        // This is the (PC, loop_info, scope_count, caller_scope, fn_optional_param_names,
         // fn_optional_param_name_idx) call stack
         let mut stack_frame: Vec<(
             // PC
@@ -6578,6 +6586,8 @@ impl Interpreter {
             Vec<(usize, usize, usize)>,
             // scope_count
             usize,
+            // caller_scope
+            u32,
             // fn_optional_param_names
             Vec<Ident>,
             // fn_optional_param_name_idx
@@ -6605,15 +6615,18 @@ impl Interpreter {
                         format_script_err(self.program.spans[pc], &self.program.script, &err_str)
                     })? {
                         CallResult::ReturnValue(res) => stack.push(res),
-                        CallResult::PC(new_pc) => {
+                        CallResult::PC(new_pc, captured_scope) => {
                             stack_frame.push((
                                 pc + 1,
                                 loop_info.clone(),
                                 env.scope_depth(&self.mem),
+                                env.current_scope,
                                 fn_optional_param_names.clone(),
                                 fn_optional_param_name_idx,
                             ));
                             loop_info = Vec::new();
+                            // Restore the captured environment and push a new scope for function locals
+                            env.current_scope = captured_scope;
                             env.push_scope(&mut self.mem);
                             pc = new_pc as usize;
                             continue;
@@ -6976,15 +6989,18 @@ impl Interpreter {
                         format_script_err(self.program.spans[pc], &self.program.script, &err_str)
                     })? {
                         CallResult::ReturnValue(res) => stack.push(res),
-                        CallResult::PC(new_pc) => {
+                        CallResult::PC(new_pc, captured_scope) => {
                             stack_frame.push((
                                 pc + 3,
                                 loop_info.clone(),
                                 env.scope_depth(&self.mem),
+                                env.current_scope,
                                 fn_optional_param_names.clone(),
                                 fn_optional_param_name_idx,
                             ));
                             loop_info = Vec::new();
+                            // Restore the captured environment and push a new scope for function locals
+                            env.current_scope = captured_scope;
                             env.push_scope(&mut self.mem);
                             pc = new_pc as usize;
                             continue;
@@ -7018,16 +7034,20 @@ impl Interpreter {
                     // The value at the top of the stack is the return value of
                     // the function, so we just need to pop the PC
                     let scope_count;
+                    let caller_scope;
                     (
                         pc,
                         loop_info,
                         scope_count,
+                        caller_scope,
                         fn_optional_param_names,
                         fn_optional_param_name_idx,
                     ) = stack_frame.pop().expect("stack frame to return to");
                     while env.scope_depth(&self.mem) > scope_count {
                         env.pop_scope(&self.mem).unwrap();
                     }
+                    // Restore the caller's environment scope
+                    env.current_scope = caller_scope;
                     continue;
                 }
                 val if val == ByteCode::JmpUp as u8 => {
@@ -7078,7 +7098,8 @@ impl Interpreter {
                     let instruction_offset = ((bytes[pc + 1] as u32) << 8) + bytes[pc + 2] as u32;
                     let fn_pc = pc as u32 - instruction_offset;
                     // Use descriptive name for anonymous functions
-                    let fn_val = self.mem.alloc_fn(fn_pc, b"<anonymous>");
+                    // Capture the current environment scope
+                    let fn_val = self.mem.alloc_fn(fn_pc, b"<anonymous>", env.current_scope);
                     stack.push(fn_val);
                     pc += 2;
                 }
@@ -7118,7 +7139,8 @@ impl Interpreter {
                         let ident = &bytes[idx + 1..idx + 1 + ident_len as usize];
                         
                         // Allocate a function object for this method
-                        let fn_val = self.mem.alloc_fn(method_pc as u32, ident);
+                        // Methods capture the environment where the struct is defined
+                        let fn_val = self.mem.alloc_fn(method_pc as u32, ident, env.current_scope);
                         let fn_pos = match fn_val {
                             ShimValue::Fn(pos) => pos,
                             _ => panic!("alloc_fn should return Fn"),
