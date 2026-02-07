@@ -1943,16 +1943,13 @@ impl MMU {
     }
 
     fn alloc_str_raw(&mut self, contents: &[u8]) -> Word {
-        // Length + contents + padding
-        let total_len = 1 + contents.len().div_ceil(8);
+        let total_len = contents.len().div_ceil(8);
         let word_count = Word(total_len.into());
         let position = alloc!(self, word_count, &format!("str `{}`", debug_u8s(contents)));
 
-        self.mem[usize::from(position.0)] = contents.len() as u64;
-
         let bytes: &mut [u8] = unsafe {
             let u64_slice = &mut self.mem[
-                (1+usize::from(position.0))..
+                usize::from(position.0)..
                 (usize::from(position.0)+total_len)
             ];
             std::slice::from_raw_parts_mut(
@@ -2010,7 +2007,7 @@ impl MMU {
         unsafe {
             let ptr: *mut ShimFn =
                 std::mem::transmute(&mut self.mem[usize::from(position.0)]);
-            ptr.write(ShimFn { pc, name: name_pos, captured_scope });
+            ptr.write(ShimFn { pc, name_len: name.len() as u16, name: name_pos, captured_scope });
         }
         ShimValue::Fn(position)
     }
@@ -3590,6 +3587,8 @@ const _: () = { assert!(std::mem::size_of::<ShimList>() == 8); };
 struct ShimFn {
     // Program counter where the function code begins
     pc: u32,
+    // Length of the function name string
+    name_len: u16,
     // Memory position of the function name (stored as string)
     name: Word,
     // The environment scope where this function was defined (for closures)
@@ -3597,7 +3596,7 @@ struct ShimFn {
 }
 
 const _: () = {
-    assert!(std::mem::size_of::<ShimFn>() == 12);
+    assert!(std::mem::size_of::<ShimFn>() == 16);
 };
 
 impl StructDef {
@@ -4710,11 +4709,11 @@ impl ShimValue {
                 let len = *len as usize;
                 let offset = *offset as usize;
                 let position_usize = usize::from(*position);
-                let total_len: usize = 1 + (offset + len).div_ceil(8);
+                let total_len: usize = (offset + len).div_ceil(8);
 
                 let bytes: &[u8] = unsafe {
                     let u64_slice = &interpreter.mem.mem[
-                        (1+position_usize)..
+                        position_usize..
                         (position_usize+total_len)
                     ];
                     std::slice::from_raw_parts(
@@ -6266,8 +6265,7 @@ impl<'a> GC<'a> {
                         
                         // Mark the function name string
                         let shim_fn: &ShimFn = self.mem.get(fn_pos);
-                        let name_len = self.mem.mem[usize::from(shim_fn.name.0)] as u16;
-                        vals.push(ShimValue::String(name_len, 0, shim_fn.name.0));
+                        vals.push(ShimValue::String(shim_fn.name_len, 0, shim_fn.name.0));
                     },
                     ShimValue::List(pos) => {
                         let pos: usize = pos.into();
@@ -6286,7 +6284,7 @@ impl<'a> GC<'a> {
                         let offset = offset as usize;
                         let pos: usize = usize::from(pos);
                         // TODO: check this...
-                        for idx in pos..(pos + 1 + (offset + len).div_ceil(8)) {
+                        for idx in pos..(pos + (offset + len).div_ceil(8)) {
                             self.mask.set(idx);
                         }
                     },
@@ -6459,7 +6457,7 @@ impl Interpreter {
                             let len = key_len as usize;
                             let offset = key_offset as usize;
                             let bytes: &[u8] = std::slice::from_raw_parts(
-                                ((&self.mem.mem[1+usize::from(key_pos)]) as *const u64 as *const u8).add(offset),
+                                ((&self.mem.mem[usize::from(key_pos)]) as *const u64 as *const u8).add(offset),
                                 len,
                             );
                             bytes
