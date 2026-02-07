@@ -1969,6 +1969,7 @@ impl MMU {
     }
 
     fn alloc_str(&mut self, contents: &[u8]) -> ShimValue {
+        assert!(contents.len() <= u16::MAX as usize, "String length exceeds u16::MAX");
         let pos = self.alloc_str_raw(contents);
         ShimValue::String(contents.len() as u16, 0, pos.0)
     }
