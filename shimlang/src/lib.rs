@@ -1969,7 +1969,8 @@ impl MMU {
     }
 
     fn alloc_str(&mut self, contents: &[u8]) -> ShimValue {
-        ShimValue::String(self.alloc_str_raw(contents))
+        let pos = self.alloc_str_raw(contents);
+        ShimValue::String(contents.len() as u16, 0, pos.0)
     }
 
     fn alloc_dict_raw(&mut self) -> Word {
@@ -2402,7 +2403,14 @@ pub enum ShimValue {
     NativeFn(Word),
     // TODO: it seems like this should point to a more generic reference-counted
     // object type that all non-value types share
-    String(Word),
+    String(
+        // len
+        u16,
+        // byte offset within the 8-byte aligned word
+        u8,
+        // position (word index into memory)
+        u24,
+    ),
     List(Word),
     Dict(Word),
     StructDef(Word),
@@ -3802,7 +3810,7 @@ fn compare_values(interpreter: &mut Interpreter, a: &ShimValue, b: &ShimValue) -
                 Ok(Ordering::Equal)
             }
         },
-        (ShimValue::String(_), ShimValue::String(_)) => {
+        (ShimValue::String(..), ShimValue::String(..)) => {
             let str_a = a.string(interpreter)?;
             let str_b = b.string(interpreter)?;
             Ok(str_a.cmp(&str_b))
@@ -4287,7 +4295,7 @@ fn get_type_name(value: &ShimValue) -> &'static str {
         ShimValue::BoundMethod(_, _) => "bound method",
         ShimValue::BoundNativeMethod(_) => "bound native method",
         ShimValue::NativeFn(_) => "native function",
-        ShimValue::String(_) => "string",
+        ShimValue::String(..) => "string",
         ShimValue::List(_) => "list",
         ShimValue::Dict(_) => "dict",
         ShimValue::StructDef(_) => "struct definition",
@@ -4346,7 +4354,7 @@ fn shim_int(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue
         ShimValue::Integer(i) => Ok(ShimValue::Integer(i)),
         ShimValue::Float(f) => Ok(ShimValue::Integer(f as i32)),
         ShimValue::Bool(b) => Ok(ShimValue::Integer(if b { 1 } else { 0 })),
-        ShimValue::String(_) => {
+        ShimValue::String(..) => {
             let s = value.string(interpreter)?;
             parse_string_to::<i32>(s, "int").map(ShimValue::Integer)
         },
@@ -4363,7 +4371,7 @@ fn shim_float(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimVal
         ShimValue::Integer(i) => Ok(ShimValue::Float(i as f32)),
         ShimValue::Float(f) => Ok(ShimValue::Float(f)),
         ShimValue::Bool(b) => Ok(ShimValue::Float(if b { 1.0 } else { 0.0 })),
-        ShimValue::String(_) => {
+        ShimValue::String(..) => {
             let s = value.string(interpreter)?;
             parse_string_to::<f32>(s, "float").map(ShimValue::Float)
         },
@@ -4380,7 +4388,7 @@ fn shim_try_int(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimV
         ShimValue::Integer(i) => Some(ShimValue::Integer(i)),
         ShimValue::Float(f) => Some(ShimValue::Integer(f as i32)),
         ShimValue::Bool(b) => Some(ShimValue::Integer(if b { 1 } else { 0 })),
-        ShimValue::String(_) => {
+        ShimValue::String(..) => {
             let s = value.string(interpreter)?;
             parse_string_to::<i32>(s, "int")
                 .map(ShimValue::Integer)
@@ -4401,7 +4409,7 @@ fn shim_try_float(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shi
         ShimValue::Integer(i) => Some(ShimValue::Float(i as f32)),
         ShimValue::Float(f) => Some(ShimValue::Float(f)),
         ShimValue::Bool(b) => Some(ShimValue::Float(if b { 1.0 } else { 0.0 })),
-        ShimValue::String(_) => {
+        ShimValue::String(..) => {
             let s = value.string(interpreter)?;
             parse_string_to::<f32>(s, "float")
                 .map(ShimValue::Float)
@@ -4525,7 +4533,7 @@ impl ShimValue {
         let hashcode: u64 = match self {
             ShimValue::Integer(i) => fnv1a_hash(&i.to_be_bytes()),
             ShimValue::Float(f) => fnv1a_hash(&f.to_be_bytes()),
-            ShimValue::String(_) => {
+            ShimValue::String(..) => {
                 fnv1a_hash(&self.string(interpreter).unwrap().to_vec())
             },
             // We might want to salt these to reduce collisions with other type,
@@ -4697,18 +4705,20 @@ impl ShimValue {
 
     fn string(&self, interpreter: &Interpreter) -> Result<&[u8], String> {
         match self {
-            ShimValue::String(position) => {
-                let len = interpreter.mem.mem[usize::from(position.0)];
-                let total_len: usize = 1 + len.div_ceil(8) as usize;
+            ShimValue::String(len, offset, position) => {
+                let len = *len as usize;
+                let offset = *offset as usize;
+                let position_usize = usize::from(*position);
+                let total_len: usize = 1 + (offset + len).div_ceil(8);
 
                 let bytes: &[u8] = unsafe {
                     let u64_slice = &interpreter.mem.mem[
-                        (1+usize::from(position.0))..
-                        (usize::from(position.0)+total_len)
+                        (1+position_usize)..
+                        (position_usize+total_len)
                     ];
                     std::slice::from_raw_parts(
-                        u64_slice.as_ptr() as *const u8,
-                        len as usize,
+                        (u64_slice.as_ptr() as *const u8).add(offset),
+                        len,
                     )
                 };
                 Ok(bytes)
@@ -4728,7 +4738,7 @@ impl ShimValue {
 
     fn index(&self, interpreter: &mut Interpreter, index: &ShimValue) -> Result<ShimValue, String> {
         match (self, index) {
-            (ShimValue::String(_), ShimValue::Integer(index)) => {
+            (ShimValue::String(..), ShimValue::Integer(index)) => {
                 let index = *index as isize;
 
                 let val = self.string(interpreter)?;
@@ -4801,7 +4811,7 @@ impl ShimValue {
             ShimValue::Float(f) => format_float(*f),
             ShimValue::Bool(false) => "false".to_string(),
             ShimValue::Bool(true) => "true".to_string(),
-            ShimValue::String(_) => {
+            ShimValue::String(..) => {
                 String::from_utf8(self.string(interpreter).unwrap().to_vec()).expect("valid utf-8 string stored")
             },
             ShimValue::List(_) => {
@@ -4871,7 +4881,7 @@ impl ShimValue {
             ShimValue::Float(f) => Ok(*f != 0.0),
             ShimValue::Bool(false) => Ok(false),
             ShimValue::Bool(true) => Ok(true),
-            ShimValue::String(_) => {
+            ShimValue::String(..) => {
                 Ok(!self.expect_string(interpreter).is_empty())
             },
             ShimValue::List(_) => {
@@ -4887,7 +4897,7 @@ impl ShimValue {
             (ShimValue::Float(a), ShimValue::Float(b)) => Ok(CallResult::ReturnValue(ShimValue::Float(*a + *b))),
             (ShimValue::Integer(a), ShimValue::Float(b)) => Ok(CallResult::ReturnValue(ShimValue::Float((*a as f32) + *b))),
             (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(CallResult::ReturnValue(ShimValue::Float(*a + (*b as f32)))),
-            (a @ ShimValue::String(_), b @ ShimValue::String(_)) => {
+            (a @ ShimValue::String(..), b @ ShimValue::String(..)) => {
                 let a = a.string(interpreter)?;
                 let b = b.string(interpreter)?;
 
@@ -4923,7 +4933,7 @@ impl ShimValue {
             (ShimValue::Bool(a), ShimValue::Bool(b)) => Ok(a == b),
             (ShimValue::Float(a), ShimValue::Float(b)) => Ok(a == b),
             (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(a == b),
-            (a @ ShimValue::String(_), b @ ShimValue::String(_)) => {
+            (a @ ShimValue::String(..), b @ ShimValue::String(..)) => {
                 let a = a.string(interpreter)?;
                 let b = b.string(interpreter)?;
                 Ok(a == b)
@@ -4998,7 +5008,7 @@ impl ShimValue {
             (ShimValue::Integer(a), ShimValue::Float(b)) => Ok(ShimValue::Bool((*a as f32) > *b)),
             (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(*a > (*b as f32))),
             (ShimValue::None, ShimValue::None) => Ok(ShimValue::Bool(false)),
-            (ShimValue::String(_), ShimValue::String(_)) => {
+            (ShimValue::String(..), ShimValue::String(..)) => {
                 Ok(ShimValue::Bool(self.string(interpreter)? > other.string(interpreter)?))
             },
             (ShimValue::List(_), ShimValue::List(_)) => {
@@ -5020,7 +5030,7 @@ impl ShimValue {
             (ShimValue::Integer(a), ShimValue::Float(b)) => Ok(ShimValue::Bool((*a as f32) >= *b)),
             (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(*a >= (*b as f32))),
             (ShimValue::None, ShimValue::None) => Ok(ShimValue::Bool(true)),
-            (ShimValue::String(_), ShimValue::String(_)) => {
+            (ShimValue::String(..), ShimValue::String(..)) => {
                 Ok(ShimValue::Bool(self.string(interpreter)? >= other.string(interpreter)?))
             },
             (ShimValue::List(_), ShimValue::List(_)) => {
@@ -5043,7 +5053,7 @@ impl ShimValue {
             (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(a < b)),
             (ShimValue::Integer(a), ShimValue::Float(b)) => Ok(ShimValue::Bool((*a as f32) < *b)),
             (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(*a < (*b as f32))),
-            (ShimValue::String(_), ShimValue::String(_)) => {
+            (ShimValue::String(..), ShimValue::String(..)) => {
                 Ok(ShimValue::Bool(self.string(interpreter)? < other.string(interpreter)?))
             },
             (ShimValue::None, ShimValue::None) => Ok(ShimValue::Bool(false)),
@@ -5066,7 +5076,7 @@ impl ShimValue {
             (ShimValue::Integer(a), ShimValue::Float(b)) => Ok(ShimValue::Bool((*a as f32) <= *b)),
             (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(*a <= (*b as f32))),
             (ShimValue::None, ShimValue::None) => Ok(ShimValue::Bool(true)),
-            (ShimValue::String(_), ShimValue::String(_)) => {
+            (ShimValue::String(..), ShimValue::String(..)) => {
                 Ok(ShimValue::Bool(self.string(interpreter)? <= other.string(interpreter)?))
             },
             (ShimValue::List(_), ShimValue::List(_)) => {
@@ -5183,7 +5193,7 @@ impl ShimValue {
                 }
                 Err(format!("Ident {:?} not found for {:?}", debug_u8s(ident), self))
             }
-            ShimValue::String(_) => {
+            ShimValue::String(..) => {
                 let func = match ident {
                     b"len" => shim_str_len,
                     _ => return Err(format!("No ident {:?} on str", debug_u8s(ident))),
@@ -6255,7 +6265,8 @@ impl<'a> GC<'a> {
                         
                         // Mark the function name string
                         let shim_fn: &ShimFn = self.mem.get(fn_pos);
-                        vals.push(ShimValue::String(shim_fn.name));
+                        let name_len = self.mem.mem[usize::from(shim_fn.name.0)] as u16;
+                        vals.push(ShimValue::String(name_len, 0, shim_fn.name.0));
                     },
                     ShimValue::List(pos) => {
                         let pos: usize = pos.into();
@@ -6269,11 +6280,12 @@ impl<'a> GC<'a> {
                             self.mask.set(idx);
                         }
                     },
-                    ShimValue::String(pos) => {
-                        let pos: usize = pos.into();
-                        let len = self.mem.mem[pos] as usize;
+                    ShimValue::String(len, offset, pos) => {
+                        let len = len as usize;
+                        let offset = offset as usize;
+                        let pos: usize = usize::from(pos);
                         // TODO: check this...
-                        for idx in pos..(pos + 1 + len.div_ceil(8)) {
+                        for idx in pos..(pos + 1 + (offset + len).div_ceil(8)) {
                             self.mask.set(idx);
                         }
                     },
@@ -6441,11 +6453,12 @@ impl Interpreter {
             for entry in entries.iter() {
                 if entry.is_valid() {
                     // Key is a string, we need to extract it
-                    if let ShimValue::String(key_pos) = entry.key {
+                    if let ShimValue::String(key_len, key_offset, key_pos) = entry.key {
                         let key_bytes = unsafe {
-                            let len = self.mem.mem[usize::from(key_pos.0)] as usize;
+                            let len = key_len as usize;
+                            let offset = key_offset as usize;
                             let bytes: &[u8] = std::slice::from_raw_parts(
-                                (&self.mem.mem[1+usize::from(key_pos.0)]) as *const u64 as *const u8,
+                                ((&self.mem.mem[1+usize::from(key_pos)]) as *const u64 as *const u8).add(offset),
                                 len,
                             );
                             bytes
@@ -6969,7 +6982,7 @@ impl Interpreter {
                     for _ in 0..kwarg_count {
                         let val = stack.pop().unwrap();
                         let ident = match stack.pop().unwrap() {
-                            val @ ShimValue::String(_position) => {
+                            val @ ShimValue::String(..) => {
                                 val.string(self)?.to_vec()
                             },
                             other => return Err(format!("Invalid kwarg ident {:?}", other)),
