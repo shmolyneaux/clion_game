@@ -1972,12 +1972,12 @@ impl MMU {
     }
 
     fn alloc_dict_raw(&mut self) -> Word {
-        let word_count = Word((std::mem::size_of::<NewShimDict>() as u32).div_ceil(8).into());
+        let word_count = Word((std::mem::size_of::<ShimDict>() as u32).div_ceil(8).into());
         let position = alloc!(self, word_count, "Dict");
         unsafe {
-            let ptr: *mut NewShimDict =
+            let ptr: *mut ShimDict =
                 std::mem::transmute(&mut self.mem[usize::from(position.0)]);
-            ptr.write(NewShimDict::new());
+            ptr.write(ShimDict::new());
         }
         position
     }
@@ -2245,7 +2245,7 @@ impl Environment {
         
         // Get the dict and insert using raw pointer to avoid double borrow
         unsafe {
-            let dict_ptr: *mut NewShimDict = interpreter.mem.mem[usize::from(dict_word.0)..].as_mut_ptr() as *mut NewShimDict;
+            let dict_ptr: *mut ShimDict = interpreter.mem.mem[usize::from(dict_word.0)..].as_mut_ptr() as *mut ShimDict;
             (*dict_ptr).set(interpreter, key_val, val)
                 .expect("Failed to insert key into environment");
         }
@@ -2268,7 +2268,7 @@ impl Environment {
             
             // Try to get the key from this dict using raw pointer
             let found = unsafe {
-                let dict_ptr: *const NewShimDict = interpreter.mem.mem[usize::from(dict_word.0)..].as_ptr() as *const NewShimDict;
+                let dict_ptr: *const ShimDict = interpreter.mem.mem[usize::from(dict_word.0)..].as_ptr() as *const ShimDict;
                 (*dict_ptr).get(interpreter, key_val).is_ok()
             };
             
@@ -2290,7 +2290,7 @@ impl Environment {
         if let Some((_, dict_word)) = self.find_key_scope(interpreter, key_val) {
             // Get the dict to update using raw pointer to avoid double borrow
             unsafe {
-                let dict_ptr: *mut NewShimDict = interpreter.mem.mem[usize::from(dict_word.0)..].as_mut_ptr() as *mut NewShimDict;
+                let dict_ptr: *mut ShimDict = interpreter.mem.mem[usize::from(dict_word.0)..].as_mut_ptr() as *mut ShimDict;
                 (*dict_ptr).set(interpreter, key_val, val)?;
             }
             Ok(())
@@ -2306,7 +2306,7 @@ impl Environment {
         if let Some((_, dict_word)) = self.find_key_scope(interpreter, key_val) {
             // Get the value from the dict using raw pointer
             unsafe {
-                let dict_ptr: *const NewShimDict = interpreter.mem.mem[usize::from(dict_word.0)..].as_ptr() as *const NewShimDict;
+                let dict_ptr: *const ShimDict = interpreter.mem.mem[usize::from(dict_word.0)..].as_ptr() as *const ShimDict;
                 (*dict_ptr).get(interpreter, key_val).ok()
             }
         } else {
@@ -2954,11 +2954,11 @@ impl DictEntry {
     }
 }
 
-// Minimum non-zero size_pow for NewShimDict. When the dict grows from empty,
+// Minimum non-zero size_pow for ShimDict. When the dict grows from empty,
 // it starts with this size_pow value (2^3 = 8 index slots, capacity of ~5 entries).
 const MIN_NON_ZERO_SIZE_POW: u8 = 3;
 
-struct NewShimDict {
+struct ShimDict {
     // Size of the index array, always a power of 2
     size_pow: u8,
 
@@ -3037,7 +3037,7 @@ impl TypedIndices {
     }
 }
 
-impl NewShimDict {
+impl ShimDict {
     fn new() -> Self {
         Self {
             size_pow: 0,
@@ -4632,10 +4632,10 @@ impl ShimValue {
         }
     }
 
-    fn dict_mut(&self, interpreter: &mut Interpreter) -> Result<&mut NewShimDict, String> {
+    fn dict_mut(&self, interpreter: &mut Interpreter) -> Result<&mut ShimDict, String> {
         match self {
             ShimValue::Dict(position) => {
-                let dict: &mut NewShimDict = unsafe {
+                let dict: &mut ShimDict = unsafe {
                     std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)])
                 };
                 Ok(dict)
@@ -4646,10 +4646,10 @@ impl ShimValue {
         }
     }
 
-    fn dict(&self, interpreter: &Interpreter) -> Result<&NewShimDict, String> {
+    fn dict(&self, interpreter: &Interpreter) -> Result<&ShimDict, String> {
         match self {
             ShimValue::Dict(position) => {
-                let dict: &NewShimDict = unsafe {
+                let dict: &ShimDict = unsafe {
                     std::mem::transmute(&interpreter.mem.mem[usize::from(position.0)])
                 };
                 Ok(dict)
@@ -4788,7 +4788,7 @@ impl ShimValue {
                 Ok(())
             }
             (ShimValue::Dict(position), index) => {
-                let dict: &mut NewShimDict = unsafe {
+                let dict: &mut ShimDict = unsafe {
                     std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)])
                 };
 
@@ -5097,8 +5097,8 @@ impl ShimValue {
     ) -> Result<ShimValue, String> {
         match self {
             ShimValue::Dict(position) => {
-                let dict: &mut NewShimDict = unsafe {
-                    let ptr: &mut NewShimDict =
+                let dict: &mut ShimDict = unsafe {
+                    let ptr: &mut ShimDict =
                         std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
                     ptr
                 };
@@ -6290,7 +6290,7 @@ impl<'a> GC<'a> {
                     },
                     ShimValue::Dict(pos) => {
                         let pos: usize = pos.into();
-                        let dict: &NewShimDict = std::mem::transmute(&self.mem.mem[pos]);
+                        let dict: &ShimDict = std::mem::transmute(&self.mem.mem[pos]);
                         let u64_slice = &self.mem.mem[
                             usize::from(dict.entries)..
                             usize::from(dict.entries)+3*(dict.entry_count as usize)
@@ -6310,7 +6310,7 @@ impl<'a> GC<'a> {
                         }
 
                         // Mark the sapce for the dict struct
-                        for idx in pos..(pos + (std::mem::size_of::<NewShimDict>()/8)) {
+                        for idx in pos..(pos + (std::mem::size_of::<ShimDict>()/8)) {
                             self.mask.set(idx);
                         }
 
@@ -6443,7 +6443,7 @@ impl Interpreter {
             };
             
             // Get the dict from the scope
-            let dict: &NewShimDict = unsafe {
+            let dict: &ShimDict = unsafe {
                 self.mem.get(scope.dict)
             };
             
@@ -6530,7 +6530,7 @@ impl Interpreter {
             };
             
             // Get the dict from the scope
-            let dict: &NewShimDict = unsafe {
+            let dict: &ShimDict = unsafe {
                 self.mem.get(scope.dict)
             };
             
