@@ -6380,7 +6380,9 @@ struct GC<'a> {
 impl<'a> GC<'a> {
     fn new(mem: &'a mut MMU) -> Self {
         let last_block_start = mem.free_list[mem.free_list.len()-1].pos;
-        let mask = Bitmask::new(last_block_start.into());
+        let mut mask = Bitmask::new(last_block_start.into());
+        // Mark word 0 so the GC never frees the sentinel reserved by MMU::with_capacity
+        mask.set(0);
         Self {
             mem,
             mask,
