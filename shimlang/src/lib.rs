@@ -2245,18 +2245,9 @@ impl EnvScope {
         }
     }
 
-    /// Ensure the data block has room for `needed_bytes` total bytes.
-    /// Handles initial allocation (capacity == 0) and growth. Returns the
-    /// (possibly updated) data pointer and capacity after growing.
-    fn ensure_capacity(mem: &mut MMU, data: Word, capacity: u32, used: u32, needed_bytes: usize) -> (Word, u32) {
-        if needed_bytes <= capacity as usize * 8 {
-            return (data, capacity);
-        }
-
-        let mut new_capacity = if capacity == 0 { ENV_SCOPE_DEFAULT_CAPACITY } else { capacity };
-        while needed_bytes > new_capacity as usize * 8 {
-            new_capacity *= 2;
-        }
+    /// Reallocate the data block to `new_capacity` words, copying `used` bytes of
+    /// existing data. Frees the old block if `capacity > 0`. Returns the new data pointer.
+    fn realloc(mem: &mut MMU, data: Word, capacity: u32, used: u32, new_capacity: u32) -> Word {
         let new_data = alloc!(mem, Word(new_capacity.into()), "EnvScope data grow");
         // Copy old data
         if used > 0 {
@@ -2275,7 +2266,7 @@ impl EnvScope {
         if capacity > 0 {
             mem.free(data, Word(capacity.into()));
         }
-        (new_data, new_capacity)
+        new_data
     }
 }
 
@@ -2370,7 +2361,16 @@ impl Environment {
         let new_used = used as usize + entry_size;
 
         // Grow if needed (also handles initial allocation when capacity == 0)
-        let (data, capacity) = EnvScope::ensure_capacity(&mut interpreter.mem, data, capacity, used, new_used);
+        let (data, capacity) = if new_used > capacity as usize * 8 {
+            let mut new_capacity = if capacity == 0 { ENV_SCOPE_DEFAULT_CAPACITY } else { capacity * 2 };
+            while new_used > new_capacity as usize * 8 {
+                new_capacity *= 2;
+            }
+            let new_data = EnvScope::realloc(&mut interpreter.mem, data, capacity, used, new_capacity);
+            (new_data, new_capacity)
+        } else {
+            (data, capacity)
+        };
 
         // Update scope header (data/capacity may have changed)
         unsafe {
@@ -2467,14 +2467,14 @@ impl Environment {
             };
             current.depth
         };
-
+        
         // Allocate a new EnvScope with parent pointing to current scope
         // (data block allocated lazily on first insert)
         let scope_pos = mem.alloc_and_set(
             EnvScope::new_with_parent(self.current_scope.into(), current_depth),
             "EnvScope"
         );
-
+        
         // Update current scope to the new one
         self.current_scope = scope_pos.0.into();
     }
@@ -2483,28 +2483,28 @@ impl Environment {
         if self.current_scope == 0 {
             return Err(format!("Ran out of scopes to pop!"));
         }
-
+        
         // Get the current EnvScope
         let scope: &EnvScope = unsafe {
             mem.get(Word(self.current_scope.into()))
         };
-
+        
         // Move to parent scope
         let parent: u32 = scope.parent.into();
         if parent == 0 {
             return Err(format!("Cannot pop root scope!"));
         }
-
+        
         self.current_scope = parent;
         Ok(())
     }
-
+    
     // Helper to get the depth of the current scope
     fn scope_depth(&self, mem: &MMU) -> usize {
         if self.current_scope == 0 {
             return 0;
         }
-
+        
         let scope: &EnvScope = unsafe {
             mem.get(Word(self.current_scope.into()))
         };
