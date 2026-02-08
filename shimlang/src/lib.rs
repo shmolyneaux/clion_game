@@ -2159,8 +2159,11 @@ impl MMU {
 // Variables are stored in a contiguous block of [len: u8][ident_bytes: [u8; len]][value: ShimValue]
 // entries stored inline in a single MMU allocation. Lookups scan raw &[u8] bytes directly —
 // no allocations, no hashing, no probing.
+//
+// Each entry occupies 1 + name_len + 8 bytes. For a typical variable name of ~6 bytes, that's
+// 15 bytes per entry. A scope starts with capacity 0 and lazily allocates on first insert.
 struct EnvScope {
-    // Pointer to the contiguous data block in MMU
+    // Pointer to the contiguous data block in MMU (Word(0) when capacity is 0)
     data: Word,
     // Allocated size of the data block in u64 words
     capacity: u32,
@@ -2172,54 +2175,66 @@ struct EnvScope {
     depth: u32,
 }
 
-// Initial capacity for a new scope's contiguous data block (in u64 words)
-const ENV_SCOPE_INITIAL_CAPACITY: u32 = 8;
+// Default capacity when a scope's data block is first allocated (in u64 words).
+// 16 words = 128 bytes, enough for ~8 variables with 6-byte names before needing to grow.
+const ENV_SCOPE_DEFAULT_CAPACITY: u32 = 16;
 
 impl EnvScope {
-    fn new(data_word: Word) -> Self {
+    fn new() -> Self {
         Self {
-            data: data_word,
-            capacity: ENV_SCOPE_INITIAL_CAPACITY,
+            data: Word(0.into()),
+            capacity: 0,
             used: 0,
             parent: 0.into(),
             depth: 1,
         }
     }
 
-    fn new_with_parent(data_word: Word, parent_pos: u24, parent_depth: u32) -> Self {
+    fn new_with_parent(parent_pos: u24, parent_depth: u32) -> Self {
         Self {
-            data: data_word,
-            capacity: ENV_SCOPE_INITIAL_CAPACITY,
+            data: Word(0.into()),
+            capacity: 0,
             used: 0,
             parent: parent_pos,
             depth: parent_depth + 1,
         }
     }
+
+    /// Get a byte slice view of the used portion of this scope's data block.
+    /// Safety: `self.data` must be a valid MMU word pointing to at least `self.capacity`
+    /// words, and `self.used` must be <= `self.capacity * 8`.
+    unsafe fn raw_bytes<'a>(&self, mem: &'a MMU) -> &'a [u8] {
+        if self.used == 0 {
+            return &[];
+        }
+        let start = usize::from(self.data.0);
+        let word_count = (self.used as usize).div_ceil(8);
+        let u64_slice = &mem.mem[start..start + word_count];
+        let ptr = u64_slice.as_ptr() as *const u8;
+        unsafe { std::slice::from_raw_parts(ptr, self.used as usize) }
+    }
+
+    /// Get a mutable byte slice view of the full capacity of a scope's data block.
+    /// Takes explicit data/capacity to avoid borrow conflicts when the EnvScope
+    /// reference is obtained via raw pointer.
+    unsafe fn raw_bytes_mut_from(mem: &mut MMU, data: Word, capacity: u32) -> &mut [u8] {
+        let start = usize::from(data.0);
+        let u64_slice = &mut mem.mem[start..start + capacity as usize];
+        let ptr = u64_slice.as_mut_ptr() as *mut u8;
+        unsafe { std::slice::from_raw_parts_mut(ptr, capacity as usize * 8) }
+    }
+
+    /// Scan this scope's data block for `key`, returning the byte offset of
+    /// the value (ShimValue) within the block, or None if not found.
+    /// Layout per entry: [len: u8][ident_bytes: [u8; len]][value: ShimValue (8 bytes)]
+    fn scan_for_key(&self, mem: &MMU, key: &[u8]) -> Option<usize> {
+        let bytes = unsafe { self.raw_bytes(mem) };
+        scan_for_key(bytes, key)
+    }
 }
 
-/// Get a byte slice view of the used portion of a scope's data block.
-/// Safety: `data` must be a valid MMU word pointing to at least `capacity` words,
-/// and `used` must be <= capacity * 8.
-unsafe fn scope_raw_bytes<'a>(mem: &'a MMU, data: Word, used: u32) -> &'a [u8] {
-    let start = usize::from(data.0);
-    let word_count = (used as usize).div_ceil(8).max(1);
-    let u64_slice = &mem.mem[start..start + word_count];
-    let ptr = u64_slice.as_ptr() as *const u8;
-    unsafe { std::slice::from_raw_parts(ptr, used as usize) }
-}
-
-/// Get a mutable byte slice view of the full capacity of a scope's data block.
-/// Safety: same as `scope_raw_bytes`, but returns mutable slice of full capacity.
-unsafe fn scope_raw_bytes_mut<'a>(mem: &'a mut MMU, data: Word, capacity: u32) -> &'a mut [u8] {
-    let start = usize::from(data.0);
-    let u64_slice = &mut mem.mem[start..start + capacity as usize];
-    let ptr = u64_slice.as_mut_ptr() as *mut u8;
-    unsafe { std::slice::from_raw_parts_mut(ptr, capacity as usize * 8) }
-}
-
-/// Scan a contiguous scope data block for `key`, returning the byte offset of
-/// the value (ShimValue) within the block, or None if not found.
-/// Layout per entry: [len: u8][ident_bytes: [u8; len]][value: ShimValue (8 bytes)]
+/// Scan a contiguous scope data block (as raw bytes) for `key`, returning the byte
+/// offset of the value (ShimValue) within the block, or None if not found.
 fn scan_for_key(bytes: &[u8], key: &[u8]) -> Option<usize> {
     let mut offset = 0usize;
     while offset < bytes.len() {
@@ -2249,11 +2264,12 @@ pub struct Environment {
 
 impl Environment {
     pub fn new(mem: &mut MMU) -> Self {
-        // Allocate a contiguous data block for the root scope
-        let data_word = alloc!(mem, Word(ENV_SCOPE_INITIAL_CAPACITY.into()), "EnvScope data");
+        // Reserve word 0 so that the scope is never at position 0
+        // (position 0 is used as sentinel for "no scope")
+        let _ = alloc!(mem, Word(1.into()), "EnvScope sentinel");
 
-        // Allocate an EnvScope wrapper
-        let scope_pos = mem.alloc_and_set(EnvScope::new(data_word), "EnvScope");
+        // Allocate an EnvScope wrapper (data block allocated lazily on first insert)
+        let scope_pos = mem.alloc_and_set(EnvScope::new(), "EnvScope");
 
         Self {
             current_scope: scope_pos.0.into(),
@@ -2293,6 +2309,23 @@ impl Environment {
     fn insert_new(&mut self, interpreter: &mut Interpreter, key: Vec<u8>, val: ShimValue) {
         assert!(key.len() <= u8::MAX as usize, "Key length {} exceeds maximum {}", key.len(), u8::MAX);
 
+        // Check if key already exists in the current scope — update in place (upsert)
+        if self.get(interpreter, &key).is_some() {
+            // Key exists somewhere in the scope chain; update the value in the current scope
+            // by scanning just the current scope directly
+            let scope: &EnvScope = unsafe { interpreter.mem.get(Word(self.current_scope.into())) };
+            if let Some(value_offset) = scope.scan_for_key(&interpreter.mem, &key) {
+                let (data, capacity) = (scope.data, scope.capacity);
+                unsafe {
+                    let buf = EnvScope::raw_bytes_mut_from(&mut interpreter.mem, data, capacity);
+                    let val_bytes: [u8; 8] = std::mem::transmute(val);
+                    std::ptr::copy_nonoverlapping(val_bytes.as_ptr(), buf[value_offset..].as_mut_ptr(), 8);
+                }
+                return;
+            }
+            // Key exists in a parent scope but not current — fall through to append
+        }
+
         // Read current scope header via raw pointer to avoid borrow issues
         let (mut data, mut capacity, used) = unsafe {
             let scope_ptr: *mut EnvScope =
@@ -2300,24 +2333,13 @@ impl Environment {
             ((*scope_ptr).data, (*scope_ptr).capacity, (*scope_ptr).used)
         };
 
-        // Check if key already exists in the current scope — update in place (upsert)
-        let bytes = unsafe { scope_raw_bytes(&interpreter.mem, data, used) };
-        if let Some(value_offset) = scan_for_key(bytes, &key) {
-            unsafe {
-                let buf = scope_raw_bytes_mut(&mut interpreter.mem, data, capacity);
-                let val_bytes: [u8; 8] = std::mem::transmute(val);
-                std::ptr::copy_nonoverlapping(val_bytes.as_ptr(), buf[value_offset..].as_mut_ptr(), 8);
-            }
-            return;
-        }
-
         // Key not found — append new entry
         let entry_size = 1 + key.len() + 8; // len byte + ident bytes + ShimValue
         let new_used = used as usize + entry_size;
 
-        // Grow if needed
+        // Grow if needed (also handles initial allocation when capacity == 0)
         if new_used > capacity as usize * 8 {
-            let mut new_capacity = capacity;
+            let mut new_capacity = if capacity == 0 { ENV_SCOPE_DEFAULT_CAPACITY } else { capacity };
             while new_used > new_capacity as usize * 8 {
                 new_capacity *= 2;
             }
@@ -2335,8 +2357,10 @@ impl Environment {
                     );
                 }
             }
-            // Free old block
-            interpreter.mem.free(data, Word(capacity.into()));
+            // Free old block (only if there was one)
+            if capacity > 0 {
+                interpreter.mem.free(data, Word(capacity.into()));
+            }
             data = new_data;
             capacity = new_capacity;
 
@@ -2351,7 +2375,7 @@ impl Environment {
 
         // Append entry: [len: u8][ident_bytes][value: ShimValue (8 bytes)]
         unsafe {
-            let buf = scope_raw_bytes_mut(&mut interpreter.mem, data, capacity);
+            let buf = EnvScope::raw_bytes_mut_from(&mut interpreter.mem, data, capacity);
             let off = used as usize;
             buf[off] = key.len() as u8;
             buf[off + 1..off + 1 + key.len()].copy_from_slice(&key);
@@ -2378,13 +2402,12 @@ impl Environment {
                 break;
             }
 
-            let (data, used, parent) = unsafe {
+            let (parent, found) = unsafe {
                 let scope: &EnvScope = interpreter.mem.get(Word(current_scope_pos.into()));
-                (scope.data, scope.used, scope.parent)
+                (scope.parent, scope.scan_for_key(&interpreter.mem, key).is_some())
             };
 
-            let bytes = unsafe { scope_raw_bytes(&interpreter.mem, data, used) };
-            if scan_for_key(bytes, key).is_some() {
+            if found {
                 return Some(current_scope_pos);
             }
 
@@ -2403,16 +2426,15 @@ impl Environment {
                 break;
             }
 
-            let (data, capacity, used, parent) = unsafe {
+            let (parent, data, capacity, value_offset) = unsafe {
                 let scope: &EnvScope = interpreter.mem.get(Word(current_scope_pos.into()));
-                (scope.data, scope.capacity, scope.used, scope.parent)
+                (scope.parent, scope.data, scope.capacity, scope.scan_for_key(&interpreter.mem, key))
             };
 
-            let bytes = unsafe { scope_raw_bytes(&interpreter.mem, data, used) };
-            if let Some(value_offset) = scan_for_key(bytes, key) {
+            if let Some(value_offset) = value_offset {
                 // Write the new value in-place
                 unsafe {
-                    let buf = scope_raw_bytes_mut(&mut interpreter.mem, data, capacity);
+                    let buf = EnvScope::raw_bytes_mut_from(&mut interpreter.mem, data, capacity);
                     let val_bytes: [u8; 8] = std::mem::transmute(val);
                     std::ptr::copy_nonoverlapping(val_bytes.as_ptr(), buf[value_offset..].as_mut_ptr(), 8);
                 }
@@ -2433,15 +2455,16 @@ impl Environment {
                 break;
             }
 
-            let (data, used, parent) = unsafe {
+            let (parent, value_offset) = unsafe {
                 let scope: &EnvScope = interpreter.mem.get(Word(current_scope_pos.into()));
-                (scope.data, scope.used, scope.parent)
+                (scope.parent, scope.scan_for_key(&interpreter.mem, key))
             };
 
-            let bytes = unsafe { scope_raw_bytes(&interpreter.mem, data, used) };
-            if let Some(value_offset) = scan_for_key(bytes, key) {
+            if let Some(value_offset) = value_offset {
                 // Read the ShimValue from the byte offset
                 let val: ShimValue = unsafe {
+                    let scope: &EnvScope = interpreter.mem.get(Word(current_scope_pos.into()));
+                    let bytes = scope.raw_bytes(&interpreter.mem);
                     let mut val_bytes = [0u8; 8];
                     std::ptr::copy_nonoverlapping(bytes[value_offset..].as_ptr(), val_bytes.as_mut_ptr(), 8);
                     std::mem::transmute(val_bytes)
@@ -2470,12 +2493,10 @@ impl Environment {
             current.depth
         };
 
-        // Allocate a contiguous data block for the new scope
-        let data_word = alloc!(mem, Word(ENV_SCOPE_INITIAL_CAPACITY.into()), "EnvScope data");
-
         // Allocate a new EnvScope with parent pointing to current scope
+        // (data block allocated lazily on first insert)
         let scope_pos = mem.alloc_and_set(
-            EnvScope::new_with_parent(data_word, self.current_scope.into(), current_depth),
+            EnvScope::new_with_parent(self.current_scope.into(), current_depth),
             "EnvScope"
         );
 
@@ -6584,7 +6605,7 @@ impl Interpreter {
             };
             
             // Walk the contiguous data block and print entries
-            let bytes = unsafe { scope_raw_bytes(&self.mem, scope.data, scope.used) };
+            let bytes = unsafe { scope.raw_bytes(&self.mem) };
             let mut off = 0usize;
             while off < bytes.len() {
                 let key_len = bytes[off] as usize;
@@ -6660,7 +6681,7 @@ impl Interpreter {
             };
             
             // Walk the contiguous data block and collect values as roots
-            let bytes = unsafe { scope_raw_bytes(&self.mem, scope.data, scope.used) };
+            let bytes = unsafe { scope.raw_bytes(&self.mem) };
             let mut off = 0usize;
             while off < bytes.len() {
                 let key_len = bytes[off] as usize;
