@@ -1901,7 +1901,10 @@ impl MMU {
 
     fn with_capacity(word_count: Word) -> Self {
         let mem = vec![0; usize::from(word_count.0)];
-        let free_list = vec![FreeBlock::new(Word(0.into()), word_count)];
+        // Start the free list at word 1, reserving word 0 as a sentinel.
+        // This ensures no allocation ever returns position 0, which is used
+        // as a "null" / "no scope" sentinel by consumers.
+        let free_list = vec![FreeBlock::new(Word(1.into()), word_count - Word(1.into()))];
         Self {
             mem: mem,
             free_list: free_list,
@@ -2155,32 +2158,138 @@ impl MMU {
     }
 }
 
-// Wrapper structure that chains ShimDict scopes for the environment
+// Wrapper structure that chains scopes for the environment.
+// Variables are stored in a contiguous block of [len: u8][ident_bytes: [u8; len]][value: ShimValue]
+// entries stored inline in a single MMU allocation. Lookups scan raw &[u8] bytes directly —
+// no allocations, no hashing, no probing.
+//
+// Each entry occupies 1 + name_len + 8 bytes. For a typical variable name of ~6 bytes, that's
+// 15 bytes per entry. A scope starts with capacity 0 and lazily allocates on first insert.
 struct EnvScope {
-    // The dictionary for this scope, stored in MMU
-    dict: Word,
+    // Pointer to the contiguous data block in MMU (Word(0) when capacity is 0)
+    data: Word,
+    // Allocated size of the data block in u64 words
+    capacity: u32,
+    // Used size of the data block in bytes
+    used: u32,
     // Pointer to the parent scope in MMU (0 means no parent)
     parent: u24,
     // Depth of this scope in the chain (root is 1)
     depth: u32,
 }
 
+// Default capacity when a scope's data block is first allocated (in u64 words).
+// 16 words = 128 bytes, enough for ~8 variables with 6-byte names before needing to grow.
+const ENV_SCOPE_DEFAULT_CAPACITY: u32 = 16;
+
 impl EnvScope {
-    fn new(dict_word: Word) -> Self {
+    fn new() -> Self {
         Self {
-            dict: dict_word,
+            data: Word(0.into()),
+            capacity: 0,
+            used: 0,
             parent: 0.into(),
             depth: 1,
         }
     }
 
-    fn new_with_parent(dict_word: Word, parent_pos: u24, parent_depth: u32) -> Self {
+    fn new_with_parent(parent_pos: u24, parent_depth: u32) -> Self {
         Self {
-            dict: dict_word,
+            data: Word(0.into()),
+            capacity: 0,
+            used: 0,
             parent: parent_pos,
             depth: parent_depth + 1,
         }
     }
+
+    /// Get a byte slice view of the used portion of this scope's data block.
+    /// Safety: `self.data` must be a valid MMU word pointing to at least `self.capacity`
+    /// words, and `self.used` must be <= `self.capacity * 8`.
+    unsafe fn raw_bytes<'a>(&self, mem: &'a MMU) -> &'a [u8] {
+        if self.used == 0 {
+            return &[];
+        }
+        let start = usize::from(self.data.0);
+        let word_count = (self.used as usize).div_ceil(8);
+        let u64_slice = &mem.mem[start..start + word_count];
+        let ptr = u64_slice.as_ptr() as *const u8;
+        unsafe { std::slice::from_raw_parts(ptr, self.used as usize) }
+    }
+
+    /// Get a mutable byte slice view of the full capacity of a scope's data block.
+    /// Takes explicit data/capacity to avoid borrow conflicts when the EnvScope
+    /// reference is obtained via raw pointer.
+    unsafe fn raw_bytes_mut_from(mem: &mut MMU, data: Word, capacity: u32) -> &mut [u8] {
+        let start = usize::from(data.0);
+        let u64_slice = &mut mem.mem[start..start + capacity as usize];
+        let ptr = u64_slice.as_mut_ptr() as *mut u8;
+        unsafe { std::slice::from_raw_parts_mut(ptr, capacity as usize * 8) }
+    }
+
+    /// Scan this scope's data block for `key`, returning the byte offset of
+    /// the value (ShimValue) within the block, or None if not found.
+    /// Layout per entry: [len: u8][ident_bytes: [u8; len]][value: ShimValue (8 bytes)]
+    fn scan_for_key(&self, mem: &MMU, key: &[u8]) -> Option<usize> {
+        let bytes = unsafe { self.raw_bytes(mem) };
+        scan_for_key(bytes, key)
+    }
+
+    /// Write a ShimValue at the given byte offset within this scope's data block.
+    /// Safety: `value_offset + 8` must be within capacity.
+    unsafe fn write_value_at(mem: &mut MMU, data: Word, capacity: u32, value_offset: usize, val: ShimValue) {
+        unsafe {
+            let buf = EnvScope::raw_bytes_mut_from(mem, data, capacity);
+            let val_bytes: [u8; 8] = std::mem::transmute(val);
+            std::ptr::copy_nonoverlapping(val_bytes.as_ptr(), buf[value_offset..].as_mut_ptr(), 8);
+        }
+    }
+
+    /// Reallocate the data block to `new_capacity` words, copying `used` bytes of
+    /// existing data. Frees the old block if `capacity > 0`. Returns the new data pointer.
+    fn realloc(mem: &mut MMU, data: Word, capacity: u32, used: u32, new_capacity: u32) -> Word {
+        let new_data = alloc!(mem, Word(new_capacity.into()), "EnvScope data grow");
+        // Copy old data
+        if used > 0 {
+            let old_start = usize::from(data.0);
+            let new_start = usize::from(new_data.0);
+            let old_word_count = (used as usize).div_ceil(8);
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    mem.mem.as_ptr().add(old_start),
+                    mem.mem.as_mut_ptr().add(new_start),
+                    old_word_count,
+                );
+            }
+        }
+        // Free old block (only if there was one)
+        if capacity > 0 {
+            mem.free(data, Word(capacity.into()));
+        }
+        new_data
+    }
+}
+
+/// Scan a contiguous scope data block (as raw bytes) for `key`, returning the byte
+/// offset of the value (ShimValue) within the block, or None if not found.
+fn scan_for_key(bytes: &[u8], key: &[u8]) -> Option<usize> {
+    let mut offset = 0usize;
+    while offset < bytes.len() {
+        let entry_key_len = bytes[offset] as usize;
+        let entry_key_start = offset + 1;
+        let entry_key_end = entry_key_start + entry_key_len;
+        let value_offset = entry_key_end;
+        // Each entry is 1 + key_len + 8 bytes
+        let entry_end = value_offset + 8;
+        if entry_end > bytes.len() {
+            break;
+        }
+        if entry_key_len == key.len() && &bytes[entry_key_start..entry_key_end] == key {
+            return Some(value_offset);
+        }
+        offset = entry_end;
+    }
+    None
 }
 
 #[derive(Debug)]
@@ -2192,12 +2301,9 @@ pub struct Environment {
 
 impl Environment {
     pub fn new(mem: &mut MMU) -> Self {
-        // Allocate a new dict in MMU for the root scope
-        let dict_word = mem.alloc_dict_raw();
-        
-        // Allocate an EnvScope wrapper
-        let scope_pos = mem.alloc_and_set(EnvScope::new(dict_word), "EnvScope");
-        
+        // Allocate an EnvScope wrapper (data block allocated lazily on first insert)
+        let scope_pos = mem.alloc_and_set(EnvScope::new(), "EnvScope");
+
         Self {
             current_scope: scope_pos.0.into(),
         }
@@ -2232,86 +2338,119 @@ impl Environment {
         env
     }
 
-
     fn insert_new(&mut self, interpreter: &mut Interpreter, key: Vec<u8>, val: ShimValue) {
-        // Get the dict word from current EnvScope
-        let dict_word = unsafe {
-            let scope: &EnvScope = interpreter.mem.get(Word(self.current_scope.into()));
-            scope.dict
+        assert!(key.len() <= u8::MAX as usize, "Key length {} exceeds maximum {}", key.len(), u8::MAX);
+
+        // Check if key already exists in the current scope — update in place (upsert)
+        let scope: &EnvScope = unsafe { interpreter.mem.get(Word(self.current_scope.into())) };
+        if let Some(value_offset) = scope.scan_for_key(&interpreter.mem, &key) {
+            let (data, capacity) = (scope.data, scope.capacity);
+            unsafe { EnvScope::write_value_at(&mut interpreter.mem, data, capacity, value_offset, val); }
+            return;
+        }
+
+        // Read current scope header via raw pointer to avoid borrow issues
+        let (data, capacity, used) = unsafe {
+            let scope_ptr: *mut EnvScope =
+                interpreter.mem.mem[usize::from(u24::from(self.current_scope))..].as_mut_ptr() as *mut EnvScope;
+            ((*scope_ptr).data, (*scope_ptr).capacity, (*scope_ptr).used)
         };
-        
-        // Allocate key string
-        let key_val = interpreter.mem.alloc_str(key.as_slice());
-        
-        // Get the dict and insert using raw pointer to avoid double borrow
+
+        // Key not found — append new entry
+        let entry_size = 1 + key.len() + 8; // len byte + ident bytes + ShimValue
+        let new_used = used as usize + entry_size;
+
+        // Grow if needed (also handles initial allocation when capacity == 0)
+        let (data, capacity) = if new_used > capacity as usize * 8 {
+            let mut new_capacity = if capacity == 0 { ENV_SCOPE_DEFAULT_CAPACITY } else { capacity * 2 };
+            while new_used > new_capacity as usize * 8 {
+                new_capacity *= 2;
+            }
+            let new_data = EnvScope::realloc(&mut interpreter.mem, data, capacity, used, new_capacity);
+            (new_data, new_capacity)
+        } else {
+            (data, capacity)
+        };
+
+        // Update scope header (data/capacity may have changed)
         unsafe {
-            let dict_ptr: *mut ShimDict = interpreter.mem.mem[usize::from(dict_word.0)..].as_mut_ptr() as *mut ShimDict;
-            (*dict_ptr).set(interpreter, key_val, val)
-                .expect("Failed to insert key into environment");
+            let scope_ptr: *mut EnvScope =
+                interpreter.mem.mem[usize::from(u24::from(self.current_scope))..].as_mut_ptr() as *mut EnvScope;
+            (*scope_ptr).data = data;
+            (*scope_ptr).capacity = capacity;
+        }
+
+        // Append entry: [len: u8][ident_bytes][value: ShimValue (8 bytes)]
+        unsafe {
+            let buf = EnvScope::raw_bytes_mut_from(&mut interpreter.mem, data, capacity);
+            let off = used as usize;
+            buf[off] = key.len() as u8;
+            buf[off + 1..off + 1 + key.len()].copy_from_slice(&key);
+        }
+        unsafe { EnvScope::write_value_at(&mut interpreter.mem, data, capacity, used as usize + 1 + key.len(), val); }
+
+        // Update used in scope header
+        unsafe {
+            let scope_ptr: *mut EnvScope =
+                interpreter.mem.mem[usize::from(u24::from(self.current_scope))..].as_mut_ptr() as *mut EnvScope;
+            (*scope_ptr).used = new_used as u32;
         }
     }
 
-    // Helper to traverse scope chain and find a key, returns (scope_pos, dict_word)
-    fn find_key_scope(&self, interpreter: &mut Interpreter, key_val: ShimValue) -> Option<(u32, Word)> {
+    fn update(&mut self, interpreter: &mut Interpreter, key: &[u8], val: ShimValue) -> Result<(), String> {
+        // Walk the scope chain to find the key
         let mut current_scope_pos = self.current_scope;
-        
+
         loop {
             if current_scope_pos == 0 {
                 break;
             }
-            
-            // Get the EnvScope and extract necessary data
-            let (dict_word, parent) = unsafe {
-                let scope: &EnvScope = interpreter.mem.get(Word(current_scope_pos.into()));
-                (scope.dict, scope.parent)
-            };
-            
-            // Try to get the key from this dict using raw pointer
-            let found = unsafe {
-                let dict_ptr: *const ShimDict = interpreter.mem.mem[usize::from(dict_word.0)..].as_ptr() as *const ShimDict;
-                (*dict_ptr).get(interpreter, key_val).is_ok()
-            };
-            
-            if found {
-                return Some((current_scope_pos, dict_word));
-            } else {
-                // Not in this dict, try parent
-                current_scope_pos = parent.into();
-            }
-        }
-        
-        None
-    }
 
-    fn update(&mut self, interpreter: &mut Interpreter, key: &[u8], val: ShimValue) -> Result<(), String> {
-        // Search through the scope chain starting from current
-        let key_val = interpreter.mem.alloc_str(key);
-        
-        if let Some((_, dict_word)) = self.find_key_scope(interpreter, key_val) {
-            // Get the dict to update using raw pointer to avoid double borrow
-            unsafe {
-                let dict_ptr: *mut ShimDict = interpreter.mem.mem[usize::from(dict_word.0)..].as_mut_ptr() as *mut ShimDict;
-                (*dict_ptr).set(interpreter, key_val, val)?;
+            let (parent, data, capacity, value_offset) = unsafe {
+                let scope: &EnvScope = interpreter.mem.get(Word(current_scope_pos.into()));
+                (scope.parent, scope.data, scope.capacity, scope.scan_for_key(&interpreter.mem, key))
+            };
+
+            if let Some(value_offset) = value_offset {
+                unsafe { EnvScope::write_value_at(&mut interpreter.mem, data, capacity, value_offset, val); }
+                return Ok(());
             }
-            Ok(())
-        } else {
-            Err(format!("Key {:?} not found in environment", key))
+
+            current_scope_pos = parent.into();
         }
+
+        Err(format!("Key {:?} not found in environment", key))
     }
 
     fn get(&self, interpreter: &mut Interpreter, key: &[u8]) -> Option<ShimValue> {
-        let key_val = interpreter.mem.alloc_str(key);
-        
-        // Use find_key_scope to locate the key
-        if let Some((_, dict_word)) = self.find_key_scope(interpreter, key_val) {
-            // Get the value from the dict using raw pointer
-            unsafe {
-                let dict_ptr: *const ShimDict = interpreter.mem.mem[usize::from(dict_word.0)..].as_ptr() as *const ShimDict;
-                (*dict_ptr).get(interpreter, key_val).ok()
+        let mut current_scope_pos = self.current_scope;
+
+        loop {
+            if current_scope_pos == 0 {
+                break;
             }
-        } else {
-            None
+
+            let (parent, value_offset) = unsafe {
+                let scope: &EnvScope = interpreter.mem.get(Word(current_scope_pos.into()));
+                (scope.parent, scope.scan_for_key(&interpreter.mem, key))
+            };
+
+            if let Some(value_offset) = value_offset {
+                // Read the ShimValue from the byte offset
+                let val: ShimValue = unsafe {
+                    let scope: &EnvScope = interpreter.mem.get(Word(current_scope_pos.into()));
+                    let bytes = scope.raw_bytes(&interpreter.mem);
+                    let mut val_bytes = [0u8; 8];
+                    std::ptr::copy_nonoverlapping(bytes[value_offset..].as_ptr(), val_bytes.as_mut_ptr(), 8);
+                    std::mem::transmute(val_bytes)
+                };
+                return Some(val);
+            }
+
+            current_scope_pos = parent.into();
         }
+
+        None
     }
 
     fn contains_key(&self, interpreter: &mut Interpreter, key: &[u8]) -> bool {
@@ -2329,12 +2468,10 @@ impl Environment {
             current.depth
         };
         
-        // Allocate a new dict for the new scope
-        let dict_word = mem.alloc_dict_raw();
-        
         // Allocate a new EnvScope with parent pointing to current scope
+        // (data block allocated lazily on first insert)
         let scope_pos = mem.alloc_and_set(
-            EnvScope::new_with_parent(dict_word, self.current_scope.into(), current_depth),
+            EnvScope::new_with_parent(self.current_scope.into(), current_depth),
             "EnvScope"
         );
         
@@ -6243,7 +6380,9 @@ struct GC<'a> {
 impl<'a> GC<'a> {
     fn new(mem: &'a mut MMU) -> Self {
         let last_block_start = mem.free_list[mem.free_list.len()-1].pos;
-        let mask = Bitmask::new(last_block_start.into());
+        let mut mask = Bitmask::new(last_block_start.into());
+        // Mark word 0 so the GC never frees the sentinel reserved by MMU::with_capacity
+        mask.set(0);
         Self {
             mem,
             mask,
@@ -6309,7 +6448,7 @@ impl<'a> GC<'a> {
                             }
                         }
 
-                        // Mark the space for the dict struct
+                        // Mark the sapce for the dict struct
                         for idx in pos..(pos + (std::mem::size_of::<ShimDict>()/8)) {
                             self.mask.set(idx);
                         }
@@ -6442,65 +6581,54 @@ impl Interpreter {
                 self.mem.get(Word(current_scope_pos.into()))
             };
             
-            // Get the dict from the scope
-            let dict: &ShimDict = unsafe {
-                self.mem.get(scope.dict)
-            };
-            
-            // Print entries in the dict
-            let entries = dict.entries_array(self);
-            for entry in entries.iter() {
-                if entry.is_valid() {
-                    // Key is a string, we need to extract it
-                    if let ShimValue::String(key_len, key_offset, key_pos) = entry.key {
-                        let key_bytes = unsafe {
-                            let len = key_len as usize;
-                            let offset = key_offset as usize;
-                            let bytes: &[u8] = std::slice::from_raw_parts(
-                                ((&self.mem.mem[usize::from(key_pos)]) as *const u64 as *const u8).add(offset),
-                                len,
-                            );
-                            bytes
-                        };
-                        
-                        let val = entry.value;
-                        println!("{:>12}: {:?}", debug_u8s(key_bytes), val);
-                        match val {
-                            ShimValue::Struct(pos) => {
-                                unsafe {
-                                    let def_pos: u64 = *self.mem.get(pos);
-                                    let def_pos: Word = Word((def_pos as u32).into());
-                                    let def: &StructDef = self.mem.get(def_pos);
-                                    for (attr, loc) in def.lookup.iter() {
-                                        match loc {
-                                            StructAttribute::MemberInstanceOffset(offset) => {
-                                                let val: ShimValue = *self.mem.get(pos + *offset as u32 + 1);
-                                                println!("                - {} = {:?}", debug_u8s(&attr), val);
-                                            },
-                                            StructAttribute::MethodDef(_) => (),
-                                        };
-                                    }
-                                }
-                            },
-                            ShimValue::StructDef(pos) => {
-                                unsafe {
-                                    let def: &StructDef = self.mem.get(pos);
-                                    for (attr, loc) in def.lookup.iter() {
-                                        match loc {
-                                            StructAttribute::MemberInstanceOffset(_) => {
-                                                println!("                - {}", debug_u8s(&attr));
-                                            },
-                                            StructAttribute::MethodDef(_) => {
-                                                println!("                - {}()", debug_u8s(&attr));
-                                            }
-                                        };
-                                    }
-                                }
-                            },
-                            _ => (),
+            // Walk the contiguous data block and print entries
+            let bytes = unsafe { scope.raw_bytes(&self.mem) };
+            let mut off = 0usize;
+            while off < bytes.len() {
+                let key_len = bytes[off] as usize;
+                let key_bytes = &bytes[off + 1..off + 1 + key_len];
+                let value_offset = off + 1 + key_len;
+                let val: ShimValue = unsafe {
+                    let mut val_bytes = [0u8; 8];
+                    std::ptr::copy_nonoverlapping(bytes[value_offset..].as_ptr(), val_bytes.as_mut_ptr(), 8);
+                    std::mem::transmute(val_bytes)
+                };
+                println!("{:>12}: {:?}", debug_u8s(key_bytes), val);
+                match val {
+                    ShimValue::Struct(pos) => {
+                        unsafe {
+                            let def_pos: u64 = *self.mem.get(pos);
+                            let def_pos: Word = Word((def_pos as u32).into());
+                            let def: &StructDef = self.mem.get(def_pos);
+                            for (attr, loc) in def.lookup.iter() {
+                                match loc {
+                                    StructAttribute::MemberInstanceOffset(offset) => {
+                                        let val: ShimValue = *self.mem.get(pos + *offset as u32 + 1);
+                                        println!("                - {} = {:?}", debug_u8s(&attr), val);
+                                    },
+                                    StructAttribute::MethodDef(_) => (),
+                                };
+                            }
                         }
-                    }
+                    },
+                    ShimValue::StructDef(pos) => {
+                        unsafe {
+                            let def: &StructDef = self.mem.get(pos);
+                            for (attr, loc) in def.lookup.iter() {
+                                match loc {
+                                    StructAttribute::MemberInstanceOffset(_) => {
+                                        println!("                - {}", debug_u8s(&attr));
+                                    },
+                                    StructAttribute::MethodDef(_) => {
+                                        println!("                - {}()", debug_u8s(&attr));
+                                    }
+                                };
+                            }
+                        }
+                    },
+                    _ => (),
                 }
+                off = value_offset + 8;
             }
             
             // Move to parent scope
@@ -6529,17 +6657,19 @@ impl Interpreter {
                 self.mem.get(Word(current_scope_pos.into()))
             };
             
-            // Get the dict from the scope
-            let dict: &ShimDict = unsafe {
-                self.mem.get(scope.dict)
-            };
-            
-            // Add all values in the dict as roots
-            let entries = dict.entries_array(self);
-            for entry in entries.iter() {
-                if entry.is_valid() {
-                    roots.push(entry.value);
-                }
+            // Walk the contiguous data block and collect values as roots
+            let bytes = unsafe { scope.raw_bytes(&self.mem) };
+            let mut off = 0usize;
+            while off < bytes.len() {
+                let key_len = bytes[off] as usize;
+                let value_offset = off + 1 + key_len;
+                let val: ShimValue = unsafe {
+                    let mut val_bytes = [0u8; 8];
+                    std::ptr::copy_nonoverlapping(bytes[value_offset..].as_ptr(), val_bytes.as_mut_ptr(), 8);
+                    std::mem::transmute(val_bytes)
+                };
+                roots.push(val);
+                off = value_offset + 8;
             }
             
             // Move to parent scope
@@ -7445,6 +7575,127 @@ mod tests {
         assert_eq!(u32::from(u24::from(1u32)), 1u32);
 
         assert_eq!(u24::from(1u32).0, [0, 0, 1]);
+    }
+
+    #[test]
+    fn scan_for_key_empty() {
+        let bytes: &[u8] = &[];
+        assert_eq!(scan_for_key(bytes, b"x"), None);
+    }
+
+    #[test]
+    fn scan_for_key_single_entry() {
+        // Entry: [3] "foo" [8 bytes value]
+        let mut data = vec![3u8]; // len
+        data.extend_from_slice(b"foo");
+        data.extend_from_slice(&[0xAA; 8]); // value placeholder
+        assert!(scan_for_key(&data, b"foo").is_some());
+        assert_eq!(scan_for_key(&data, b"foo"), Some(4)); // offset of value
+        assert_eq!(scan_for_key(&data, b"bar"), None);
+    }
+
+    #[test]
+    fn scan_for_key_multiple_entries() {
+        let mut data = Vec::new();
+        // Entry 1: "ab" -> 8 bytes
+        data.push(2u8);
+        data.extend_from_slice(b"ab");
+        data.extend_from_slice(&[0x11; 8]);
+        // Entry 2: "cde" -> 8 bytes
+        data.push(3u8);
+        data.extend_from_slice(b"cde");
+        data.extend_from_slice(&[0x22; 8]);
+
+        assert_eq!(scan_for_key(&data, b"ab"), Some(3));
+        // entry1 = 1+2+8 = 11 bytes, entry2: len at 11, key at 12..15, value at 15
+        assert_eq!(scan_for_key(&data, b"cde"), Some(15));
+        assert_eq!(scan_for_key(&data, b"xyz"), None);
+    }
+
+    fn test_interpreter() -> Interpreter {
+        let config = Config::default();
+        let program = Program {
+            bytecode: Vec::new(),
+            spans: Vec::new(),
+            script: Vec::new(),
+        };
+        Interpreter::create(&config, program)
+    }
+
+    #[test]
+    fn env_scope_insert_and_get() {
+        let mut interpreter = test_interpreter();
+        let mut env = Environment::new(&mut interpreter.mem);
+
+        env.insert_new(&mut interpreter, b"x".to_vec(), ShimValue::Integer(42));
+        let val = env.get(&mut interpreter, b"x");
+        assert!(val.is_some());
+        match val.unwrap() {
+            ShimValue::Integer(42) => {},
+            other => panic!("Expected Integer(42), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn env_scope_update() {
+        let mut interpreter = test_interpreter();
+        let mut env = Environment::new(&mut interpreter.mem);
+
+        env.insert_new(&mut interpreter, b"y".to_vec(), ShimValue::Integer(1));
+        env.update(&mut interpreter, b"y", ShimValue::Integer(99)).unwrap();
+        match env.get(&mut interpreter, b"y").unwrap() {
+            ShimValue::Integer(99) => {},
+            other => panic!("Expected Integer(99), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn env_scope_parent_lookup() {
+        let mut interpreter = test_interpreter();
+        let mut env = Environment::new(&mut interpreter.mem);
+
+        env.insert_new(&mut interpreter, b"root_var".to_vec(), ShimValue::Integer(10));
+        env.push_scope(&mut interpreter.mem);
+        env.insert_new(&mut interpreter, b"child_var".to_vec(), ShimValue::Integer(20));
+
+        // Can see child var
+        match env.get(&mut interpreter, b"child_var").unwrap() {
+            ShimValue::Integer(20) => {},
+            other => panic!("Expected Integer(20), got {:?}", other),
+        }
+        // Can see parent var through scope chain
+        match env.get(&mut interpreter, b"root_var").unwrap() {
+            ShimValue::Integer(10) => {},
+            other => panic!("Expected Integer(10), got {:?}", other),
+        }
+
+        // Pop scope and child var is gone
+        env.pop_scope(&interpreter.mem).unwrap();
+        assert!(env.get(&mut interpreter, b"child_var").is_none());
+        match env.get(&mut interpreter, b"root_var").unwrap() {
+            ShimValue::Integer(10) => {},
+            other => panic!("Expected Integer(10), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn env_scope_grow() {
+        let mut interpreter = test_interpreter();
+        let mut env = Environment::new(&mut interpreter.mem);
+
+        // Insert enough variables to force at least one grow
+        for i in 0..20u8 {
+            let name = format!("var_{}", i);
+            env.insert_new(&mut interpreter, name.into_bytes(), ShimValue::Integer(i as i32));
+        }
+        // Verify all are retrievable
+        for i in 0..20u8 {
+            let name = format!("var_{}", i);
+            match env.get(&mut interpreter, name.as_bytes()).unwrap() {
+                ShimValue::Integer(v) if v == i as i32 => {},
+                other => panic!("Expected Integer({}), got {:?}", i, other),
+            }
+        }
     }
 }
 
