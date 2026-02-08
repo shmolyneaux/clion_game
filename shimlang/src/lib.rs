@@ -2291,7 +2291,7 @@ impl Environment {
 
 
     fn insert_new(&mut self, interpreter: &mut Interpreter, key: Vec<u8>, val: ShimValue) {
-        assert!(key.len() <= u8::MAX as usize, "Key too long for EnvScope");
+        assert!(key.len() <= u8::MAX as usize, "Key length {} exceeds maximum {}", key.len(), u8::MAX);
 
         // Read current scope header via raw pointer to avoid borrow issues
         let (mut data, mut capacity, used) = unsafe {
@@ -2327,8 +2327,12 @@ impl Environment {
                 let old_start = usize::from(data.0);
                 let new_start = usize::from(new_data.0);
                 let old_word_count = (used as usize).div_ceil(8);
-                for i in 0..old_word_count {
-                    interpreter.mem.mem[new_start + i] = interpreter.mem.mem[old_start + i];
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        interpreter.mem.mem.as_ptr().add(old_start),
+                        interpreter.mem.mem.as_mut_ptr().add(new_start),
+                        old_word_count,
+                    );
                 }
             }
             // Free old block
