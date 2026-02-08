@@ -1901,7 +1901,10 @@ impl MMU {
 
     fn with_capacity(word_count: Word) -> Self {
         let mem = vec![0; usize::from(word_count.0)];
-        let free_list = vec![FreeBlock::new(Word(0.into()), word_count)];
+        // Start the free list at word 1, reserving word 0 as a sentinel.
+        // This ensures no allocation ever returns position 0, which is used
+        // as a "null" / "no scope" sentinel by consumers.
+        let free_list = vec![FreeBlock::new(Word(1.into()), word_count - Word(1.into()))];
         Self {
             mem: mem,
             free_list: free_list,
@@ -2231,6 +2234,49 @@ impl EnvScope {
         let bytes = unsafe { self.raw_bytes(mem) };
         scan_for_key(bytes, key)
     }
+
+    /// Write a ShimValue at the given byte offset within this scope's data block.
+    /// Safety: `value_offset + 8` must be within capacity.
+    unsafe fn write_value_at(mem: &mut MMU, data: Word, capacity: u32, value_offset: usize, val: ShimValue) {
+        unsafe {
+            let buf = EnvScope::raw_bytes_mut_from(mem, data, capacity);
+            let val_bytes: [u8; 8] = std::mem::transmute(val);
+            std::ptr::copy_nonoverlapping(val_bytes.as_ptr(), buf[value_offset..].as_mut_ptr(), 8);
+        }
+    }
+
+    /// Ensure the data block has room for `needed_bytes` total bytes.
+    /// Handles initial allocation (capacity == 0) and growth. Returns the
+    /// (possibly updated) data pointer and capacity after growing.
+    fn ensure_capacity(mem: &mut MMU, data: Word, capacity: u32, used: u32, needed_bytes: usize) -> (Word, u32) {
+        if needed_bytes <= capacity as usize * 8 {
+            return (data, capacity);
+        }
+
+        let mut new_capacity = if capacity == 0 { ENV_SCOPE_DEFAULT_CAPACITY } else { capacity };
+        while needed_bytes > new_capacity as usize * 8 {
+            new_capacity *= 2;
+        }
+        let new_data = alloc!(mem, Word(new_capacity.into()), "EnvScope data grow");
+        // Copy old data
+        if used > 0 {
+            let old_start = usize::from(data.0);
+            let new_start = usize::from(new_data.0);
+            let old_word_count = (used as usize).div_ceil(8);
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    mem.mem.as_ptr().add(old_start),
+                    mem.mem.as_mut_ptr().add(new_start),
+                    old_word_count,
+                );
+            }
+        }
+        // Free old block (only if there was one)
+        if capacity > 0 {
+            mem.free(data, Word(capacity.into()));
+        }
+        (new_data, new_capacity)
+    }
 }
 
 /// Scan a contiguous scope data block (as raw bytes) for `key`, returning the byte
@@ -2264,10 +2310,6 @@ pub struct Environment {
 
 impl Environment {
     pub fn new(mem: &mut MMU) -> Self {
-        // Reserve word 0 so that the scope is never at position 0
-        // (position 0 is used as sentinel for "no scope")
-        let _ = alloc!(mem, Word(1.into()), "EnvScope sentinel");
-
         // Allocate an EnvScope wrapper (data block allocated lazily on first insert)
         let scope_pos = mem.alloc_and_set(EnvScope::new(), "EnvScope");
 
@@ -2305,29 +2347,19 @@ impl Environment {
         env
     }
 
-
     fn insert_new(&mut self, interpreter: &mut Interpreter, key: Vec<u8>, val: ShimValue) {
         assert!(key.len() <= u8::MAX as usize, "Key length {} exceeds maximum {}", key.len(), u8::MAX);
 
         // Check if key already exists in the current scope — update in place (upsert)
-        if self.get(interpreter, &key).is_some() {
-            // Key exists somewhere in the scope chain; update the value in the current scope
-            // by scanning just the current scope directly
-            let scope: &EnvScope = unsafe { interpreter.mem.get(Word(self.current_scope.into())) };
-            if let Some(value_offset) = scope.scan_for_key(&interpreter.mem, &key) {
-                let (data, capacity) = (scope.data, scope.capacity);
-                unsafe {
-                    let buf = EnvScope::raw_bytes_mut_from(&mut interpreter.mem, data, capacity);
-                    let val_bytes: [u8; 8] = std::mem::transmute(val);
-                    std::ptr::copy_nonoverlapping(val_bytes.as_ptr(), buf[value_offset..].as_mut_ptr(), 8);
-                }
-                return;
-            }
-            // Key exists in a parent scope but not current — fall through to append
+        let scope: &EnvScope = unsafe { interpreter.mem.get(Word(self.current_scope.into())) };
+        if let Some(value_offset) = scope.scan_for_key(&interpreter.mem, &key) {
+            let (data, capacity) = (scope.data, scope.capacity);
+            unsafe { EnvScope::write_value_at(&mut interpreter.mem, data, capacity, value_offset, val); }
+            return;
         }
 
         // Read current scope header via raw pointer to avoid borrow issues
-        let (mut data, mut capacity, used) = unsafe {
+        let (data, capacity, used) = unsafe {
             let scope_ptr: *mut EnvScope =
                 interpreter.mem.mem[usize::from(u24::from(self.current_scope))..].as_mut_ptr() as *mut EnvScope;
             ((*scope_ptr).data, (*scope_ptr).capacity, (*scope_ptr).used)
@@ -2338,39 +2370,14 @@ impl Environment {
         let new_used = used as usize + entry_size;
 
         // Grow if needed (also handles initial allocation when capacity == 0)
-        if new_used > capacity as usize * 8 {
-            let mut new_capacity = if capacity == 0 { ENV_SCOPE_DEFAULT_CAPACITY } else { capacity };
-            while new_used > new_capacity as usize * 8 {
-                new_capacity *= 2;
-            }
-            let new_data = alloc!(interpreter.mem, Word(new_capacity.into()), "EnvScope data grow");
-            // Copy old data
-            if used > 0 {
-                let old_start = usize::from(data.0);
-                let new_start = usize::from(new_data.0);
-                let old_word_count = (used as usize).div_ceil(8);
-                unsafe {
-                    std::ptr::copy_nonoverlapping(
-                        interpreter.mem.mem.as_ptr().add(old_start),
-                        interpreter.mem.mem.as_mut_ptr().add(new_start),
-                        old_word_count,
-                    );
-                }
-            }
-            // Free old block (only if there was one)
-            if capacity > 0 {
-                interpreter.mem.free(data, Word(capacity.into()));
-            }
-            data = new_data;
-            capacity = new_capacity;
+        let (data, capacity) = EnvScope::ensure_capacity(&mut interpreter.mem, data, capacity, used, new_used);
 
-            // Update scope header
-            unsafe {
-                let scope_ptr: *mut EnvScope =
-                    interpreter.mem.mem[usize::from(u24::from(self.current_scope))..].as_mut_ptr() as *mut EnvScope;
-                (*scope_ptr).data = data;
-                (*scope_ptr).capacity = capacity;
-            }
+        // Update scope header (data/capacity may have changed)
+        unsafe {
+            let scope_ptr: *mut EnvScope =
+                interpreter.mem.mem[usize::from(u24::from(self.current_scope))..].as_mut_ptr() as *mut EnvScope;
+            (*scope_ptr).data = data;
+            (*scope_ptr).capacity = capacity;
         }
 
         // Append entry: [len: u8][ident_bytes][value: ShimValue (8 bytes)]
@@ -2379,10 +2386,8 @@ impl Environment {
             let off = used as usize;
             buf[off] = key.len() as u8;
             buf[off + 1..off + 1 + key.len()].copy_from_slice(&key);
-            let val_bytes: [u8; 8] = std::mem::transmute(val);
-            // Use copy_nonoverlapping for potentially misaligned write
-            std::ptr::copy_nonoverlapping(val_bytes.as_ptr(), buf[off + 1 + key.len()..].as_mut_ptr(), 8);
         }
+        unsafe { EnvScope::write_value_at(&mut interpreter.mem, data, capacity, used as usize + 1 + key.len(), val); }
 
         // Update used in scope header
         unsafe {
@@ -2390,31 +2395,6 @@ impl Environment {
                 interpreter.mem.mem[usize::from(u24::from(self.current_scope))..].as_mut_ptr() as *mut EnvScope;
             (*scope_ptr).used = new_used as u32;
         }
-    }
-
-    // Helper to traverse scope chain and find a key. Returns the scope_pos of the
-    // scope that contains the key, or None.
-    fn find_key_scope(&self, interpreter: &Interpreter, key: &[u8]) -> Option<u32> {
-        let mut current_scope_pos = self.current_scope;
-
-        loop {
-            if current_scope_pos == 0 {
-                break;
-            }
-
-            let (parent, found) = unsafe {
-                let scope: &EnvScope = interpreter.mem.get(Word(current_scope_pos.into()));
-                (scope.parent, scope.scan_for_key(&interpreter.mem, key).is_some())
-            };
-
-            if found {
-                return Some(current_scope_pos);
-            }
-
-            current_scope_pos = parent.into();
-        }
-
-        None
     }
 
     fn update(&mut self, interpreter: &mut Interpreter, key: &[u8], val: ShimValue) -> Result<(), String> {
@@ -2432,12 +2412,7 @@ impl Environment {
             };
 
             if let Some(value_offset) = value_offset {
-                // Write the new value in-place
-                unsafe {
-                    let buf = EnvScope::raw_bytes_mut_from(&mut interpreter.mem, data, capacity);
-                    let val_bytes: [u8; 8] = std::mem::transmute(val);
-                    std::ptr::copy_nonoverlapping(val_bytes.as_ptr(), buf[value_offset..].as_mut_ptr(), 8);
-                }
+                unsafe { EnvScope::write_value_at(&mut interpreter.mem, data, capacity, value_offset, val); }
                 return Ok(());
             }
 
