@@ -23,6 +23,7 @@ dependencies = [
  "gl",
  "glam",
  "shimlang",
+ "shm-tracy",
 ]
 
 [[package]]
@@ -168,6 +169,10 @@ checksum = "65da48d447333cebe1aadbdd3662f3ba56e76e67f53bc46f3dd5f67c74629d6b"
 
 [[package]]
 name = "shimlang"
+version = "0.1.0"
+
+[[package]]
+name = "shm-tracy"
 version = "0.1.0"
 
 [[package]]
