@@ -1,0 +1,7 @@
+- Hot reloading scripts
+- Script editor
+- Debugger
+- Drawlist debugging
+- debug_draw method on objects
+- Font editor
+- SDF fonts

@@ -13,7 +13,7 @@
 		{
 			"label": "Test ShimLang",
 			"type": "shell",
-			"command": "python3 test_shimlang.py"
+			"command": "cd shimlang; python3 test_shimlang.py"
 		}
 	]
 }
