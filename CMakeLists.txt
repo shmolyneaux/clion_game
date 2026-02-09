@@ -121,7 +121,10 @@ else()
     set(GLEW_PATH "C:/lib/glew-2.1.0")
     
     target_include_directories(game PRIVATE ${SDL2_PATH}/include ${GLEW_PATH}/include)
-    link_directories(${SDL2_PATH}/lib/x64 ${GLEW_PATH}/lib/Release/x64)
+    target_link_directories(game PRIVATE 
+        ${SDL2_PATH}/lib/x64 
+        ${GLEW_PATH}/lib/Release/x64
+    )
 
     target_link_libraries(game SDL2 SDL2main opengl32 glew32 ws2_32 userenv ntdll TracyClient)
 
