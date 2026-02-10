@@ -6439,7 +6439,7 @@ impl<'a> GC<'a> {
                         let pos: usize = pos.into();
                         let dict: &ShimDict = std::mem::transmute(&self.mem.mem[pos]);
 
-                        // Mark the sapce for the dict struct
+                        // Mark the space for the dict struct
                         for idx in pos..(pos + (std::mem::size_of::<ShimDict>()/8)) {
                             self.mask.set(idx);
                         }
