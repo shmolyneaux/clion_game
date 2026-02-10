@@ -6383,14 +6383,6 @@ impl<'a> GC<'a> {
         let mut mask = Bitmask::new(last_block_start.into());
         // Mark word 0 so the GC never frees the sentinel reserved by MMU::with_capacity
         mask.set(0);
-        // Mark all existing free blocks so they don't get double-freed during sweep
-        for block in &mem.free_list[..mem.free_list.len()-1] {
-            let start: usize = block.pos.into();
-            let size: usize = block.size.into();
-            for idx in start..(start + size) {
-                mask.set(idx);
-            }
-        }
         Self {
             mem,
             mask,
@@ -6439,11 +6431,6 @@ impl<'a> GC<'a> {
                         let pos: usize = pos.into();
                         let dict: &ShimDict = std::mem::transmute(&self.mem.mem[pos]);
 
-                        // Mark the space for the dict struct
-                        for idx in pos..(pos + (std::mem::size_of::<ShimDict>()/8)) {
-                            self.mask.set(idx);
-                        }
-
                         if dict.size_pow > 0 {
                             let u64_slice = &self.mem.mem[
                                 usize::from(dict.entries)..
@@ -6462,7 +6449,14 @@ impl<'a> GC<'a> {
                                     vals.push(entry.value);
                                 }
                             }
+                        }
 
+                        // Mark the space for the dict struct
+                        for idx in pos..(pos + (std::mem::size_of::<ShimDict>()/8)) {
+                            self.mask.set(idx);
+                        }
+
+                        if dict.size_pow > 0 {
                             let size = 1usize << dict.size_pow;
 
                             // Mark the indices array
@@ -6555,9 +6549,27 @@ impl<'a> GC<'a> {
     }
 
     fn sweep(&mut self) {
+        let last_block = &self.mem.free_list[self.mem.free_list.len()-1];
+        let last_block_pos = last_block.pos;
+        let last_block_size = last_block.size;
+
+        let mut new_free_list: Vec<FreeBlock> = Vec::new();
         for block in self.mask.find_zeros() {
-            self.mem.free(block.start.into(), (block.end-block.start).into());
+            new_free_list.push(FreeBlock::new(block.start.into(), (block.end - block.start).into()));
         }
+
+        // Merge with or append the sentinel block
+        if let Some(last) = new_free_list.last_mut() {
+            if last.end() == last_block_pos {
+                last.size += last_block_size;
+            } else {
+                new_free_list.push(FreeBlock::new(last_block_pos, last_block_size));
+            }
+        } else {
+            new_free_list.push(FreeBlock::new(last_block_pos, last_block_size));
+        }
+
+        self.mem.free_list = new_free_list;
     }
 }
 
