@@ -6383,6 +6383,14 @@ impl<'a> GC<'a> {
         let mut mask = Bitmask::new(last_block_start.into());
         // Mark word 0 so the GC never frees the sentinel reserved by MMU::with_capacity
         mask.set(0);
+        // Mark all existing free blocks so they don't get double-freed during sweep
+        for block in &mem.free_list[..mem.free_list.len()-1] {
+            let start: usize = block.pos.into();
+            let size: usize = block.size.into();
+            for idx in start..(start + size) {
+                mask.set(idx);
+            }
+        }
         Self {
             mem,
             mask,
@@ -6430,41 +6438,53 @@ impl<'a> GC<'a> {
                     ShimValue::Dict(pos) => {
                         let pos: usize = pos.into();
                         let dict: &ShimDict = std::mem::transmute(&self.mem.mem[pos]);
-                        let u64_slice = &self.mem.mem[
-                            usize::from(dict.entries)..
-                            usize::from(dict.entries)+3*(dict.entry_count as usize)
-                        ];
-                        let entries: &[DictEntry] = std::slice::from_raw_parts(
-                            u64_slice.as_ptr() as *const DictEntry,
-                            u64_slice.len() / 3,
-                        );
-
-                        // Push the keys/vals
-                        let count: usize = dict.entry_count as usize;
-                        for entry in &entries[..count] {
-                            if entry.key.is_uninitialized() {
-                                vals.push(entry.key);
-                                vals.push(entry.value);
-                            }
-                        }
 
                         // Mark the sapce for the dict struct
                         for idx in pos..(pos + (std::mem::size_of::<ShimDict>()/8)) {
                             self.mask.set(idx);
                         }
 
-                        let size = 1 << dict.size_pow;
+                        if dict.size_pow > 0 {
+                            let u64_slice = &self.mem.mem[
+                                usize::from(dict.entries)..
+                                usize::from(dict.entries)+3*(dict.entry_count as usize)
+                            ];
+                            let entries: &[DictEntry] = std::slice::from_raw_parts(
+                                u64_slice.as_ptr() as *const DictEntry,
+                                u64_slice.len() / 3,
+                            );
 
-                        // Mark the indices array
-                        let indices_pos: usize = dict.indices.into();
-                        for idx in indices_pos..(indices_pos + size) {
-                            self.mask.set(idx);
-                        }
+                            // Push the keys/vals
+                            let count: usize = dict.entry_count as usize;
+                            for entry in &entries[..count] {
+                                if !entry.key.is_uninitialized() {
+                                    vals.push(entry.key);
+                                    vals.push(entry.value);
+                                }
+                            }
 
-                        // Mark the entries array
-                        let entries_pos: usize = dict.entries.into();
-                        for idx in entries_pos..(entries_pos + size*3) {
-                            self.mask.set(idx);
+                            let size = 1usize << dict.size_pow;
+
+                            // Mark the indices array
+                            let indices_pos: usize = dict.indices.into();
+                            let stride_bytes = if size <= (u8::MAX as usize) + 1 {
+                                1
+                            } else if size <= (u16::MAX as usize) + 1 {
+                                2
+                            } else {
+                                4
+                            };
+                            let indices_words = size.div_ceil(8 / stride_bytes);
+                            for idx in indices_pos..(indices_pos + indices_words) {
+                                self.mask.set(idx);
+                            }
+
+                            // Mark the entries array
+                            let capacity = (size * 2) / 3;
+                            let entries_pos: usize = dict.entries.into();
+                            for idx in entries_pos..(entries_pos + capacity*3) {
+                                self.mask.set(idx);
+                            }
                         }
                     },
                     ShimValue::StructDef(pos) => {
@@ -6644,6 +6664,10 @@ impl Interpreter {
         
         let mut roots: Vec<ShimValue> = Vec::new();
         
+        // Collect scope memory locations so we can mark them
+        let scope_word_count = (std::mem::size_of::<EnvScope>() as usize).div_ceil(8);
+        let mut scope_regions: Vec<(usize, usize)> = Vec::new(); // (pos, word_count)
+        
         // Traverse the scope chain and collect all values as roots
         // We need to do this before creating the GC to avoid borrowing conflicts
         let mut current_scope_pos = env.current_scope;
@@ -6656,6 +6680,14 @@ impl Interpreter {
             let scope: &EnvScope = unsafe {
                 self.mem.get(Word(current_scope_pos.into()))
             };
+            
+            // Track scope struct memory
+            scope_regions.push((current_scope_pos as usize, scope_word_count));
+            
+            // Track scope data block memory
+            if scope.capacity > 0 {
+                scope_regions.push((usize::from(scope.data.0), scope.capacity as usize));
+            }
             
             // Walk the contiguous data block and collect values as roots
             let bytes = unsafe { scope.raw_bytes(&self.mem) };
@@ -6679,6 +6711,14 @@ impl Interpreter {
         
         // Now create GC and process roots
         let mut gc = GC::new(&mut self.mem);
+        
+        // Mark scope memory regions
+        for (pos, word_count) in scope_regions {
+            for idx in pos..(pos + word_count) {
+                gc.mask.set(idx);
+            }
+        }
+        
         gc.mark(roots);
         gc.sweep();
     }
