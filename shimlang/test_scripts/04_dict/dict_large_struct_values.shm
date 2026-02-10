@@ -1,0 +1,15 @@
+struct Point {
+    x,
+    y
+}
+
+fn rounds() {
+    let d = dict();
+    for i in 0..1000 {
+        d[i] = Point(i*2, i*3);
+    }
+}
+
+rounds();
+
+print("done");

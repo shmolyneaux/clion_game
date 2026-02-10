@@ -3282,7 +3282,7 @@ impl ShimDict {
     fn typed_indices(&self, interpreter: &Interpreter) -> TypedIndices {
         match self.index_size() {
             0 => TypedIndices::Zero,
-            x if x <= (u8::MAX as usize) => TypedIndices::U8(
+            x if x <= (u8::MAX as usize) + 1 => TypedIndices::U8(
                 self.indicies_mut::<u8>(interpreter)
             ),
             x if x <= (u16::MAX as usize) + 1 => TypedIndices::U16(
