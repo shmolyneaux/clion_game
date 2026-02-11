@@ -1850,7 +1850,7 @@ impl FreeBlock {
         Self { pos, size }
     }
 
-    fn end(&self) -> Word {
+    pub fn end(&self) -> Word {
         self.pos + self.size
     }
 }
@@ -6328,7 +6328,6 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
 #[derive(Debug)]
 pub struct Bitmask {
     data: Vec<u64>,
-    size: usize,
 }
 
 impl Bitmask {
@@ -6338,7 +6337,6 @@ impl Bitmask {
 
         Bitmask {
             data: vec![0; blocks],
-            size: num_bits,
         }
     }
 
@@ -6361,23 +6359,51 @@ impl Bitmask {
         let mut ranges = Vec::new();
         let mut start_of_run: Option<usize> = None;
 
-        for i in 0..self.size {
-            let is_zero = !self.is_set(i);
-
-            if is_zero {
-                if start_of_run == None {
-                    start_of_run = Some(i);
+        for (idx, word) in self.data.iter().enumerate() {
+            if *word == 0 {
+                if start_of_run.is_none() {
+                    start_of_run = Some(idx*64);
+                }
+            } else if *word == u64::MAX {
+                if let Some(start_bit) = start_of_run {
+                    ranges.push(start_bit..(idx*64));
+                    start_of_run = None;
                 }
             } else {
-                if let Some(start) = start_of_run {
-                    ranges.push(start..i);
-                    start_of_run = None;
+                let mut bit_offset: usize;
+                match start_of_run {
+                    Some(start_bit) => {
+                        bit_offset = word.trailing_zeros() as usize;
+                        ranges.push(start_bit..(idx*64 + bit_offset));
+                        start_of_run = None
+                    }
+                    None => {
+                        bit_offset = word.trailing_ones() as usize;
+                        start_of_run = Some(idx*64 + bit_offset);
+                    }
+                }
+                let mut shifted_word = word >> bit_offset;
+                for i in (bit_offset as usize)..64 {
+                    let is_zero = (shifted_word & 1) == 0;
+
+                    if is_zero {
+                        if start_of_run == None {
+                            start_of_run = Some(i);
+                        }
+                    } else {
+                        if let Some(start) = start_of_run {
+                            ranges.push(start..i);
+                            start_of_run = None;
+                        }
+                    }
+                    shifted_word >>= 1;
                 }
             }
         }
 
-        if let Some(start) = start_of_run {
-            ranges.push(start..self.size);
+
+        if let Some(start_bit) = start_of_run {
+            ranges.push(start_bit..self.data.len()*64);
         }
 
         ranges
@@ -6599,10 +6625,10 @@ impl<'a> GC<'a> {
             .iter()
             .map(|block| FreeBlock { pos: block.start.into(), size: (block.end-block.start).into() }).collect();
         let new_last_block = self.mem.free_list[self.mem.free_list.len()-1];
-        if new_last_block.pos + new_last_block.size == last_block.pos {
+        if new_last_block.end() >= last_block.pos {
             // Merge with the new last block
             let len = self.mem.free_list.len();
-            self.mem.free_list[len - 1].size += last_block.size;
+            self.mem.free_list[len - 1].size = last_block.end() - self.mem.free_list[len - 1].pos;
         } else {
             // Append the previous last free block (which was not included in the bitmask)
             self.mem.free_list.push(last_block);

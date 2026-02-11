@@ -89,9 +89,6 @@ impl Navigation {
             igText(CString::new(format!("Disassembly:\n{}",
                                         shimlang::format_asm(&interpreter.program.bytecode)
                                         )).unwrap().as_ptr());
-            igText(CString::new(format!("Free List:\n{:#?}",
-                                        &interpreter.mem.free_list
-                                        )).unwrap().as_ptr());
 
             // Memory viewer
 
@@ -123,16 +120,31 @@ impl Navigation {
 
             let page_size: usize = 128;
             let item_offset: usize = page_size * self.memory_page as usize;
-            for (idx, x) in interpreter.mem.mem.iter().skip(item_offset).take(page_size).enumerate() {
+            for (relative_idx, x) in interpreter.mem.mem.iter().skip(item_offset).take(page_size).enumerate() {
+                let idx = relative_idx + item_offset;
                 if !(idx % 4 == 0) {
                     // We show 4 memory locations per line, so if we're not at the start of the line
                     // we know the text should continue on the same line
                     igSameLine();
                 } else {
-                    igTextColored(0.6, 0.6, 0.6, 1.0, CString::new(format!("{:08X}", idx + item_offset as usize)).unwrap().as_ptr());
+                    // Start of a new line, show the memory address
+                    igTextColored(0.6, 0.6, 0.6, 1.0, CString::new(format!("{:08X}", idx)).unwrap().as_ptr());
                     igSameLine();
                 }
-                igTextColored(1.0, 1.0, 1.0, 1.0, CString::new(format!("{:016X}", x)).unwrap().as_ptr());
+                let mut is_free_memory = false;
+                for block in interpreter.mem.free_list.iter() {
+                    if usize::from(block.pos) > idx {
+                        break;
+                    }
+                    if usize::from(block.pos) <= idx && idx < block.end().into() {
+                        is_free_memory = true;
+                    }
+                }
+                if is_free_memory {
+                    igTextColored(0.3, 0.3, 0.3, 0.3, CString::new(format!("{:016X}", x)).unwrap().as_ptr());
+                } else {
+                    igTextColored(1.0, 1.0, 1.0, 1.0, CString::new(format!("{:016X}", x)).unwrap().as_ptr());
+                }
             }
             igText(CString::new(format!("Did that work?")).unwrap().as_ptr());
 
