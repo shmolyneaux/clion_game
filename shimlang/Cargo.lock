@@ -122,7 +122,12 @@ version = "0.1.0"
 dependencies = [
  "facet",
  "facet-reflect",
+ "shm-tracy",
 ]
+
+[[package]]
+name = "shm-tracy"
+version = "0.1.0"
 
 [[package]]
 name = "static_assertions"

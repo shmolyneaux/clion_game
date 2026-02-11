@@ -79,15 +79,27 @@ impl Navigation {
         let mut open = true;
         unsafe {
             igBegin(c"Shimlang Debug".as_ptr(), &mut open as *mut bool, IMGUI_WINDOW_FLAGS_NO_FOCUS_ON_APPEARING);
+
+            igText(CString::new(format!("Mem size is {}", interpreter.mem.mem.len())).unwrap().as_ptr());
+            igText(CString::new(format!("Mask size is {}", usize::from(interpreter.mem.free_list[interpreter.mem.free_list.len()-1].pos))).unwrap().as_ptr());
+
+
             igText(CString::new(format!("Interpreter source: {:#?}", interpreter.source)).unwrap().as_ptr());
             igText(cformat!("ANother test {}", 42).as_ptr());
             igText(CString::new(format!("Disassembly:\n{}",
                                         shimlang::format_asm(&interpreter.program.bytecode)
                                         )).unwrap().as_ptr());
+            igText(CString::new(format!("Free List:\n{:#?}",
+                                        &interpreter.mem.free_list
+                                        )).unwrap().as_ptr());
 
             // Memory viewer
 
             igText(CString::new(format!("Mem size is {}", interpreter.mem.mem.len())).unwrap().as_ptr());
+
+
+
+
             if self.memory_page == 0 {
                 igBeginDisabled();
                 igButton(CString::new(format!("Prev")).unwrap().as_ptr());

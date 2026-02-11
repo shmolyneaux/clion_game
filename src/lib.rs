@@ -244,6 +244,7 @@ pub struct DebugState {
 /// -180.0 180.0
 pub struct State {
     interpreter: shimlang::Interpreter,
+    env: shimlang::Environment,
 
     frame_num: u64,
     view: Mat4,
@@ -926,9 +927,27 @@ fn init_state() -> State {
 
     println!("Creating interpreter");
     let interpreter_config = shimlang::Config::default();
-    let ast = shimlang::ast_from_text(br#"print("Hello world");"#).unwrap();
+    let ast = shimlang::ast_from_text(br#"
+
+    struct Point {
+        x,
+        y
+    }
+
+    fn rounds() {
+        let d = dict();
+        for i in 0..1000 {
+            d[i] = Point(i*2, i*3);
+        }
+    }
+
+    rounds();
+    
+    print("done");
+    "#).unwrap();
     let program = shimlang::compile_ast(&ast).unwrap();
-    let interpreter = shimlang::Interpreter::create(&shimlang::Config::default(), program);
+    let mut interpreter = shimlang::Interpreter::create(&shimlang::Config::default(), program);
+    let env = shimlang::Environment::new_with_builtins(&mut interpreter);
 
     println!("Generating arrays/buffers");
     let debug_vao = VertexArray::create();
@@ -1165,6 +1184,7 @@ fn init_state() -> State {
     println!("State initialized!");
     let mut state = State {
         interpreter,
+        env,
         frame_num,
         debug_vao,
         debug_vbo,
@@ -1221,28 +1241,6 @@ fn update_keys(state: &mut State) {
     }
 }
 
-struct TracyZone {
-    ctx: TracyCZoneCtx
-}
-
-impl Drop for TracyZone {
-    fn drop(&mut self) {
-        unsafe {
-            tracy_zone_end(self.ctx);
-        }
-    }
-}
-
-fn zone_start(name: &'static CStr) -> TracyZone {
-    unsafe {
-        let ctx = tracy_zone_begin_n(name.as_ptr() as *const c_char, 1);
-        tracy_zone_name(ctx, name.as_ptr() as *const c_char, name.to_bytes().len() as u32);
-        TracyZone {
-            ctx
-        }
-    }
-}
-
 fn frame(state: &mut State, delta: f32) {
     if state.frame_num == 00 {
         println!("Starting first frame");
@@ -1251,6 +1249,18 @@ fn frame(state: &mut State, delta: f32) {
     {
         let _zone = zone_scoped!("imgui_debug");
         //imgui_debug(state);
+    }
+
+    {
+        let _zone = zone_scoped!("Run interpreter");
+        let mut pc = 0;
+        match state.interpreter.execute_bytecode_extended(&mut pc, shimlang::ArgBundle::new(), &mut state.env) {
+            Ok(_) => {},
+            Err(msg) => {
+                eprintln!("{msg}");
+            }
+        };
+        state.interpreter.gc(&state.env);
     }
 
     unsafe {

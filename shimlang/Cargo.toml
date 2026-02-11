@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 facet = { version = "0.27.14", optional = true}
 facet-reflect = { version = "0.27.14", optional = true }
-
+shm-tracy = { path = "../shm-tracy", default-features = false }
 
 [patch.crates-io]
 facet = { path = "../facet/facet" }

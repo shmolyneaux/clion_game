@@ -12,6 +12,9 @@ use std::any::{Any, type_name, type_name_of_val};
 use std::mem::size_of;
 use std::rc::Rc;
 
+use shm_tracy::*;
+use shm_tracy::zone_scoped;
+
 #[derive(Debug, Clone, Copy)]
 pub struct Span {
     pub start: u32,
@@ -1829,7 +1832,7 @@ impl From<usize> for Word {
 }
 
 #[cfg_attr(feature = "facet", derive(Facet))]
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct FreeBlock {
     #[cfg(feature = "dev")]
     pub pos: Word,
@@ -2165,6 +2168,7 @@ impl MMU {
 //
 // Each entry occupies 1 + name_len + 8 bytes. For a typical variable name of ~6 bytes, that's
 // 15 bytes per entry. A scope starts with capacity 0 and lazily allocates on first insert.
+#[derive(Debug)]
 struct EnvScope {
     // Pointer to the contiguous data block in MMU (Word(0) when capacity is 0)
     data: Word,
@@ -2551,6 +2555,8 @@ pub enum ShimValue {
     StructDef(Word),
     Struct(Word),
     Native(Word),
+    // For now this is really only used for GC purposes
+    Environment(Word),
 }
 const _: () = {
     assert!(std::mem::size_of::<ShimValue>() == 8);
@@ -3095,6 +3101,7 @@ impl DictEntry {
 // it starts with this size_pow value (2^3 = 8 index slots, capacity of ~5 entries).
 const MIN_NON_ZERO_SIZE_POW: u8 = 3;
 
+#[derive(Debug)]
 struct NewShimDict {
     // Size of the index array, always a power of 2
     size_pow: u8,
@@ -3221,6 +3228,7 @@ impl NewShimDict {
     }
 
     fn expand_capacity(&mut self, interpreter: &mut Interpreter) {
+        let _zone = zone_scoped!("ShimDict::expand_capacity");
         let old_size = self.index_size();
         let old_capacity = self.capacity();
         self.size_pow = if old_size == 0 {
@@ -3282,7 +3290,7 @@ impl NewShimDict {
     fn typed_indices(&self, interpreter: &Interpreter) -> TypedIndices {
         match self.index_size() {
             0 => TypedIndices::Zero,
-            x if x <= (u8::MAX as usize) => TypedIndices::U8(
+            x if x <= (u8::MAX as usize) + 1 => TypedIndices::U8(
                 self.indicies_mut::<u8>(interpreter)
             ),
             x if x <= (u16::MAX as usize) + 1 => TypedIndices::U16(
@@ -3435,7 +3443,11 @@ impl NewShimDict {
         }
         let idx = match freeslot {
             Some(idx) => idx,
-            None => panic!("Could not find free slot"),
+            None => {
+                eprintln!("{self:#?}");
+                eprintln!("Capacity: {:#?}  Mask: {}", self.capacity(), mask);
+                panic!("Could not find free slot");
+            },
         };
         match indices {
             TypedIndices::Zero => panic!("probingn nothing"),
@@ -3792,6 +3804,7 @@ fn shim_range(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimVal
 }
 
 fn shim_print(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let _zone = zone_scoped!("shim_print");
     for (idx, arg) in args.args.iter().enumerate() {
         if idx != 0 {
             print!(" ");
@@ -4438,6 +4451,7 @@ fn get_type_name(value: &ShimValue) -> &'static str {
         ShimValue::StructDef(_) => "struct definition",
         ShimValue::Struct(_) => "struct",
         ShimValue::Native(_) => "native object",
+        ShimValue::Environment(_) => "environment",
     }
 }
 
@@ -6311,6 +6325,7 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
     }
 }
 
+#[derive(Debug)]
 pub struct Bitmask {
     data: Vec<u64>,
     size: usize,
@@ -6342,6 +6357,7 @@ impl Bitmask {
     }
 
     pub fn find_zeros(&self) -> Vec<Range<usize>> {
+        let _zone = zone_scoped!("find_zeros");
         let mut ranges = Vec::new();
         let mut start_of_run: Option<usize> = None;
 
@@ -6390,8 +6406,10 @@ impl<'a> GC<'a> {
     }
 
     fn mark(&mut self, mut vals: Vec<ShimValue>) {
+        let _zone = zone_scoped!("GC mark");
         unsafe {
             while !vals.is_empty() {
+                let _zone = zone_scoped!("GC mark item");
                 match vals.pop().unwrap() {
                     ShimValue::Integer(_) | ShimValue::Float(_) | ShimValue::Bool(_) | ShimValue::Unit | ShimValue::None | ShimValue::Uninitialized => (),
                     ShimValue::Fn(fn_pos) => {
@@ -6529,14 +6547,65 @@ impl<'a> GC<'a> {
                         vals.extend(ptr.gc_vals());
                         vals.push(ShimValue::Native(pos.into()));
                     },
+                    ShimValue::Environment(pos) => {
+                        let scope: &EnvScope = unsafe {
+                            self.mem.get(pos)
+                        };
+
+                        // Chunk of memory that store the EnvScope metadata
+                        let pos: usize = pos.into();
+                        for bit in pos..(pos + std::mem::size_of::<EnvScope>().div_ceil(8)) {
+                            self.mask.set(bit);
+                        }
+
+                        // Data block
+                        let start = usize::from(scope.data);
+                        let end = start + scope.capacity as usize;
+                        for bit in start..end {
+                            self.mask.set(bit);
+                        }
+                        
+                        // Walk the contiguous data block and collect values
+                        let bytes = unsafe { scope.raw_bytes(&self.mem) };
+                        let mut off = 0usize;
+                        while off < bytes.len() {
+                            let key_len = bytes[off] as usize;
+                            let value_offset = off + 1 + key_len;
+                            let val: ShimValue = unsafe {
+                                let mut val_bytes = [0u8; 8];
+                                std::ptr::copy_nonoverlapping(bytes[value_offset..].as_ptr(), val_bytes.as_mut_ptr(), 8);
+                                std::mem::transmute(val_bytes)
+                            };
+                            vals.push(val);
+                            off = value_offset + 8;
+                        }
+
+                        if scope.parent != 0.into() {
+                            vals.push(ShimValue::Environment(Word(scope.parent)));
+                        }
+                    }
                 }
             }
         }
     }
 
     fn sweep(&mut self) {
-        for block in self.mask.find_zeros() {
-            self.mem.free(block.start.into(), (block.end-block.start).into());
+        let _zone = zone_scoped!("GC sweep");
+
+        // TODO: need to add the original last block from the free list
+        let last_block = self.mem.free_list[self.mem.free_list.len()-1];
+        self.mem.free_list = self.mask
+            .find_zeros()
+            .iter()
+            .map(|block| FreeBlock { pos: block.start.into(), size: (block.end-block.start).into() }).collect();
+        let new_last_block = self.mem.free_list[self.mem.free_list.len()-1];
+        if new_last_block.pos + new_last_block.size == last_block.pos {
+            // Merge with the new last block
+            let len = self.mem.free_list.len();
+            self.mem.free_list[len - 1].size += last_block.size;
+        } else {
+            // Append the previous last free block (which was not included in the bitmask)
+            self.mem.free_list.push(last_block);
         }
     }
 }
@@ -6550,6 +6619,7 @@ pub struct Interpreter {
 
 impl Interpreter {
     pub fn print_mem(&self) {
+        let _zone = zone_scoped!("print_mem");
         let mut count = 0;
         let mut idx = 0;
         for block in self.mem.free_list.iter() {
@@ -6566,6 +6636,7 @@ impl Interpreter {
     }
 
     pub fn print_env(&self, env: &Environment) {
+        let _zone = zone_scoped!("print_env");
         let mut current_scope_pos = env.current_scope;
         let mut idx = 0;
         
@@ -6639,46 +6710,22 @@ impl Interpreter {
     }
 
     pub fn gc(&mut self, env: &Environment) {
-        self.print_mem();
-        self.print_env(env);
+        let _zone = zone_scoped!("GC");
+        //self.print_mem();
+        //self.print_env(env);
         
-        let mut roots: Vec<ShimValue> = Vec::new();
-        
-        // Traverse the scope chain and collect all values as roots
-        // We need to do this before creating the GC to avoid borrowing conflicts
-        let mut current_scope_pos = env.current_scope;
-        loop {
-            if current_scope_pos == 0 {
-                break;
-            }
-            
-            // Get the EnvScope
-            let scope: &EnvScope = unsafe {
-                self.mem.get(Word(current_scope_pos.into()))
-            };
-            
-            // Walk the contiguous data block and collect values as roots
-            let bytes = unsafe { scope.raw_bytes(&self.mem) };
-            let mut off = 0usize;
-            while off < bytes.len() {
-                let key_len = bytes[off] as usize;
-                let value_offset = off + 1 + key_len;
-                let val: ShimValue = unsafe {
-                    let mut val_bytes = [0u8; 8];
-                    std::ptr::copy_nonoverlapping(bytes[value_offset..].as_ptr(), val_bytes.as_mut_ptr(), 8);
-                    std::mem::transmute(val_bytes)
-                };
-                roots.push(val);
-                off = value_offset + 8;
-            }
-            
-            // Move to parent scope
-            let parent: u32 = scope.parent.into();
-            current_scope_pos = parent;
+        unsafe {
+            let scope: &EnvScope = self.mem.get(Word(env.current_scope.into()));
         }
+
+        let mut roots: Vec<ShimValue> = Vec::new();
+        roots.push(ShimValue::Environment(Word(env.current_scope.into())));
         
         // Now create GC and process roots
-        let mut gc = GC::new(&mut self.mem);
+        let mut gc = {
+            let _zone = zone_scoped!("Init GC");
+            GC::new(&mut self.mem)
+        };
         gc.mark(roots);
         gc.sweep();
     }
@@ -6713,6 +6760,7 @@ impl Interpreter {
         mut pending_args: ArgBundle,
         env: &mut Environment,
     ) -> Result<ShimValue, String> {
+        let _zone = zone_scoped!("Execute Bytecode");
         let mut pc = *mod_pc;
         // These are values that are operated on. Expressions push and pop to
         // this stack, return values go on this stack etc.
@@ -6745,6 +6793,7 @@ impl Interpreter {
 
         let bytes = &self.program.clone().bytecode;
         while pc < bytes.len() {
+            //let _zone = zone_scoped!("Execute Single Instruction");
             match bytes[pc] {
                 val if val == ByteCode::Pop as u8 => {
                     stack.pop();

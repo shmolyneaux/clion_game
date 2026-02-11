@@ -19,6 +19,18 @@ pub struct ___tracy_source_location_data {
 
 unsafe impl Sync for ___tracy_source_location_data {}
 
+pub struct TracyZone {
+    pub ctx: TracyCZoneCtx
+}
+
+impl Drop for TracyZone {
+    fn drop(&mut self) {
+        unsafe {
+            tracy_zone_end(self.ctx);
+        }
+    }
+}
+
 #[macro_export]
 macro_rules! zone_scoped {
     ($name:expr) => {{
@@ -30,7 +42,7 @@ macro_rules! zone_scoped {
             color: 0,
         };
         unsafe {
-            TracyZone { ctx: ___tracy_emit_zone_begin(&LOC as *const ___tracy_source_location_data, 1) }
+            $crate::TracyZone { ctx: $crate::___tracy_emit_zone_begin(&LOC as *const ___tracy_source_location_data, 1) }
         }
     }};
 }
@@ -50,15 +62,16 @@ unsafe extern "C" {
 
 #[cfg(not(feature = "tracy-enable"))]
 mod stubs {
-    fn tracy_zone_begin_n(name: *const c_char, active: c_int) -> TracyCZoneCtx { TracyCZoneCtx {id: 0, active: 0} }
-    fn tracy_zone_begin_ns(name: *const c_char, depth: c_int, active: c_int) -> TracyCZoneCtx { TracyCZoneCtx {id: 0, active: 0} }
-    fn tracy_zone_end(ctx: TracyCZoneCtx) {}
-    fn tracy_zone_text(ctx: TracyCZoneCtx, txt: *const c_char, len: c_uint) {}
-    fn tracy_zone_name(ctx: TracyCZoneCtx, txt: *const c_char, len: c_uint) {}
-    fn tracy_zone_color(ctx: TracyCZoneCtx, color: c_uint) {}
+    use crate::*;
+    pub fn tracy_zone_begin_n(_name: *const c_char, _active: c_int) -> TracyCZoneCtx { TracyCZoneCtx {id: 0, active: 0} }
+    pub fn tracy_zone_begin_ns(_name: *const c_char, _depth: c_int, _active: c_int) -> TracyCZoneCtx { TracyCZoneCtx {id: 0, active: 0} }
+    pub fn tracy_zone_end(_ctx: TracyCZoneCtx) {}
+    pub fn tracy_zone_text(_ctx: TracyCZoneCtx, _txt: *const c_char, _len: c_uint) {}
+    pub fn tracy_zone_name(_ctx: TracyCZoneCtx, _txt: *const c_char, _len: c_uint) {}
+    pub fn tracy_zone_color(_ctx: TracyCZoneCtx, _color: c_uint) {}
 
-    unsafe fn ___tracy_emit_zone_begin(loc: *const ___tracy_source_location_data, active: i32) -> TracyCZoneCtx { TracyCZoneCtx {id: 0, active: 0} }
-    unsafe fn ___tracy_emit_zone_end(ctx: TracyCZoneCtx) {}
+    pub unsafe fn ___tracy_emit_zone_begin(_loc: *const ___tracy_source_location_data, _active: i32) -> TracyCZoneCtx { TracyCZoneCtx {id: 0, active: 0} }
+    pub unsafe fn ___tracy_emit_zone_end(_ctx: TracyCZoneCtx) {}
 }
 
 #[cfg(not(feature = "tracy-enable"))]
