@@ -1,0 +1,1256 @@
+# Shimlang Language Reference
+
+Shimlang is a dynamically-typed scripting language designed for the SHIM game
+engine. It features a clean syntax, first-class functions with closures, structs
+with methods, and a growing standard library of built-in types and functions.
+
+> **Note:** Shimlang is under active development. This document describes the
+> current state of the language as it exists today.
+
+## Table of Contents
+
+- [Hello, World!](#hello-world)
+- [Variables](#variables)
+- [Data Types](#data-types)
+  - [Integers](#integers)
+  - [Floats](#floats)
+  - [Booleans](#booleans)
+  - [Strings](#strings)
+  - [None](#none)
+  - [Lists](#lists)
+  - [Dictionaries](#dictionaries)
+- [Operators](#operators)
+  - [Arithmetic](#arithmetic)
+  - [Comparison](#comparison)
+  - [Logical](#logical)
+  - [Negation](#negation)
+  - [Range](#range)
+- [Control Flow](#control-flow)
+  - [If / Else](#if--else)
+  - [While Loops](#while-loops)
+  - [For Loops](#for-loops)
+  - [Break and Continue](#break-and-continue)
+- [Functions](#functions)
+  - [Defining Functions](#defining-functions)
+  - [Implicit Return](#implicit-return)
+  - [Default Arguments](#default-arguments)
+  - [Keyword Arguments](#keyword-arguments)
+  - [Anonymous Functions](#anonymous-functions)
+  - [Closures](#closures)
+- [Structs](#structs)
+  - [Defining Structs](#defining-structs)
+  - [Methods](#methods)
+  - [Static Methods](#static-methods)
+  - [Default Field Values](#default-field-values)
+  - [Operator Overloading](#operator-overloading)
+  - [Struct Introspection](#struct-introspection)
+- [String Interpolation](#string-interpolation)
+- [Block Expressions](#block-expressions)
+- [Comments](#comments)
+- [Custom Iterators](#custom-iterators)
+- [Built-in Functions](#built-in-functions)
+- [Suggested Improvements](#suggested-improvements)
+
+## Hello, World!
+
+The simplest Shimlang program prints a message to the console using the built-in
+`print` function:
+
+```rust
+print("Hello, World!");
+```
+
+Output:
+
+```
+Hello, World!
+```
+
+`print` accepts multiple arguments separated by commas, which are printed
+space-separated:
+
+```rust
+print("The answer is", 42);
+```
+
+Output:
+
+```
+The answer is 42
+```
+
+## Variables
+
+Variables are declared with `let` and can hold any type. Reassignment uses `=`
+without the `let` keyword:
+
+```rust
+let greeting = "Hello";
+let year = 2024;
+print(greeting, year);
+
+let x = 10;
+x = 20;
+print(x);
+```
+
+Output:
+
+```
+Hello 2024
+20
+```
+
+## Data Types
+
+### Integers
+
+Integers are 32-bit signed values. They support standard arithmetic operations:
+
+```rust
+let a = 42;
+let b = -7;
+print(a);
+print(b);
+print(a + b);
+```
+
+Output:
+
+```
+42
+-7
+35
+```
+
+### Floats
+
+Floating-point numbers are 32-bit (single precision). A number with a decimal
+point is treated as a float:
+
+```rust
+let pi = 3.14;
+let neg = -2.5;
+print(pi);
+print(neg);
+```
+
+Output:
+
+```
+3.14
+-2.5
+```
+
+Integer division truncates toward zero. Use floats for decimal results:
+
+```rust
+print(10 / 3);
+print(10.0 / 3.0);
+```
+
+Output:
+
+```
+3
+3.3333333
+```
+
+### Booleans
+
+The two boolean literals are `true` and `false`:
+
+```rust
+print(true);
+print(false);
+```
+
+Output:
+
+```
+true
+false
+```
+
+### Strings
+
+Strings are created with double quotes. They support indexing, length, escape
+sequences, and concatenation with `+`:
+
+```rust
+let name = "Shimlang";
+print(name);
+print(name.len());
+print(name[0]);
+print("Hello" + " " + "World");
+```
+
+Output:
+
+```
+Shimlang
+8
+S
+Hello World
+```
+
+Supported escape sequences include `\n` (newline), `\t` (tab), `\"` (double
+quote), and `\\` (backslash):
+
+```rust
+print("line one\nline two");
+print("a \"quoted\" word");
+```
+
+Output:
+
+```
+line one
+line two
+a "quoted" word
+```
+
+Strings can be compared for equality:
+
+```rust
+let a = "test";
+let b = "test";
+let c = "other";
+print(a == b);
+print(a == c);
+```
+
+Output:
+
+```
+true
+false
+```
+
+### None
+
+`None` represents the absence of a value. Functions that do not explicitly
+return a value return `None`:
+
+```rust
+let x = None;
+print(x);
+```
+
+Output:
+
+```
+None
+```
+
+### Lists
+
+Lists are ordered, mutable collections that can hold values of any type:
+
+```rust
+let numbers = [1, 2, 3, 4, 5];
+print(numbers);
+print(numbers[0]);
+print(numbers[-1]);
+print(numbers.len());
+```
+
+Output:
+
+```
+[1, 2, 3, 4, 5]
+1
+5
+5
+```
+
+Negative indices count from the end of the list. List elements can be reassigned
+by index:
+
+```rust
+let lst = ["a", "b", "c"];
+lst[0] = "x";
+lst[-1] = "z";
+print(lst);
+```
+
+Output:
+
+```
+[x, b, z]
+```
+
+Lists have a rich set of methods:
+
+| Method | Description |
+|--------|-------------|
+| `.len()` | Returns the number of elements |
+| `.append(val)` | Adds an element to the end |
+| `.pop()` | Removes and returns the last element |
+| `.pop(idx)` | Removes and returns the element at `idx` |
+| `.insert(idx, val)` | Inserts `val` before position `idx` |
+| `.extend(iterable)` | Appends all elements from an iterable |
+| `.clear()` | Removes all elements |
+| `.index(val)` | Returns the index of `val`, or `None` |
+| `.index(val, default)` | Returns the index of `val`, or `default` |
+| `.sort()` | Sorts the list in place |
+| `.sort(key_fn)` | Sorts in place using a key function |
+| `.sorted()` | Returns a new sorted list |
+| `.reverse()` | Reverses the list in place |
+| `.reversed()` | Returns a new reversed list |
+| `.map(fn)` | Returns a new list with `fn` applied to each element |
+| `.filter(fn)` | Returns a new list of elements where `fn` returns truthy |
+
+Examples:
+
+```rust
+let lst = [3, 1, 4, 1, 5];
+lst.append(9);
+print(lst);
+
+lst.sort();
+print(lst);
+
+let doubled = lst.map(fn(x) { x * 2 });
+print(doubled);
+
+let big = lst.filter(fn(x) { x > 3 });
+print(big);
+```
+
+Output:
+
+```
+[3, 1, 4, 1, 5, 9]
+[1, 1, 3, 4, 5, 9]
+[2, 2, 6, 8, 10, 18]
+[4, 5, 9]
+```
+
+The `sorted()` method returns a copy without modifying the original:
+
+```rust
+let lst = [5, 2, 8, 1];
+let sorted_copy = lst.sorted();
+print(lst);
+print(sorted_copy);
+```
+
+Output:
+
+```
+[5, 2, 8, 1]
+[1, 2, 5, 8]
+```
+
+The `sort` method accepts an optional key function:
+
+```rust
+let lst = [5, 2, 8, 1, 9, 3];
+lst.sort(fn(x) { 0 - x });
+print(lst);
+```
+
+Output:
+
+```
+[9, 8, 5, 3, 2, 1]
+```
+
+### Dictionaries
+
+Dictionaries are hash maps created with the `dict()` built-in. Keys can be
+strings or integers:
+
+```rust
+let d = dict();
+d["name"] = "Alice";
+d["age"] = 30;
+print(d["name"]);
+print(d["age"]);
+print(d.len());
+```
+
+Output:
+
+```
+Alice
+30
+2
+```
+
+You can also use the `.set()` and `.get()` methods:
+
+```rust
+let d = dict();
+d.set("key", "value");
+print(d.get("key"));
+```
+
+Output:
+
+```
+value
+```
+
+Dictionary methods:
+
+| Method | Description |
+|--------|-------------|
+| `.len()` | Returns the number of entries |
+| `.get(key)` | Returns the value for `key` |
+| `.set(key, val)` | Sets `key` to `val` |
+| `.has(key)` | Returns `true` if `key` exists |
+| `.pop(key)` | Removes `key` and returns its value |
+| `.pop(key, default)` | Removes `key` or returns `default` |
+| `.keys()` | Returns an iterator over keys |
+| `.values()` | Returns an iterator over values |
+| `.items()` | Returns an iterator over entries with `.key` and `.value` |
+
+Iterating over a dictionary yields its keys. Use `.items()` for key-value pairs:
+
+```rust
+let d = dict();
+d["a"] = 1;
+d["b"] = 2;
+d["c"] = 3;
+
+for key in d {
+    print(key);
+}
+
+for item in d.items() {
+    print(item.key, "=>", item.value);
+}
+```
+
+Output:
+
+```
+a
+b
+c
+a => 1
+b => 2
+c => 3
+```
+
+## Operators
+
+### Arithmetic
+
+| Operator | Description |
+|----------|-------------|
+| `+` | Addition (also string concatenation) |
+| `-` | Subtraction |
+| `*` | Multiplication |
+| `/` | Division (integer division truncates) |
+| `%` | Modulus |
+
+```rust
+print(10 + 3);
+print(10 - 3);
+print(10 * 3);
+print(10 / 3);
+print(10 % 3);
+```
+
+Output:
+
+```
+13
+7
+30
+3
+1
+```
+
+### Comparison
+
+| Operator | Description |
+|----------|-------------|
+| `==` | Equal to |
+| `<` | Less than |
+| `>` | Greater than |
+| `<=` | Less than or equal |
+| `>=` | Greater than or equal |
+
+```rust
+print(1 < 2);
+print(2 > 1);
+print(1 <= 1);
+print(1 >= 2);
+print(1 == 1);
+```
+
+Output:
+
+```
+true
+true
+true
+false
+true
+```
+
+### Logical
+
+The `and` and `or` operators use short-circuit evaluation. They return the value
+that determined the result, not necessarily `true` or `false`:
+
+```rust
+let a = true and false;
+print(a);
+
+let b = true or false;
+print(b);
+
+let c = false or "fallback";
+print(c);
+```
+
+Output:
+
+```
+false
+true
+fallback
+```
+
+Because of short-circuiting, the right-hand side is not evaluated when the
+result is already determined:
+
+```rust
+print(false and panic("not reached"));
+print(true or panic("not reached"));
+```
+
+Output:
+
+```
+false
+true
+```
+
+### Negation
+
+The `!` operator negates a boolean value:
+
+```rust
+let a = !true;
+print(a);
+```
+
+Output:
+
+```
+false
+```
+
+### Range
+
+The `..` operator creates a range. The `Range()` built-in provides more control
+including custom step values:
+
+```rust
+for i in 0..5 {
+    print(i);
+}
+```
+
+Output:
+
+```
+0
+1
+2
+3
+4
+```
+
+Ranges exclude the upper bound. The `Range()` built-in supports a `.step()`
+method for custom increments:
+
+```rust
+for i in Range(0, 10).step(3) {
+    print(i);
+}
+```
+
+Output:
+
+```
+0
+3
+6
+9
+```
+
+Negative steps count downward:
+
+```rust
+for i in Range(5, 0).step(-1) {
+    print(i);
+}
+```
+
+Output:
+
+```
+5
+4
+3
+2
+1
+```
+
+## Control Flow
+
+### If / Else
+
+Conditionals use `if` and `else` with curly braces:
+
+```rust
+let x = 10;
+if x > 5 {
+    print("big");
+} else {
+    print("small");
+}
+```
+
+Output:
+
+```
+big
+```
+
+`if`/`else` can also be used as an expression (see
+[Block Expressions](#block-expressions)).
+
+### While Loops
+
+```rust
+let i = 0;
+while i < 3 {
+    print(i);
+    i = i + 1;
+}
+```
+
+Output:
+
+```
+0
+1
+2
+```
+
+### For Loops
+
+`for` loops iterate over any iterable value — lists, ranges, dictionary
+keys, and custom iterators:
+
+```rust
+let fruits = ["apple", "banana", "cherry"];
+for fruit in fruits {
+    print(fruit);
+}
+```
+
+Output:
+
+```
+apple
+banana
+cherry
+```
+
+```rust
+for i in 0..5 {
+    print(i);
+}
+```
+
+Output:
+
+```
+0
+1
+2
+3
+4
+```
+
+### Break and Continue
+
+`break` exits a loop early. `continue` skips to the next iteration:
+
+```rust
+let i = 0;
+while true {
+    if i == 2 {
+        i = i + 1;
+        continue;
+    }
+    if i == 4 {
+        break;
+    }
+    print(i);
+    i = i + 1;
+}
+```
+
+Output:
+
+```
+0
+1
+3
+```
+
+## Functions
+
+### Defining Functions
+
+Functions are defined with the `fn` keyword:
+
+```rust
+fn add(a, b) {
+    return a + b;
+}
+print(add(3, 4));
+```
+
+Output:
+
+```
+7
+```
+
+### Implicit Return
+
+The last expression in a function body is its return value when no explicit
+`return` statement is used:
+
+```rust
+fn double(x) {
+    x * 2
+}
+print(double(5));
+```
+
+Output:
+
+```
+10
+```
+
+### Default Arguments
+
+Parameters can have default values. Default expressions are evaluated each time
+the function is called with that argument omitted:
+
+```rust
+fn greet(name="World") {
+    print("Hello, " + name + "!");
+}
+greet();
+greet("Alice");
+```
+
+Output:
+
+```
+Hello, World!
+Hello, Alice!
+```
+
+### Keyword Arguments
+
+Arguments can be passed by name, allowing you to skip positional order:
+
+```rust
+fn describe(name, age, city) {
+    print(name, "is", age, "from", city);
+}
+describe("Alice", "NYC", age=30);
+```
+
+Output:
+
+```
+Alice is 30 from NYC
+```
+
+### Anonymous Functions
+
+Anonymous functions are created with `fn` without a name. They are commonly used
+as callbacks:
+
+```rust
+let square = fn(x) { x * x };
+print(square(5));
+```
+
+Output:
+
+```
+25
+```
+
+### Closures
+
+Functions capture variables from their enclosing scope, forming closures:
+
+```rust
+fn make_counter(start) {
+    let count = start;
+    fn increment() {
+        count = count + 1;
+        count
+    }
+    increment
+}
+
+let counter = make_counter(0);
+print(counter());
+print(counter());
+print(counter());
+```
+
+Output:
+
+```
+1
+2
+3
+```
+
+Closures work with anonymous functions as well:
+
+```rust
+fn make_adder(n) {
+    let adder = fn(val) { n + val };
+    adder
+}
+
+let add_5 = make_adder(5);
+let add_10 = make_adder(10);
+print(add_5(3));
+print(add_10(3));
+```
+
+Output:
+
+```
+8
+13
+```
+
+## Structs
+
+### Defining Structs
+
+Structs group named fields together. Instances are created by calling the struct
+name as a constructor:
+
+```rust
+struct Point {
+    x,
+    y
+}
+
+let p = Point(1, 2);
+print(p.x, p.y);
+```
+
+Output:
+
+```
+1 2
+```
+
+Structs print with a readable representation:
+
+```rust
+struct Color {
+    r, g, b
+}
+let c = Color(255, 128, 0);
+print(c);
+```
+
+Output:
+
+```
+Color(r=255, g=128, b=0)
+```
+
+### Methods
+
+Methods are defined inside the struct body and take `self` as the first
+parameter:
+
+```rust
+struct Point {
+    x,
+    y
+
+    fn add(self, other) {
+        Point(self.x + other.x, self.y + other.y)
+    }
+}
+
+let a = Point(1, 2);
+let b = Point(3, 4);
+let c = a.add(b);
+print(c.x, c.y);
+```
+
+Output:
+
+```
+4 6
+```
+
+Field values can be updated through `self`:
+
+```rust
+struct Point {
+    x, y
+}
+
+let p = Point(2, 3);
+p.x = p.x + 1;
+print(p.x);
+```
+
+Output:
+
+```
+3
+```
+
+### Static Methods
+
+Methods without a `self` parameter are static methods, called on the struct
+itself rather than an instance:
+
+```rust
+struct Point {
+    x, y
+
+    fn origin() {
+        Point(0, 0)
+    }
+}
+
+let p = Point.origin();
+print(p.x, p.y);
+```
+
+Output:
+
+```
+0 0
+```
+
+### Default Field Values
+
+Struct fields can have default values, including computed expressions:
+
+```rust
+struct Config {
+    debug = false,
+    verbose = false
+}
+
+let cfg = Config();
+print(cfg.debug, cfg.verbose);
+
+let cfg2 = Config(debug=true);
+print(cfg2.debug, cfg2.verbose);
+```
+
+Output:
+
+```
+false false
+true false
+```
+
+### Operator Overloading
+
+Defining an `add` method allows instances to be combined with the `+` operator:
+
+```rust
+struct Vec2 {
+    x, y
+
+    fn add(self, other) {
+        Vec2(self.x + other.x, self.y + other.y)
+    }
+}
+
+let a = Vec2(1, 2);
+let b = Vec2(3, 4);
+let c = a + b;
+print(c.x, c.y);
+```
+
+Output:
+
+```
+4 6
+```
+
+### Struct Introspection
+
+Every struct definition has a `__name__` attribute. Instances have a `__type__`
+attribute that refers back to the struct definition:
+
+```rust
+struct Animal {
+    name,
+    age
+}
+
+print(Animal.__name__);
+
+let dog = Animal("Buddy", 5);
+print(dog.__type__.__name__);
+```
+
+Output:
+
+```
+Animal
+Animal
+```
+
+## String Interpolation
+
+Expressions can be embedded in strings using `\(expr)` syntax:
+
+```rust
+let name = "World";
+let msg = "Hello, \(name)!";
+print(msg);
+```
+
+Output:
+
+```
+Hello, World!
+```
+
+Arbitrary expressions are supported, including function calls and nested
+interpolation:
+
+```rust
+let result = "2 + 3 = \(2 + 3)";
+print(result);
+```
+
+Output:
+
+```
+2 + 3 = 5
+```
+
+```rust
+fn greet(name) {
+    "hello \(name)"
+}
+print("You say: '\(greet("Alice"))' to me");
+```
+
+Output:
+
+```
+You say: 'hello Alice' to me
+```
+
+## Block Expressions
+
+Curly braces create block expressions. The value of the last expression in a
+block becomes the block's value:
+
+```rust
+let result = {
+    let a = 10;
+    let b = 20;
+    a + b
+};
+print(result);
+```
+
+Output:
+
+```
+30
+```
+
+This works with `if`/`else` to create conditional expressions:
+
+```rust
+let x = 10;
+let label = if x > 5 { "big" } else { "small" };
+print(label);
+```
+
+Output:
+
+```
+big
+```
+
+## Comments
+
+Single-line comments start with `//`:
+
+```rust
+// This is a comment
+let x = 42;
+print(x);
+```
+
+Output:
+
+```
+42
+```
+
+Multi-line comments use `/* */` and can be nested:
+
+```rust
+/* This is a
+   multi-line comment */
+let x = 42;
+
+/* outer /* inner comment */ still a comment */
+print(x);
+```
+
+Output:
+
+```
+42
+```
+
+## Custom Iterators
+
+Any struct that implements an `iter` method returning an object with a `next`
+method can be used in `for` loops. The `next` method should return `None` to
+signal the end of iteration:
+
+```rust
+struct Counter {
+    current,
+    max,
+
+    fn iter(self) {
+        self
+    }
+
+    fn next(self) {
+        if self.current >= self.max {
+            return None;
+        }
+        let val = self.current;
+        self.current = self.current + 1;
+        return val;
+    }
+}
+
+for i in Counter(0, 3) {
+    print(i);
+}
+```
+
+Output:
+
+```
+0
+1
+2
+```
+
+## Built-in Functions
+
+| Function | Description |
+|----------|-------------|
+| `print(args...)` | Prints arguments separated by spaces, followed by a newline |
+| `assert(condition)` | Panics if `condition` is falsy |
+| `panic(message)` | Immediately halts execution with an error message |
+| `dict()` | Creates a new empty dictionary |
+| `Range(start, end)` | Creates a range from `start` (inclusive) to `end` (exclusive) |
+| `str(value)` | Converts a value to a string |
+| `int(value)` | Converts a value to an integer (panics on failure) |
+| `float(value)` | Converts a value to a float (panics on failure) |
+| `try_int(value)` | Converts a value to an integer, returns `None` on failure |
+| `try_float(value)` | Converts a value to a float, returns `None` on failure |
+
+Type conversion examples:
+
+```rust
+print(int("42"));
+print(float("3.14"));
+print(str(123));
+```
+
+Output:
+
+```
+42
+3.14
+123
+```
+
+The `try_` variants return `None` instead of panicking on invalid input:
+
+```rust
+let good = try_int("42");
+print(good);
+let bad = try_int("hello");
+print(bad);
+```
+
+Output:
+
+```
+42
+None
+```
+
+## Suggested Improvements
+
+The following changes would improve the Shimlang experience for users:
+
+- **Inequality operator (`!=`):** The `!=` token is defined internally but
+  not yet wired into the lexer. Currently the only way to test inequality is
+  `!(a == b)`, which is less readable than `a != b`.
+- **Compound assignment operators:** `+=`, `-=`, `*=`, and `/=` would reduce
+  boilerplate in expressions like `count = count + 1`.
+- **Else-if chains (`else if`):** Currently each `else if` requires nested
+  braces. A dedicated `else if` syntax would flatten conditional chains.
+- **Error handling:** There is no `try`/`catch` mechanism. `panic` halts
+  execution immediately with no way to recover. A structured error-handling
+  system would make Shimlang more robust for larger programs.
+- **Module / import system:** All code lives in a single file. An import
+  system would allow organizing projects into reusable modules.
+- **Tuple type and destructuring:** Tuples and pattern-matching destructuring
+  (e.g., `let (x, y) = point;`) would make working with multiple return values
+  more ergonomic.
+- **Variadic arguments (`*args`, `**kwargs`):** Functions cannot currently
+  accept a variable number of positional or keyword arguments.
+- **Standard library expansion:** Built-in support for file I/O, math
+  functions (e.g., `sqrt`, `sin`, `cos`), and string manipulation methods
+  (e.g., `split`, `join`, `trim`, `upper`, `lower`) would greatly increase the
+  language's utility.
+- **REPL improvements:** The interactive REPL could benefit from line editing,
+  history, and multi-line input support.
+- **Better error messages:** While error messages include source location,
+  they could be improved with suggestions, "did you mean?" hints, and
+  stack traces for runtime errors in nested function calls.
