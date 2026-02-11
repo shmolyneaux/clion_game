@@ -1,5 +1,4 @@
 #![allow(unused_variables, unused_mut, unused_imports, unused_attributes, unused_unsafe, dead_code, unsafe_op_in_unsafe_fn, non_snake_case)]
-#![feature(c_variadic)]
 
 #[macro_use]
 use gl;

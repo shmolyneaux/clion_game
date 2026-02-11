@@ -6370,7 +6370,7 @@ impl Bitmask {
                     start_of_run = None;
                 }
             } else {
-                let mut bit_offset: usize;
+                let bit_offset: usize;
                 match start_of_run {
                     Some(start_bit) => {
                         bit_offset = word.trailing_zeros() as usize;
@@ -6574,9 +6574,7 @@ impl<'a> GC<'a> {
                         vals.push(ShimValue::Native(pos.into()));
                     },
                     ShimValue::Environment(pos) => {
-                        let scope: &EnvScope = unsafe {
-                            self.mem.get(pos)
-                        };
+                        let scope: &EnvScope = self.mem.get(pos);
 
                         // Chunk of memory that store the EnvScope metadata
                         let pos: usize = pos.into();
@@ -6592,12 +6590,12 @@ impl<'a> GC<'a> {
                         }
                         
                         // Walk the contiguous data block and collect values
-                        let bytes = unsafe { scope.raw_bytes(&self.mem) };
+                        let bytes = scope.raw_bytes(&self.mem);
                         let mut off = 0usize;
                         while off < bytes.len() {
                             let key_len = bytes[off] as usize;
                             let value_offset = off + 1 + key_len;
-                            let val: ShimValue = unsafe {
+                            let val: ShimValue = {
                                 let mut val_bytes = [0u8; 8];
                                 std::ptr::copy_nonoverlapping(bytes[value_offset..].as_ptr(), val_bytes.as_mut_ptr(), 8);
                                 std::mem::transmute(val_bytes)
@@ -6741,7 +6739,7 @@ impl Interpreter {
         //self.print_env(env);
         
         unsafe {
-            let scope: &EnvScope = self.mem.get(Word(env.current_scope.into()));
+            let _scope: &EnvScope = self.mem.get(Word(env.current_scope.into()));
         }
 
         let mut roots: Vec<ShimValue> = Vec::new();
