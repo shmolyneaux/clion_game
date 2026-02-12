@@ -659,9 +659,11 @@ pub fn parse_call(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                 tokens.advance()?;
                 let index_expr = parse_expression(tokens)?;
                 tokens.consume(Token::RSquare)?;
+                let end_span = tokens.previous_span()?;
+                let start = expr.span;
                 expr = Node {
                     data: Expression::Index(Box::new(expr), Box::new(index_expr)),
-                    span: span,
+                    span: start + end_span,
                 };
             }
             Token::Dot => {
@@ -1083,16 +1085,26 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
         let stmt = if *tokens.peek()? == Token::Let {
             tokens.advance()?;
             if tokens.is_empty() {
-                return Err("No token found after let".to_string());
+                return Err(format_script_err(
+                    start_span,
+                    &tokens.script,
+                    "No token found after let",
+                ));
             }
             let ident = match tokens.pop()? {
                 Token::Identifier(ident) => ident.clone(),
-                token => return Err(format!("Expected ident after let, found {:?}", token)),
+                token => {
+                    tokens.unadvance()?;
+                    return Err(tokens.format_peek_err(&format!("Expected ident after let, found {:?}", token)));
+                }
             };
 
             match tokens.pop()? {
                 Token::Equal => (),
-                token => return Err(format!("Expected = after `let ident`, found {:?}", token)),
+                token => {
+                    tokens.unadvance()?;
+                    return Err(tokens.format_peek_err(&format!("Expected = after `let ident`, found {:?}", token)));
+                }
             }
 
             let expr = parse_expression(tokens)?;
@@ -1353,10 +1365,15 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
                     }
                 }
                 token => {
-                    return Err(tokens.format_peek_err(&format!(
-                        "Expected semicolon after expression statement, found {:?}",
-                        token
-                    )));
+                    let next_span = tokens.peek_span()?;
+                    return Err(format_script_err(
+                        expr.span + next_span,
+                        &tokens.script,
+                        &format!(
+                            "Expected semicolon after expression statement, found {:?}",
+                            token
+                        ),
+                    ));
                 }
             }
         };
@@ -5756,7 +5773,7 @@ pub fn compile_fn_body_inner(
 
     if let Some(expr) = &body.last_expr {
         let val: Option<&ExprNode> = Some(expr);
-        asm.extend(compile_return(&val, fn_span)?);
+        asm.extend(compile_return(&val, expr.span)?);
     } else {
         let needs_implicit_return = if body.stmts.len() > 1 {
             match &body.stmts[body.stmts.len() - 1].data {
@@ -7000,7 +7017,9 @@ impl Interpreter {
                 val if val == ByteCode::Sub as u8 => {
                     let b = stack.pop().expect("Operand for add");
                     let a = stack.pop().expect("Operand for add");
-                    stack.push(a.sub(&b)?);
+                    stack.push(a.sub(&b).map_err(|err_str| {
+                        format_script_err(self.program.spans[pc], &self.program.script, &err_str)
+                    })?);
                 }
                 val if val == ByteCode::Equal as u8 => {
                     let b = stack.pop().expect("Operand for add");
@@ -7015,37 +7034,51 @@ impl Interpreter {
                 val if val == ByteCode::Multiply as u8 => {
                     let b = stack.pop().expect("Operand for ByteCode::Multiply");
                     let a = stack.pop().expect("Operand for ByteCode::Multiply");
-                    stack.push(a.mul(self, &b)?);
+                    stack.push(a.mul(self, &b).map_err(|err_str| {
+                        format_script_err(self.program.spans[pc], &self.program.script, &err_str)
+                    })?);
                 }
                 val if val == ByteCode::Divide as u8 => {
                     let b = stack.pop().expect("Operand for ByteCode::Divide");
                     let a = stack.pop().expect("Operand for ByteCode::Divide");
-                    stack.push(a.div(self, &b)?);
+                    stack.push(a.div(self, &b).map_err(|err_str| {
+                        format_script_err(self.program.spans[pc], &self.program.script, &err_str)
+                    })?);
                 }
                 val if val == ByteCode::Modulus as u8 => {
                     let b = stack.pop().expect("Operand for ByteCode::Modulus");
                     let a = stack.pop().expect("Operand for ByteCode::Modulus");
-                    stack.push(a.modulus(self, &b)?);
+                    stack.push(a.modulus(self, &b).map_err(|err_str| {
+                        format_script_err(self.program.spans[pc], &self.program.script, &err_str)
+                    })?);
                 }
                 val if val == ByteCode::GT as u8 => {
                     let b = stack.pop().expect("Operand for ByteCode::GT");
                     let a = stack.pop().expect("Operand for ByteCode::GT");
-                    stack.push(a.gt(self, &b)?);
+                    stack.push(a.gt(self, &b).map_err(|err_str| {
+                        format_script_err(self.program.spans[pc], &self.program.script, &err_str)
+                    })?);
                 }
                 val if val == ByteCode::GTE as u8 => {
                     let b = stack.pop().expect("Operand for ByteCode::GTE");
                     let a = stack.pop().expect("Operand for ByteCode::GTE");
-                    stack.push(a.gte(self, &b)?);
+                    stack.push(a.gte(self, &b).map_err(|err_str| {
+                        format_script_err(self.program.spans[pc], &self.program.script, &err_str)
+                    })?);
                 }
                 val if val == ByteCode::LT as u8 => {
                     let b = stack.pop().expect("Operand for ByteCode::LT");
                     let a = stack.pop().expect("Operand for ByteCode::LT");
-                    stack.push(a.lt(self, &b)?);
+                    stack.push(a.lt(self, &b).map_err(|err_str| {
+                        format_script_err(self.program.spans[pc], &self.program.script, &err_str)
+                    })?);
                 }
                 val if val == ByteCode::LTE as u8 => {
                     let b = stack.pop().expect("Operand for ByteCode::LTE");
                     let a = stack.pop().expect("Operand for ByteCode::LTE");
-                    stack.push(a.lte(self, &b)?);
+                    stack.push(a.lte(self, &b).map_err(|err_str| {
+                        format_script_err(self.program.spans[pc], &self.program.script, &err_str)
+                    })?);
                 }
                 val if val == ByteCode::In as u8 => {
                     let b = stack.pop().expect("Operand for ByteCode::In");
