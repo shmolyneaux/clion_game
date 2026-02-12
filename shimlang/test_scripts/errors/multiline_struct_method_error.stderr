@@ -1,0 +1,7 @@
+ 2 |     value
+ 3 |     fn add(self, x) {
+ 4 |         self.value + x;
+                        ^
+ 5 |     }
+ 6 | }
+Error: Operation '+' not supported between String(12, 0, u24([0, 0, 18])) and Integer(5)

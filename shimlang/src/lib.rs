@@ -1273,10 +1273,14 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
                     Token::Semicolon => (),
                     token => {
                         tokens.unadvance()?;
-                        return Err(tokens.format_peek_err(&format!(
-                            "Expected semicolon after `return <expr>`, found {:?}",
-                            token
-                        )));
+                        return Err(format_script_err(
+                            start_span + expr.span,
+                            &tokens.script,
+                            &format!(
+                                "Expected semicolon after `return <expr>`, found {:?}",
+                                token
+                            ),
+                        ));
                     }
                 }
                 StatementNode {
