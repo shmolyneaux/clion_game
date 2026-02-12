@@ -470,6 +470,7 @@ Output:
 | Operator | Description |
 |----------|-------------|
 | `==` | Equal to |
+| `!=` | Not equal to |
 | `<` | Less than |
 | `>` | Greater than |
 | `<=` | Less than or equal |
@@ -481,6 +482,7 @@ print(2 > 1);
 print(1 <= 1);
 print(1 >= 2);
 print(1 == 1);
+print(1 != 2);
 ```
 
 Output:
@@ -490,6 +492,7 @@ true
 true
 true
 false
+true
 true
 ```
 
@@ -1228,9 +1231,6 @@ None
 
 The following changes would improve the Shimlang experience for users:
 
-- **Inequality operator (`!=`):** The `!=` token is defined internally but
-  not yet wired into the lexer. Currently the only way to test inequality is
-  `!(a == b)`, which is less readable than `a != b`.
 - **Compound assignment operators:** `+=`, `-=`, `*=`, and `/=` would reduce
   boilerplate in expressions like `count = count + 1`.
 - **Else-if chains (`else if`):** Currently each `else if` requires nested
