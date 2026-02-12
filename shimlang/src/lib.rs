@@ -906,10 +906,23 @@ pub fn parse_conditional(tokens: &mut TokenStream) -> Result<Conditional, String
     let conditional = parse_expression(tokens)?;
 
     let if_body = parse_block(tokens)?;
-    let else_body = if *tokens.peek()? == Token::Else {
+
+    let else_body = if !tokens.is_empty() && *tokens.peek()? == Token::Else {
         tokens.advance()?;
-        // TODO: implement `else if`
-        parse_block(tokens)?
+        if *tokens.peek()? == Token::If {
+            let elseif = parse_conditional(tokens)?;
+            Block {
+                stmts: Vec::new(),
+                last_expr: Some(
+                    Box::new(ExprNode {
+                        data: Expression::If(Box::new(elseif.conditional), elseif.if_body, elseif.else_body),
+                        span: Span::start(),
+                    })
+                )
+            }
+        } else {
+            parse_block(tokens)?
+        }
     } else {
         Block {
             stmts: Vec::new(),
@@ -1044,6 +1057,7 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
 
             // Do we treat this as an expression or statement?
             if *tokens.peek()? == Token::RCurly {
+                // If the next token is an RCurly, it means that this is the closing curly of the block
                 let expr = Expression::If(Box::new(cond.conditional), cond.if_body, cond.else_body);
                 last_expr = Some(Box::new(ExprNode {
                     data: expr,
