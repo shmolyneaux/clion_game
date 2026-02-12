@@ -21,11 +21,6 @@ pub struct Span {
     pub end: u32,
 }
 
-impl Span {
-    fn start() -> Self {
-        Self { start: 0, end: 1 }
-    }
-}
 
 impl Add<Span> for Span {
     type Output = Span;
@@ -265,32 +260,34 @@ fn format_script_err(span: Span, script: &[u8], msg: &str) -> String {
     let mut out = "".to_string();
 
     // Find which lines the span covers
-    let mut first_line: Option<usize> = None;
-    let mut last_line: Option<usize> = None;
+    let mut first_line: usize = 0;
+    let mut last_line: usize = 0;
     for (lineno, line_info) in script_lines.iter().enumerate() {
         if line_info.start_idx <= span.start && span.start <= line_info.end_idx {
-            first_line = Some(lineno);
+            first_line = lineno;
         }
         // The `+ 1` accounts for span.end being one past the last character
         // (e.g. at a newline or EOF position just after the line ends)
         if line_info.start_idx <= span.end && span.end <= line_info.end_idx + 1 {
-            last_line = Some(lineno);
+            last_line = lineno;
         }
     }
-
-    // If we couldn't find either line, fall back to showing the start line
-    let first_line = first_line.unwrap_or(0);
-    let last_line = last_line.unwrap_or(first_line);
 
     // The `gutter_size` includes everything up to the first character of the line
     let gutter_size = script_lines.len().to_string().len() + 4;
     let is_multiline = first_line != last_line;
 
+    // For single-line errors, show 2 lines of context before and after
+    let context_before = if !is_multiline { 2 } else { 0 };
+    let context_after = if !is_multiline { 2 } else { 0 };
+    let display_start = first_line.saturating_sub(context_before);
+    let display_end = (last_line + context_after).min(script_lines.len() - 1);
+
     for (lineno_0, line_info) in script_lines.iter().enumerate() {
         let lineno = lineno_0 + 1;
 
-        // Only show lines that are part of the span
-        if lineno_0 < first_line || lineno_0 > last_line {
+        // Only show lines in the display range
+        if lineno_0 < display_start || lineno_0 > display_end {
             continue;
         }
 
@@ -301,18 +298,27 @@ fn format_script_err(span: Span, script: &[u8], msg: &str) -> String {
             .to_string()
         };
 
-        if is_multiline {
-            // Rust-style multi-line error display
-            out.push_str(&format!(
-                " {:lineno_size$} | {}",
-                lineno,
-                line,
-                lineno_size = gutter_size - 4
-            ));
-            if !line.ends_with("\n") {
-                out.push_str("\n");
-            }
+        out.push_str(&format!(
+            " {:lineno_size$} | {}",
+            lineno,
+            line,
+            lineno_size = gutter_size - 4
+        ));
+        if !line.ends_with("\n") {
+            out.push_str("\n");
+        }
 
+        if !is_multiline {
+            if lineno_0 == first_line {
+                let line_span_start = span.start - line_info.start_idx;
+                let line_span_end = span.end - line_info.start_idx;
+
+                out.push_str(&" ".repeat(gutter_size));
+                out.push_str(&" ".repeat(line_span_start as usize));
+                out.push_str(&"^".repeat((line_span_end - line_span_start) as usize));
+                out.push('\n');
+            }
+        } else {
             if lineno_0 == first_line {
                 // First line: show carets from span start to end of line content
                 let line_span_start = span.start - line_info.start_idx;
@@ -337,25 +343,6 @@ fn format_script_err(span: Span, script: &[u8], msg: &str) -> String {
                 out.push_str(&"^".repeat(line_len as usize));
                 out.push('\n');
             }
-        } else {
-            // Single-line span display (original behavior)
-            out.push_str(&format!(
-                " {:lineno_size$} | {}",
-                lineno,
-                line,
-                lineno_size = gutter_size - 4
-            ));
-            if !line.ends_with("\n") {
-                out.push_str("\n");
-            }
-
-            let line_span_start = span.start - line_info.start_idx;
-            let line_span_end = span.end - line_info.start_idx;
-
-            out.push_str(&" ".repeat(gutter_size));
-            out.push_str(&" ".repeat(line_span_start as usize));
-            out.push_str(&"^".repeat((line_span_end - line_span_start) as usize));
-            out.push('\n');
         }
     }
 
@@ -5683,7 +5670,8 @@ pub struct Program {
 
 pub fn compile_ast(ast: &Ast) -> Result<Program, String> {
     let mut program = Vec::new();
-    compile_block_inner(&ast.block, true, &mut program)?;
+    let ast_span = Span { start: 0, end: ast.script.len() as u32 };
+    compile_block_inner(&ast.block, true, ast_span, &mut program)?;
     let (bytecode, spans): (Vec<u8>, Vec<Span>) = program.into_iter().unzip();
     Ok(Program {
         bytecode: bytecode,
@@ -5704,36 +5692,37 @@ pub fn compile_fn_body_inner(
     pos_args_required: &Vec<Vec<u8>>,
     pos_args_optional: &Vec<(Vec<u8>, ExprNode)>,
     body: &Block,
+    fn_span: Span,
 ) -> Result<Vec<(u8, Span)>, String> {
 
     let mut asm = Vec::new();
-    asm.push((ByteCode::UnpackArgs as u8, Span { start: 0, end: 1 }));
+    asm.push((ByteCode::UnpackArgs as u8, fn_span));
     asm.push((
         pos_args_required.len() as u8,
-        Span { start: 0, end: 1 },
+        fn_span,
     ));
     asm.push((
         pos_args_optional.len() as u8,
-        Span { start: 0, end: 1 },
+        fn_span,
     ));
 
     for param in pos_args_required.iter() {
         asm.push((
             param.len().try_into().expect("Param len should into u8"),
-            Span { start: 0, end: 1 },
+            fn_span,
         ));
         for b in param {
-            asm.push((*b, Span { start: 0, end: 1 }));
+            asm.push((*b, fn_span));
         }
     }
 
     for (param, _) in pos_args_optional.iter() {
         asm.push((
             param.len().try_into().expect("Param len should into u8"),
-            Span { start: 0, end: 1 },
+            fn_span,
         ));
         for b in param {
-            asm.push((*b, Span { start: 0, end: 1 }));
+            asm.push((*b, fn_span));
         }
     }
 
@@ -5758,7 +5747,7 @@ pub fn compile_fn_body_inner(
 
     if let Some(expr) = &body.last_expr {
         let val: Option<&ExprNode> = Some(expr);
-        asm.extend(compile_return(&val)?);
+        asm.extend(compile_return(&val, fn_span)?);
     } else {
         let needs_implicit_return = if body.stmts.len() > 1 {
             match &body.stmts[body.stmts.len() - 1].data {
@@ -5772,10 +5761,10 @@ pub fn compile_fn_body_inner(
         if needs_implicit_return {
             let expr = ExprNode {
                 data: Expression::Primary(Primary::None),
-                span: Span::start(),
+                span: fn_span,
             };
             let val: Option<&ExprNode> = Some(&expr);
-            asm.extend(compile_return(&val)?);
+            asm.extend(compile_return(&val, fn_span)?);
         }
     }
 
@@ -5789,19 +5778,21 @@ pub fn compile_fn_expression(
     pos_args_required: &Vec<Vec<u8>>,
     pos_args_optional: &Vec<(Vec<u8>, ExprNode)>,
     body: &Block,
+    fn_span: Span,
 ) -> Result<Vec<(u8, Span)>, String> {
     // This will be replaced with a relative jump to after the function
     // declaration
     let mut asm = vec![
-        (ByteCode::Jmp as u8, Span { start: 0, end: 1 }),
-        (0, Span { start: 0, end: 1 }),
-        (0, Span { start: 0, end: 1 }),
+        (ByteCode::Jmp as u8, fn_span),
+        (0, fn_span),
+        (0, fn_span),
     ];
     asm.extend(
         compile_fn_body_inner(
             pos_args_required,
             pos_args_optional,
             body,
+            fn_span,
         )?
     );
 
@@ -5813,14 +5804,14 @@ pub fn compile_fn_expression(
 
     // Assign the value to the ident
     let pc_offset = asm.len() as u16 - 3;
-    asm.push((ByteCode::CreateFn as u8, Span { start: 0, end: 1 }));
-    asm.push(((pc_offset >> 8) as u8, Span { start: 0, end: 1 }));
-    asm.push(((pc_offset & 0xff) as u8, Span { start: 0, end: 1 }));
+    asm.push((ByteCode::CreateFn as u8, fn_span));
+    asm.push(((pc_offset >> 8) as u8, fn_span));
+    asm.push(((pc_offset & 0xff) as u8, fn_span));
 
     Ok(asm)
 }
 
-pub fn compile_fn(func: &Fn) -> Result<Vec<(u8, Span)>, String> {
+pub fn compile_fn(func: &Fn, fn_span: Span) -> Result<Vec<(u8, Span)>, String> {
     let ident = if let Some(ident) = &func.ident {
         ident
     } else {
@@ -5831,42 +5822,44 @@ pub fn compile_fn(func: &Fn) -> Result<Vec<(u8, Span)>, String> {
         &func.pos_args_required,
         &func.pos_args_optional,
         &func.body,
+        fn_span,
     )?;
 
     asm.push((
         ByteCode::VariableDeclaration as u8,
-        Span { start: 0, end: 1 },
+        fn_span,
     ));
     asm.push((
         ident
             .len()
             .try_into()
             .expect("Ident len should into u8"),
-        Span { start: 0, end: 1 },
+        fn_span,
     ));
     for b in ident.iter() {
-        asm.push((*b, Span { start: 0, end: 1 }));
+        asm.push((*b, fn_span));
     }
 
     Ok(asm)
 }
 
-pub fn compile_fn_body(func: &Fn) -> Result<Vec<(u8, Span)>, String> {
+pub fn compile_fn_body(func: &Fn, fn_span: Span) -> Result<Vec<(u8, Span)>, String> {
     compile_fn_body_inner(
         &func.pos_args_required,
         &func.pos_args_optional,
         &func.body,
+        fn_span,
     )
 }
 
-pub fn compile_return(expr: &Option<&ExprNode>) -> Result<Vec<(u8, Span)>, String> {
+pub fn compile_return(expr: &Option<&ExprNode>, span: Span) -> Result<Vec<(u8, Span)>, String> {
     let mut res = Vec::new();
     if let Some(expr) = expr {
         res.extend(compile_expression(expr)?);
     } else {
-        res.push((ByteCode::LiteralNone as u8, Span { start: 0, end: 1 }));
+        res.push((ByteCode::LiteralNone as u8, span));
     }
-    res.push((ByteCode::Return as u8, Span { start: 0, end: 1 }));
+    res.push((ByteCode::Return as u8, span));
     Ok(res)
 }
 
@@ -5925,7 +5918,7 @@ pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, S
             Ok(expr_asm)
         }
         Statement::Fn(func) => {
-            compile_fn(func)
+            compile_fn(func, stmt_span)
         }
         Statement::Struct(Struct {
             ident,
@@ -5934,14 +5927,14 @@ pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, S
             methods,
         }) => {
             let mut asm = vec![
-                (ByteCode::CreateStruct as u8, Span { start: 0, end: 1 }),
-                (0, Span { start: 0, end: 1 }),
-                (0, Span { start: 0, end: 1 }),
+                (ByteCode::CreateStruct as u8, stmt_span),
+                (0, stmt_span),
+                (0, stmt_span),
             ];
-            asm.push(((members_required.len() + members_optional.len()) as u8, Span { start: 0, end: 1 }));
+            asm.push(((members_required.len() + members_optional.len()) as u8, stmt_span));
 
             // The +1 is for the constructor
-            asm.push(((methods.len() + 1) as u8, Span { start: 0, end: 1 }));
+            asm.push(((methods.len() + 1) as u8, stmt_span));
 
             // Add struct name
             asm.push((
@@ -5949,10 +5942,10 @@ pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, S
                     .len()
                     .try_into()
                     .expect("Struct name len should into u8"),
-                Span { start: 0, end: 1 },
+                stmt_span,
             ));
             for b in ident.into_iter() {
-                asm.push((*b, Span { start: 0, end: 1 }));
+                asm.push((*b, stmt_span));
             }
 
             let member_names: Vec<Vec<u8>> = members_required.iter().cloned().chain(members_optional.iter().map(|(x, _)| x.clone())).collect();
@@ -5963,17 +5956,17 @@ pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, S
                         .len()
                         .try_into()
                         .expect("Member ident len should into u8"),
-                    Span { start: 0, end: 1 },
+                    stmt_span,
                 ));
                 for b in member.into_iter() {
-                    asm.push((*b, Span { start: 0, end: 1 }));
+                    asm.push((*b, stmt_span));
                 }
             }
 
             let arg_list = member_names.into_iter()
                 .map(|name| Node {
                         data: Expression::Primary(Primary::Identifier(name)),
-                        span: Span::start(),
+                        span: stmt_span,
                     }
                 )
                 .collect();
@@ -5994,17 +5987,18 @@ pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, S
                                             Box::new(
                                                 Node {
                                                     data: Expression::Primary(Primary::Identifier(ident.clone())),
-                                                    span: Span::start(),
+                                                    span: stmt_span,
                                                 }
                                             ),
                                             arg_list,
                                             Vec::new()
                                         ),
-                                        span: Span::start(),
+                                        span: stmt_span,
                                     }
                                 )
                             ),
-                        }
+                        },
+                        stmt_span,
                     )?
                 )
             );
@@ -6014,23 +6008,23 @@ pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, S
                 } else {
                     return Err(format!("Method does not have ident!"));
                 };
-                method_defs.push((&ident, compile_fn_body(method)?));
+                method_defs.push((&ident, compile_fn_body(method, stmt_span)?));
             }
 
             let mut jump_asm_idx = Vec::new();
             for (ident, _method_def) in method_defs.iter() {
                 jump_asm_idx.push(asm.len());
-                asm.push((0, Span { start: 0, end: 1 }));
-                asm.push((0, Span { start: 0, end: 1 }));
+                asm.push((0, stmt_span));
+                asm.push((0, stmt_span));
                 asm.push((
                     ident
                         .len()
                         .try_into()
                         .expect("Method ident len should into u8"),
-                    Span { start: 0, end: 1 },
+                    stmt_span,
                 ));
                 for b in ident.into_iter() {
-                    asm.push((*b, Span { start: 0, end: 1 }));
+                    asm.push((*b, stmt_span));
                 }
             }
 
@@ -6048,15 +6042,15 @@ pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, S
 
             asm.push((
                 ByteCode::VariableDeclaration as u8,
-                Span { start: 0, end: 1 },
+                stmt_span,
             ));
             asm.push((
                 ident.len().try_into().expect("Ident len should into u8"),
-                Span { start: 0, end: 1 },
+                stmt_span,
             ));
 
             for b in ident.into_iter() {
-                asm.push((*b, Span { start: 0, end: 1 }));
+                asm.push((*b, stmt_span));
             }
 
             Ok(asm)
@@ -6091,9 +6085,9 @@ pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, S
 
             let loop_start_idx = asm.len();
             asm.extend(vec![
-                (ByteCode::LoopStart as u8, Span { start: 0, end: 1 }),
-                (0, Span { start: 0, end: 1 }),
-                (0, Span { start: 0, end: 1 }),
+                (ByteCode::LoopStart as u8, stmt_span),
+                (0, stmt_span),
+                (0, stmt_span),
             ]);
 
             // Copy the .next bound method and call it
@@ -6106,17 +6100,17 @@ pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, S
             asm.push((ByteCode::Copy as u8, expr.span));
             asm.push((
                 ByteCode::VariableDeclaration as u8,
-                Span { start: 0, end: 1 },
+                stmt_span,
             ));
             asm.push((
                 ident
                     .len()
                     .try_into()
                     .expect("For loop ident len should into u8"),
-                Span { start: 0, end: 1 },
+                stmt_span,
             ));
             for b in ident {
-                asm.push((*b, Span { start: 0, end: 1 }));
+                asm.push((*b, stmt_span));
             }
 
             asm.push((ByteCode::LiteralNone as u8, expr.span));
@@ -6124,17 +6118,17 @@ pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, S
 
             // Jump to `LoopEnd` if calling .next() returns None
             let none_check_idx = asm.len();
-            asm.push((ByteCode::JmpNZ as u8, Span { start: 0, end: 0 }));
-            asm.push((0, Span { start: 0, end: 0 }));
-            asm.push((0, Span { start: 0, end: 0 }));
+            asm.push((ByteCode::JmpNZ as u8, stmt_span));
+            asm.push((0, stmt_span));
+            asm.push((0, stmt_span));
 
-            asm.extend(compile_block(body, false)?);
+            asm.extend(compile_block(body, false, stmt_span)?);
 
             // Jump to start of loop to check the condition again
             let loop_start_offset = u16_to_u8s(asm.len() as u16 - loop_start_idx as u16 - 3);
-            asm.push((ByteCode::JmpUp as u8, Span { start: 0, end: 0 }));
-            asm.push((loop_start_offset[0], Span { start: 0, end: 0 }));
-            asm.push((loop_start_offset[1], Span { start: 0, end: 0 }));
+            asm.push((ByteCode::JmpUp as u8, stmt_span));
+            asm.push((loop_start_offset[0], stmt_span));
+            asm.push((loop_start_offset[1], stmt_span));
 
             // This is the offset from none_check_idx that will get us
             // out of the loop
@@ -6146,34 +6140,34 @@ pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, S
             asm[loop_start_idx + 1].0 = loop_end[0];
             asm[loop_start_idx + 2].0 = loop_end[1];
 
-            asm.push((ByteCode::LoopEnd as u8, Span { start: 0, end: 0 }));
+            asm.push((ByteCode::LoopEnd as u8, stmt_span));
 
             // Remove the `iter` method from the stack
-            asm.push((ByteCode::Pop as u8, Span { start: 0, end: 0 }));
+            asm.push((ByteCode::Pop as u8, stmt_span));
 
             Ok(asm)
         }
         Statement::While(conditional, body) => {
             let mut asm = vec![
-                (ByteCode::LoopStart as u8, Span { start: 0, end: 1 }),
-                (0, Span { start: 0, end: 1 }),
-                (0, Span { start: 0, end: 1 }),
+                (ByteCode::LoopStart as u8, stmt_span),
+                (0, stmt_span),
+                (0, stmt_span),
             ];
             asm.extend(compile_expression(conditional)?);
 
             // Jump to `LoopEnd` if the condition is falsy
             let conditional_check_idx = asm.len();
-            asm.push((ByteCode::JmpZ as u8, Span { start: 0, end: 0 }));
-            asm.push((0, Span { start: 0, end: 0 }));
-            asm.push((0, Span { start: 0, end: 0 }));
+            asm.push((ByteCode::JmpZ as u8, stmt_span));
+            asm.push((0, stmt_span));
+            asm.push((0, stmt_span));
 
-            asm.extend(compile_block(body, false)?);
+            asm.extend(compile_block(body, false, stmt_span)?);
 
             // Jump to start of loop to check the condition again
             let loop_start_offset = u16_to_u8s(asm.len() as u16 - 3);
-            asm.push((ByteCode::JmpUp as u8, Span { start: 0, end: 0 }));
-            asm.push((loop_start_offset[0], Span { start: 0, end: 0 }));
-            asm.push((loop_start_offset[1], Span { start: 0, end: 0 }));
+            asm.push((ByteCode::JmpUp as u8, stmt_span));
+            asm.push((loop_start_offset[0], stmt_span));
+            asm.push((loop_start_offset[1], stmt_span));
 
             // This is the offset from conditional_check_idx that will get us
             // out of the loop
@@ -6185,15 +6179,15 @@ pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, S
             asm[1].0 = loop_end[0];
             asm[2].0 = loop_end[1];
 
-            asm.push((ByteCode::LoopEnd as u8, Span { start: 0, end: 0 }));
+            asm.push((ByteCode::LoopEnd as u8, stmt_span));
 
             Ok(asm)
         }
         Statement::Break => Ok(vec![(ByteCode::Break as u8, stmt_span)]),
         Statement::Continue => Ok(vec![(ByteCode::Continue as u8, stmt_span)]),
-        Statement::Return(expr) => compile_return(&expr.as_ref()),
+        Statement::Return(expr) => compile_return(&expr.as_ref(), stmt_span),
         Statement::If(conditional, if_body, else_body) => {
-            compile_if(conditional, if_body, else_body, false)
+            compile_if(conditional, if_body, else_body, false, stmt_span)
         }
         Statement::Expression(expr) => {
             // Expression evaluates to a value that's on the top of the stack
@@ -6206,28 +6200,28 @@ pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, S
     }
 }
 
-pub fn compile_block_inner(block: &Block, is_expr: bool, asm: &mut Vec<(u8, Span)>) -> Result<(), String> {
+pub fn compile_block_inner(block: &Block, is_expr: bool, block_span: Span, asm: &mut Vec<(u8, Span)>) -> Result<(), String> {
     for stmt in block.stmts.iter() {
         asm.extend(compile_statement(&stmt)?);
     }
     if let Some(last_expr) = &block.last_expr {
         asm.extend(compile_expression(&last_expr)?);
     } else {
-        asm.push((ByteCode::LiteralNone as u8, Span::start()));
+        asm.push((ByteCode::LiteralNone as u8, block_span));
     }
     if !is_expr {
-        asm.push((ByteCode::Pop as u8, Span::start()));
+        asm.push((ByteCode::Pop as u8, block_span));
     }
 
     Ok(())
 }
 
-pub fn compile_block(block: &Block, is_expr: bool) -> Result<Vec<(u8, Span)>, String> {
+pub fn compile_block(block: &Block, is_expr: bool, block_span: Span) -> Result<Vec<(u8, Span)>, String> {
     let mut asm = Vec::new();
 
-    asm.push((ByteCode::StartScope as u8, Span { start: 0, end: 1 }));
-    compile_block_inner(block, is_expr, &mut asm)?;
-    asm.push((ByteCode::EndScope as u8, Span { start: 0, end: 1 }));
+    asm.push((ByteCode::StartScope as u8, block_span));
+    compile_block_inner(block, is_expr, block_span, &mut asm)?;
+    asm.push((ByteCode::EndScope as u8, block_span));
 
     Ok(asm)
 }
@@ -6237,20 +6231,21 @@ pub fn compile_if(
     if_body: &Block,
     else_body: &Block,
     is_expr: bool,
+    span: Span,
 ) -> Result<Vec<(u8, Span)>, String> {
     let mut asm = compile_expression(conditional)?;
     let conditional_check_idx = asm.len();
-    asm.push((ByteCode::JmpZ as u8, Span { start: 0, end: 0 }));
-    asm.push((0, Span { start: 0, end: 0 }));
-    asm.push((0, Span { start: 0, end: 0 }));
-    asm.extend(compile_block(if_body, is_expr)?);
-    asm.push((ByteCode::Jmp as u8, Span { start: 0, end: 0 }));
-    asm.push((0, Span { start: 0, end: 0 }));
-    asm.push((0, Span { start: 0, end: 0 }));
+    asm.push((ByteCode::JmpZ as u8, span));
+    asm.push((0, span));
+    asm.push((0, span));
+    asm.extend(compile_block(if_body, is_expr, span)?);
+    asm.push((ByteCode::Jmp as u8, span));
+    asm.push((0, span));
+    asm.push((0, span));
     // We jump to here when the condition is false
     let else_case_start_idx = asm.len();
 
-    asm.extend(compile_block(else_body, is_expr)?);
+    asm.extend(compile_block(else_body, is_expr, span)?);
 
     // Offset from conditional to the else branch
     let else_jump_offset = u16_to_u8s(else_case_start_idx as u16 - conditional_check_idx as u16);
@@ -6336,15 +6331,15 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
         Expression::Primary(Primary::Expression(expr)) => compile_expression(&expr),
         Expression::BooleanOp(BooleanOp::And(a, b)) => {
             let mut asm = compile_expression(&a)?;
-            asm.push((ByteCode::Copy as u8, Span { start: 0, end: 0 }));
+            asm.push((ByteCode::Copy as u8, span));
 
             let short_circuit_idx = asm.len();
-            asm.push((ByteCode::JmpZ as u8, Span { start: 0, end: 0 }));
-            asm.push((0, Span { start: 0, end: 0 }));
-            asm.push((0, Span { start: 0, end: 0 }));
+            asm.push((ByteCode::JmpZ as u8, span));
+            asm.push((0, span));
+            asm.push((0, span));
 
             // Since the result of a is truthy we get rid of it and return the result of b
-            asm.push((ByteCode::Pop as u8, Span { start: 0, end: 0 }));
+            asm.push((ByteCode::Pop as u8, span));
 
             asm.extend(compile_expression(&b)?);
 
@@ -6356,15 +6351,15 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
         }
         Expression::BooleanOp(BooleanOp::Or(a, b)) => {
             let mut asm = compile_expression(&a)?;
-            asm.push((ByteCode::Copy as u8, Span { start: 0, end: 0 }));
+            asm.push((ByteCode::Copy as u8, span));
 
             let short_circuit_idx = asm.len();
-            asm.push((ByteCode::JmpNZ as u8, Span { start: 0, end: 0 }));
-            asm.push((0, Span { start: 0, end: 0 }));
-            asm.push((0, Span { start: 0, end: 0 }));
+            asm.push((ByteCode::JmpNZ as u8, span));
+            asm.push((0, span));
+            asm.push((0, span));
 
             // Since the result of a is falsy we get rid of it and return the result of b
-            asm.push((ByteCode::Pop as u8, Span { start: 0, end: 0 }));
+            asm.push((ByteCode::Pop as u8, span));
 
             asm.extend(compile_expression(&b)?);
 
@@ -6455,15 +6450,16 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
             }
             Ok(res)
         }
-        Expression::Block(block) => compile_block(block, true),
+        Expression::Block(block) => compile_block(block, true, span),
         Expression::If(conditional, if_body, else_body) => {
-            compile_if(conditional, if_body, else_body, true)
+            compile_if(conditional, if_body, else_body, true, span)
         },
         Expression::Fn(func) => {
             compile_fn_expression(
                 &func.pos_args_required,
                 &func.pos_args_optional,
                 &func.body,
+                span,
             )
         },
     }
