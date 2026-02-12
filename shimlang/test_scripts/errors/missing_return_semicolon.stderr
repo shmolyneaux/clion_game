@@ -1,4 +1,6 @@
 Parse Error:
+ 1 | fn test() {
+ 2 |     return 5
  3 | }
      ^
 Error: Expected semicolon after `return <expr>`, found RCurly
