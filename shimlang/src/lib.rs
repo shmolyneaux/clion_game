@@ -45,12 +45,6 @@ pub struct Node<T> {
 }
 
 impl<T> Node<T> {
-    fn lazy(val: T) -> Self {
-        Self {
-            data: val,
-            span: Span::start(),
-        }
-    }
 }
 
 // Now redefine your types using the wrapper
@@ -270,17 +264,16 @@ fn format_script_err(span: Span, script: &[u8], msg: &str) -> String {
     let script_lines = script_lines(script);
     let mut out = "".to_string();
 
-    let span_start_idx = span.start;
-    let span_end_idx = span.end;
-
     // Find which lines the span covers
     let mut first_line: Option<usize> = None;
     let mut last_line: Option<usize> = None;
     for (lineno, line_info) in script_lines.iter().enumerate() {
-        if line_info.start_idx <= span_start_idx && span_start_idx <= line_info.end_idx {
+        if line_info.start_idx <= span.start && span.start <= line_info.end_idx {
             first_line = Some(lineno);
         }
-        if line_info.start_idx <= span_end_idx && span_end_idx <= line_info.end_idx + 1 {
+        // The `+ 1` accounts for span.end being one past the last character
+        // (e.g. at a newline or EOF position just after the line ends)
+        if line_info.start_idx <= span.end && span.end <= line_info.end_idx + 1 {
             last_line = Some(lineno);
         }
     }
@@ -322,7 +315,7 @@ fn format_script_err(span: Span, script: &[u8], msg: &str) -> String {
 
             if lineno_0 == first_line {
                 // First line: show carets from span start to end of line content
-                let line_span_start = span_start_idx - line_info.start_idx;
+                let line_span_start = span.start - line_info.start_idx;
                 let line_len = line_info.end_idx - line_info.start_idx + 1;
                 let caret_len = line_len - line_span_start;
 
@@ -332,7 +325,7 @@ fn format_script_err(span: Span, script: &[u8], msg: &str) -> String {
                 out.push('\n');
             } else if lineno_0 == last_line {
                 // Last line: show carets from start of line to span end
-                let line_span_end = span_end_idx - line_info.start_idx;
+                let line_span_end = span.end - line_info.start_idx;
 
                 out.push_str(&" ".repeat(gutter_size));
                 out.push_str(&"^".repeat(line_span_end as usize));
@@ -356,8 +349,8 @@ fn format_script_err(span: Span, script: &[u8], msg: &str) -> String {
                 out.push_str("\n");
             }
 
-            let line_span_start = span_start_idx - line_info.start_idx;
-            let line_span_end = span_end_idx - line_info.start_idx;
+            let line_span_start = span.start - line_info.start_idx;
+            let line_span_end = span.end - line_info.start_idx;
 
             out.push_str(&" ".repeat(gutter_size));
             out.push_str(&" ".repeat(line_span_start as usize));
@@ -391,6 +384,15 @@ impl TokenStream {
         }
     }
 
+    /// Return the span of the most recently consumed token
+    fn previous_span(&self) -> Result<Span, String> {
+        if self.idx > 0 {
+            Ok(self.token_spans[self.idx - 1])
+        } else {
+            Err("No previous token".to_string())
+        }
+    }
+
     /**
      * Return the next token (if there are tokens remaining) and advance the stream
      */
@@ -408,20 +410,6 @@ impl TokenStream {
         let value = self.pop()?;
         if value == expected {
             Ok(())
-        } else {
-            self.unadvance()?;
-            Err(self.format_peek_err(&format!(
-                "Expected token {:?} but found {:?}",
-                expected, value
-            )))
-        }
-    }
-
-    fn consume_span(&mut self, expected: Token) -> Result<Span, String> {
-        let span = self.peek_span()?;
-        let value = self.pop()?;
-        if value == expected {
-            Ok(span)
         } else {
             self.unadvance()?;
             Err(self.format_peek_err(&format!(
@@ -669,9 +657,7 @@ pub fn parse_call(tokens: &mut TokenStream) -> Result<ExprNode, String> {
             Token::LBracket => {
                 tokens.advance()?;
                 let args = parse_fn_arguments(tokens, Token::RBracket)?;
-                tokens.unadvance()?;
-                let end_span = tokens.peek_span()?;
-                tokens.advance()?;
+                let end_span = tokens.previous_span()?;
                 expr = Node {
                     span: expr.span + end_span,
                     data: Expression::Call(Box::new(expr), args.0, args.1),
@@ -1007,9 +993,7 @@ pub fn parse_conditional(tokens: &mut TokenStream) -> Result<(Conditional, Span)
     };
 
     // Get the end span (previous token, which is the closing curly)
-    tokens.unadvance()?;
-    let end_span = tokens.peek_span()?;
-    tokens.advance()?;
+    let end_span = tokens.previous_span()?;
 
     Ok((Conditional::new(conditional, if_body, else_body), start_span + end_span))
 }
@@ -1138,10 +1122,7 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
             }
         } else if *tokens.peek()? == Token::Fn {
             let fn_result = parse_function(tokens)?;
-            // Use previous token's span as the end span (the closing curly)
-            tokens.unadvance()?;
-            let end_span = tokens.peek_span()?;
-            tokens.advance()?;
+            let end_span = tokens.previous_span()?;
             StatementNode {
                 data: Statement::Fn(fn_result),
                 span: start_span + end_span,
@@ -1178,10 +1159,7 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
             let expr = parse_expression(tokens)?;
             let body = parse_block(tokens)?;
 
-            // Use previous token's span as the end span (the closing curly)
-            tokens.unadvance()?;
-            let end_span = tokens.peek_span()?;
-            tokens.advance()?;
+            let end_span = tokens.previous_span()?;
             StatementNode {
                 data: Statement::For(ident, expr, body),
                 span: start_span + end_span,
@@ -1191,10 +1169,7 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
             let conditional = parse_expression(tokens)?;
             let loop_body = parse_block(tokens)?;
 
-            // Use previous token's span as the end span (the closing curly)
-            tokens.unadvance()?;
-            let end_span = tokens.peek_span()?;
-            tokens.advance()?;
+            let end_span = tokens.previous_span()?;
             StatementNode {
                 data: Statement::While(conditional, loop_body),
                 span: start_span + end_span,
