@@ -259,6 +259,11 @@ fn format_script_err(span: Span, script: &[u8], msg: &str) -> String {
     let script_lines = script_lines(script);
     let mut out = "".to_string();
 
+    if script_lines.is_empty() {
+        out.push_str(&format!("Error: {msg}"));
+        return out;
+    }
+
     // Find which lines the span covers
     let mut first_line: usize = 0;
     let mut last_line: usize = 0;
