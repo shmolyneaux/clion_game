@@ -55,6 +55,7 @@ impl<T> Node<T> {
 
 // Now redefine your types using the wrapper
 pub type ExprNode = Node<Expression>;
+pub type StatementNode = Node<Statement>;
 pub type Ident = Vec<u8>;
 
 #[derive(Debug)]
@@ -100,7 +101,7 @@ pub enum BooleanOp {
 
 #[derive(Debug)]
 pub struct Block {
-    stmts: Vec<Statement>,
+    stmts: Vec<StatementNode>,
     last_expr: Option<Box<ExprNode>>,
 }
 
@@ -348,6 +349,20 @@ impl TokenStream {
         let value = self.pop()?;
         if value == expected {
             Ok(())
+        } else {
+            self.unadvance()?;
+            Err(self.format_peek_err(&format!(
+                "Expected token {:?} but found {:?}",
+                expected, value
+            )))
+        }
+    }
+
+    fn consume_span(&mut self, expected: Token) -> Result<Span, String> {
+        let span = self.peek_span()?;
+        let value = self.pop()?;
+        if value == expected {
+            Ok(span)
         } else {
             self.unadvance()?;
             Err(self.format_peek_err(&format!(
@@ -901,7 +916,8 @@ impl Conditional {
     }
 }
 
-pub fn parse_conditional(tokens: &mut TokenStream) -> Result<Conditional, String> {
+pub fn parse_conditional(tokens: &mut TokenStream) -> Result<(Conditional, Span), String> {
+    let start_span = tokens.peek_span()?;
     tokens.consume(Token::If)?;
     let conditional = parse_expression(tokens)?;
 
@@ -910,13 +926,13 @@ pub fn parse_conditional(tokens: &mut TokenStream) -> Result<Conditional, String
     let else_body = if !tokens.is_empty() && *tokens.peek()? == Token::Else {
         tokens.advance()?;
         if *tokens.peek()? == Token::If {
-            let elseif = parse_conditional(tokens)?;
+            let (elseif, elseif_span) = parse_conditional(tokens)?;
             Block {
                 stmts: Vec::new(),
                 last_expr: Some(
                     Box::new(ExprNode {
                         data: Expression::If(Box::new(elseif.conditional), elseif.if_body, elseif.else_body),
-                        span: Span::start(),
+                        span: elseif_span,
                     })
                 )
             }
@@ -930,16 +946,21 @@ pub fn parse_conditional(tokens: &mut TokenStream) -> Result<Conditional, String
         }
     };
 
-    Ok(Conditional::new(conditional, if_body, else_body))
+    // Get the end span (previous token, which is the closing curly)
+    tokens.unadvance()?;
+    let end_span = tokens.peek_span()?;
+    tokens.advance()?;
+
+    Ok((Conditional::new(conditional, if_body, else_body), start_span + end_span))
 }
 
 pub fn parse_expression(tokens: &mut TokenStream) -> Result<ExprNode, String> {
     match *tokens.peek()? {
         Token::If => {
-            let cond = parse_conditional(tokens)?;
+            let (cond, cond_span) = parse_conditional(tokens)?;
             Ok(ExprNode {
                 data: Expression::If(Box::new(cond.conditional), cond.if_body, cond.else_body),
-                span: Span::start(),
+                span: cond_span,
             })
         },
         _ => parse_logical_or(tokens),
@@ -1022,6 +1043,7 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
     let mut last_expr: Option<Box<ExprNode>> = None;
 
     while !tokens.is_empty() && *tokens.peek()? != Token::RCurly {
+        let start_span = tokens.peek_span()?;
         let stmt = if *tokens.peek()? == Token::Let {
             tokens.advance()?;
             if tokens.is_empty() {
@@ -1038,6 +1060,7 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
             }
 
             let expr = parse_expression(tokens)?;
+            let end_span = tokens.peek_span()?;
             match tokens.pop()? {
                 Token::Semicolon => (),
                 token => {
@@ -1049,11 +1072,22 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
                 }
             }
 
-            Statement::Let(ident, expr)
+            StatementNode {
+                data: Statement::Let(ident, expr),
+                span: start_span + end_span,
+            }
         } else if *tokens.peek()? == Token::Fn {
-            Statement::Fn(parse_function(tokens)?)
+            let fn_result = parse_function(tokens)?;
+            // Use previous token's span as the end span (the closing curly)
+            tokens.unadvance()?;
+            let end_span = tokens.peek_span()?;
+            tokens.advance()?;
+            StatementNode {
+                data: Statement::Fn(fn_result),
+                span: start_span + end_span,
+            }
         } else if *tokens.peek()? == Token::If {
-            let cond = parse_conditional(tokens)?;
+            let (cond, cond_span) = parse_conditional(tokens)?;
 
             // Do we treat this as an expression or statement?
             if *tokens.peek()? == Token::RCurly {
@@ -1061,11 +1095,14 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
                 let expr = Expression::If(Box::new(cond.conditional), cond.if_body, cond.else_body);
                 last_expr = Some(Box::new(ExprNode {
                     data: expr,
-                    span: Span::start(),
+                    span: cond_span,
                 }));
                 break;
             } else {
-                Statement::If(cond.conditional, cond.if_body, cond.else_body)
+                StatementNode {
+                    data: Statement::If(cond.conditional, cond.if_body, cond.else_body),
+                    span: cond_span,
+                }
             }
         } else if *tokens.peek()? == Token::For {
             tokens.advance()?;
@@ -1081,21 +1118,43 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
             let expr = parse_expression(tokens)?;
             let body = parse_block(tokens)?;
 
-            Statement::For(ident, expr, body)
+            // Use previous token's span as the end span (the closing curly)
+            tokens.unadvance()?;
+            let end_span = tokens.peek_span()?;
+            tokens.advance()?;
+            StatementNode {
+                data: Statement::For(ident, expr, body),
+                span: start_span + end_span,
+            }
         } else if *tokens.peek()? == Token::While {
             tokens.advance()?;
             let conditional = parse_expression(tokens)?;
             let loop_body = parse_block(tokens)?;
 
-            Statement::While(conditional, loop_body)
+            // Use previous token's span as the end span (the closing curly)
+            tokens.unadvance()?;
+            let end_span = tokens.peek_span()?;
+            tokens.advance()?;
+            StatementNode {
+                data: Statement::While(conditional, loop_body),
+                span: start_span + end_span,
+            }
         } else if *tokens.peek()? == Token::Break {
             tokens.advance()?;
+            let end_span = tokens.peek_span()?;
             tokens.consume(Token::Semicolon)?;
-            Statement::Break
+            StatementNode {
+                data: Statement::Break,
+                span: start_span + end_span,
+            }
         } else if *tokens.peek()? == Token::Continue {
             tokens.advance()?;
+            let end_span = tokens.peek_span()?;
             tokens.consume(Token::Semicolon)?;
-            Statement::Continue
+            StatementNode {
+                data: Statement::Continue,
+                span: start_span + end_span,
+            }
         } else if *tokens.peek()? == Token::Struct {
             tokens.advance()?;
             let ident = match tokens.pop()? {
@@ -1164,21 +1223,30 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
                     }
                 }
             }
+            let end_span = tokens.peek_span()?;
             tokens.consume(Token::RCurly)?;
 
-            Statement::Struct(Struct {
-                ident,
-                members_required: members,
-                members_optional: optional_members,
-                methods,
-            })
+            StatementNode {
+                data: Statement::Struct(Struct {
+                    ident,
+                    members_required: members,
+                    members_optional: optional_members,
+                    methods,
+                }),
+                span: start_span + end_span,
+            }
         } else if *tokens.peek()? == Token::Return {
             tokens.advance()?;
             if *tokens.peek()? == Token::Semicolon {
+                let end_span = tokens.peek_span()?;
                 tokens.advance()?;
-                Statement::Return(None)
+                StatementNode {
+                    data: Statement::Return(None),
+                    span: start_span + end_span,
+                }
             } else {
                 let expr = parse_expression(tokens)?;
+                let end_span = tokens.peek_span()?;
                 match tokens.pop()? {
                     Token::Semicolon => (),
                     token => {
@@ -1189,7 +1257,10 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
                         )));
                     }
                 }
-                Statement::Return(Some(expr))
+                StatementNode {
+                    data: Statement::Return(Some(expr)),
+                    span: start_span + end_span,
+                }
             }
         } else {
             let expr = parse_expression(tokens)?;
@@ -1204,26 +1275,42 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
                     break;
                 }
                 Token::Semicolon => {
+                    let end_span = tokens.peek_span()?;
                     tokens.pop()?;
-                    Statement::Expression(expr)
+                    StatementNode {
+                        data: Statement::Expression(expr),
+                        span: start_span + end_span,
+                    }
                 }
                 Token::Equal => {
                     tokens.pop()?;
                     match expr.data {
                         Expression::Primary(Primary::Identifier(ident)) => {
                             let expr_to_assign = parse_expression(tokens)?;
+                            let end_span = tokens.peek_span()?;
                             tokens.consume(Token::Semicolon)?;
-                            Statement::Assignment(ident.clone(), expr_to_assign)
+                            StatementNode {
+                                data: Statement::Assignment(ident.clone(), expr_to_assign),
+                                span: start_span + end_span,
+                            }
                         }
                         Expression::Attribute(expr, ident) => {
                             let expr_to_assign = parse_expression(tokens)?;
+                            let end_span = tokens.peek_span()?;
                             tokens.consume(Token::Semicolon)?;
-                            Statement::AttributeAssignment(*expr, ident.clone(), expr_to_assign)
+                            StatementNode {
+                                data: Statement::AttributeAssignment(*expr, ident.clone(), expr_to_assign),
+                                span: start_span + end_span,
+                            }
                         }
                         Expression::Index(expr, index_expr) => {
                             let expr_to_assign = parse_expression(tokens)?;
+                            let end_span = tokens.peek_span()?;
                             tokens.consume(Token::Semicolon)?;
-                            Statement::IndexAssignment(*expr, *index_expr, expr_to_assign)
+                            StatementNode {
+                                data: Statement::IndexAssignment(*expr, *index_expr, expr_to_assign),
+                                span: start_span + end_span,
+                            }
                         }
                         expr_data => {
                             return Err(format_script_err(
@@ -5639,7 +5726,7 @@ pub fn compile_fn_body_inner(
         asm.extend(compile_return(&val)?);
     } else {
         let needs_implicit_return = if body.stmts.len() > 1 {
-            match body.stmts[body.stmts.len() - 1] {
+            match &body.stmts[body.stmts.len() - 1].data {
                 Statement::Return(_) => false,
                 _ => true,
             }
@@ -5748,8 +5835,9 @@ pub fn compile_return(expr: &Option<&ExprNode>) -> Result<Vec<(u8, Span)>, Strin
     Ok(res)
 }
 
-pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
-    match stmt {
+pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, String> {
+    let stmt_span = stmt_node.span;
+    match &stmt_node.data {
         Statement::Let(ident, expr) => {
             // Expression evaluates to a value that's on the top of the stack
             let mut expr_asm = compile_expression(expr)?;
@@ -6066,8 +6154,8 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
 
             Ok(asm)
         }
-        Statement::Break => Ok(vec![(ByteCode::Break as u8, Span { start: 0, end: 1 })]),
-        Statement::Continue => Ok(vec![(ByteCode::Continue as u8, Span { start: 0, end: 1 })]),
+        Statement::Break => Ok(vec![(ByteCode::Break as u8, stmt_span)]),
+        Statement::Continue => Ok(vec![(ByteCode::Continue as u8, stmt_span)]),
         Statement::Return(expr) => compile_return(&expr.as_ref()),
         Statement::If(conditional, if_body, else_body) => {
             compile_if(conditional, if_body, else_body, false)
