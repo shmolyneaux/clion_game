@@ -278,42 +278,41 @@ fn format_script_err(span: Span, script: &[u8], msg: &str) -> String {
         }
     }
 
+    // The width of the line number field
+    let lineno_width = script_lines.len().to_string().len();
     // The `gutter_size` includes everything up to the first character of the line
-    let gutter_size = script_lines.len().to_string().len() + 4;
+    let gutter_size = lineno_width + 4;
     let is_multiline = first_line != last_line;
 
-    // For single-line errors, show 2 lines of context before and after
-    let context_before = if !is_multiline { 2 } else { 0 };
-    let context_after = if !is_multiline { 2 } else { 0 };
-    let display_start = first_line.saturating_sub(context_before);
-    let display_end = (last_line + context_after).min(script_lines.len() - 1);
+    if !is_multiline {
+        // For single-line errors, show 2 lines of context before and after
+        let display_start = first_line.saturating_sub(2);
+        let display_end = (last_line + 2).min(script_lines.len() - 1);
 
-    for (lineno_0, line_info) in script_lines.iter().enumerate() {
-        let lineno = lineno_0 + 1;
+        for (lineno_0, line_info) in script_lines.iter().enumerate() {
+            let lineno = lineno_0 + 1;
 
-        // Only show lines in the display range
-        if lineno_0 < display_start || lineno_0 > display_end {
-            continue;
-        }
+            if lineno_0 < display_start || lineno_0 > display_end {
+                continue;
+            }
 
-        let line: String = unsafe {
-            std::str::from_utf8_unchecked(
-                &script[line_info.start_idx as usize..=line_info.end_idx as usize],
-            )
-            .to_string()
-        };
+            let line: String = unsafe {
+                std::str::from_utf8_unchecked(
+                    &script[line_info.start_idx as usize..=line_info.end_idx as usize],
+                )
+                .to_string()
+            };
 
-        out.push_str(&format!(
-            " {:lineno_size$} | {}",
-            lineno,
-            line,
-            lineno_size = gutter_size - 4
-        ));
-        if !line.ends_with("\n") {
-            out.push_str("\n");
-        }
+            out.push_str(&format!(
+                " {:lineno_size$} | {}",
+                lineno,
+                line,
+                lineno_size = gutter_size - 4
+            ));
+            if !line.ends_with("\n") {
+                out.push_str("\n");
+            }
 
-        if !is_multiline {
             if lineno_0 == first_line {
                 let line_span_start = span.start - line_info.start_idx;
                 let line_span_end = span.end - line_info.start_idx;
@@ -323,35 +322,48 @@ fn format_script_err(span: Span, script: &[u8], msg: &str) -> String {
                 out.push_str(&"^".repeat((line_span_end - line_span_start) as usize));
                 out.push('\n');
             }
-        } else {
-            if lineno_0 == first_line {
-                // First line: show carets from span start to end of line content
-                let line_span_start = span.start - line_info.start_idx;
-                let line_len = line_info.end_idx - line_info.start_idx + 1;
-                let caret_len = line_len - line_span_start;
+        }
 
-                out.push_str(&" ".repeat(gutter_size));
-                out.push_str(&" ".repeat(line_span_start as usize));
-                out.push_str(&"^".repeat(caret_len as usize));
-                out.push('\n');
-            } else if lineno_0 == last_line {
-                // Last line: show carets from start of line to span end
-                let line_span_end = span.end - line_info.start_idx;
+        out.push_str(&format!("Error: {msg}"));
+    } else {
+        // Rust-style multiline error display
+        let start_col = (span.start - script_lines[first_line].start_idx) as usize + 1;
+        let end_col = (span.end - script_lines[last_line].start_idx) as usize;
+        let gutter_pad = " ".repeat(lineno_width + 1);
 
-                out.push_str(&" ".repeat(gutter_size));
-                out.push_str(&"^".repeat(line_span_end as usize));
-                out.push('\n');
-            } else {
-                // Middle lines: show carets for full line
-                let line_len = line_info.end_idx - line_info.start_idx + 1;
-                out.push_str(&" ".repeat(gutter_size));
-                out.push_str(&"^".repeat(line_len as usize));
-                out.push('\n');
+        out.push_str(&format!("Error: {msg}\n"));
+        out.push_str(&format!("{gutter_pad} --> {}:{}\n", first_line + 1, start_col));
+        out.push_str(&format!("{gutter_pad} |\n"));
+
+        for lineno_0 in first_line..=last_line {
+            let lineno = lineno_0 + 1;
+            let line_info = &script_lines[lineno_0];
+            let line: String = unsafe {
+                std::str::from_utf8_unchecked(
+                    &script[line_info.start_idx as usize..=line_info.end_idx as usize],
+                )
+                .to_string()
+            };
+
+            let marker = if lineno_0 == first_line { "/" } else { "|" };
+
+            out.push_str(&format!(
+                " {:lineno_size$} | {marker} {}",
+                lineno,
+                line,
+                lineno_size = lineno_width,
+            ));
+            if !line.ends_with("\n") {
+                out.push_str("\n");
             }
         }
-    }
 
-    out.push_str(&format!("Error: {msg}"));
+        // Closing line with ^
+        out.push_str(&format!(
+            "{gutter_pad} | |{}^\n",
+            "_".repeat(end_col),
+        ));
+    }
 
     out
 }
