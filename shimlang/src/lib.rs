@@ -21,11 +21,6 @@ pub struct Span {
     pub end: u32,
 }
 
-impl Span {
-    fn start() -> Self {
-        Self { start: 0, end: 1 }
-    }
-}
 
 impl Add<Span> for Span {
     type Output = Span;
@@ -45,16 +40,11 @@ pub struct Node<T> {
 }
 
 impl<T> Node<T> {
-    fn lazy(val: T) -> Self {
-        Self {
-            data: val,
-            span: Span::start(),
-        }
-    }
 }
 
 // Now redefine your types using the wrapper
 pub type ExprNode = Node<Expression>;
+pub type StatementNode = Node<Statement>;
 pub type Ident = Vec<u8>;
 
 #[derive(Debug)]
@@ -100,7 +90,7 @@ pub enum BooleanOp {
 
 #[derive(Debug)]
 pub struct Block {
-    stmts: Vec<Statement>,
+    stmts: Vec<StatementNode>,
     last_expr: Option<Box<ExprNode>>,
 }
 
@@ -269,44 +259,111 @@ fn format_script_err(span: Span, script: &[u8], msg: &str) -> String {
     let script_lines = script_lines(script);
     let mut out = "".to_string();
 
-    // The `gutter_size` includes everything up to the first character of the line
-    let gutter_size = script_lines.len().to_string().len() + 4;
+    if script_lines.is_empty() {
+        out.push_str(&format!("Error: {msg}"));
+        return out;
+    }
+
+    // Find which lines the span covers
+    let mut first_line: usize = 0;
+    let mut last_line: usize = 0;
     for (lineno, line_info) in script_lines.iter().enumerate() {
-        let lineno = lineno + 1;
-
-        let line: String = unsafe {
-            std::str::from_utf8_unchecked(
-                &script[line_info.start_idx as usize..=line_info.end_idx as usize],
-            )
-            .to_string()
-        };
-        out.push_str(&format!(
-            " {:lineno_size$} | {}",
-            lineno,
-            line,
-            lineno_size = gutter_size - 4
-        ));
-        if !line.ends_with("\n") {
-            // Last line?
-            out.push_str("\n");
+        if line_info.start_idx <= span.start && span.start <= line_info.end_idx {
+            first_line = lineno;
         }
-
-        let span_start_idx = span.start;
-        let span_end_idx = span.end;
-
-        // TODO: handle token going across line breaks
-        if line_info.start_idx <= span_start_idx && span_start_idx <= line_info.end_idx {
-            let line_span_start = span_start_idx - line_info.start_idx;
-            let line_span_end = span_end_idx - line_info.start_idx;
-
-            out.push_str(&" ".repeat(gutter_size));
-            out.push_str(&" ".repeat(line_span_start as usize));
-            out.push_str(&"^".repeat((line_span_end - line_span_start) as usize));
-            out.push('\n');
+        // The `+ 1` accounts for span.end being one past the last character
+        // (e.g. at a newline or EOF position just after the line ends)
+        if line_info.start_idx <= span.end && span.end <= line_info.end_idx + 1 {
+            last_line = lineno;
         }
     }
 
-    out.push_str(&format!("Error: {msg}"));
+    // The width of the line number field
+    let lineno_width = script_lines.len().to_string().len();
+    // The `gutter_size` includes everything up to the first character of the line
+    let gutter_size = lineno_width + 4;
+    let is_multiline = first_line != last_line;
+
+    if !is_multiline {
+        // For single-line errors, show 2 lines of context before and after
+        let display_start = first_line.saturating_sub(2);
+        let display_end = (last_line + 2).min(script_lines.len() - 1);
+
+        for (lineno_0, line_info) in script_lines.iter().enumerate() {
+            let lineno = lineno_0 + 1;
+
+            if lineno_0 < display_start || lineno_0 > display_end {
+                continue;
+            }
+
+            let line: String = unsafe {
+                std::str::from_utf8_unchecked(
+                    &script[line_info.start_idx as usize..=line_info.end_idx as usize],
+                )
+                .to_string()
+            };
+
+            out.push_str(&format!(
+                " {:lineno_size$} | {}",
+                lineno,
+                line,
+                lineno_size = gutter_size - 4
+            ));
+            if !line.ends_with("\n") {
+                out.push_str("\n");
+            }
+
+            if lineno_0 == first_line {
+                let line_span_start = span.start - line_info.start_idx;
+                let line_span_end = span.end - line_info.start_idx;
+
+                out.push_str(&" ".repeat(gutter_size));
+                out.push_str(&" ".repeat(line_span_start as usize));
+                out.push_str(&"^".repeat((line_span_end - line_span_start) as usize));
+                out.push('\n');
+            }
+        }
+
+        out.push_str(&format!("Error: {msg}"));
+    } else {
+        // Rust-style multiline error display
+        let start_col = (span.start - script_lines[first_line].start_idx) as usize + 1;
+        let end_col = (span.end - script_lines[last_line].start_idx) as usize;
+        let gutter_pad = " ".repeat(lineno_width + 1);
+
+        out.push_str(&format!("Error: {msg}\n"));
+        out.push_str(&format!("{gutter_pad} --> {}:{}\n", first_line + 1, start_col));
+        out.push_str(&format!("{gutter_pad} |\n"));
+
+        for lineno_0 in first_line..=last_line {
+            let lineno = lineno_0 + 1;
+            let line_info = &script_lines[lineno_0];
+            let line: String = unsafe {
+                std::str::from_utf8_unchecked(
+                    &script[line_info.start_idx as usize..=line_info.end_idx as usize],
+                )
+                .to_string()
+            };
+
+            let marker = if lineno_0 == first_line { "/" } else { "|" };
+
+            out.push_str(&format!(
+                " {:lineno_size$} | {marker} {}",
+                lineno,
+                line,
+                lineno_size = lineno_width,
+            ));
+            if !line.ends_with("\n") {
+                out.push_str("\n");
+            }
+        }
+
+        // Closing line with ^
+        out.push_str(&format!(
+            "{gutter_pad} | |{}^\n",
+            "_".repeat(end_col),
+        ));
+    }
 
     out
 }
@@ -328,6 +385,15 @@ impl TokenStream {
             Ok(self.token_spans[self.token_spans.len()-1])
         } else {
             Ok(self.token_spans[self.idx])
+        }
+    }
+
+    /// Return the span of the most recently consumed token
+    fn previous_span(&self) -> Result<Span, String> {
+        if self.idx > 0 {
+            Ok(self.token_spans[self.idx - 1])
+        } else {
+            Err("No previous token".to_string())
         }
     }
 
@@ -424,19 +490,20 @@ pub fn parse_primary(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                                 expr = Expression::BinaryOp(
                                     BinaryOp::Add(
                                         Box::new(
-                                            Node::lazy(expr)
+                                            Node { data: expr, span }
                                         ),
                                         Box::new(
-                                            Node::lazy(
-                                                Expression::Stringify(Box::new(interp_expr))
-                                            )
+                                            Node {
+                                                data: Expression::Stringify(Box::new(interp_expr)),
+                                                span,
+                                            }
                                         ),
                                     )
                                 );
                                 expr = Expression::BinaryOp(
                                     BinaryOp::Add(
-                                        Box::new(Node::lazy(expr)),
-                                        Box::new(Node::lazy(Expression::Primary(Primary::String(s)))),
+                                        Box::new(Node { data: expr, span }),
+                                        Box::new(Node { data: Expression::Primary(Primary::String(s)), span }),
                                     )
                                 );
                             },
@@ -594,9 +661,7 @@ pub fn parse_call(tokens: &mut TokenStream) -> Result<ExprNode, String> {
             Token::LBracket => {
                 tokens.advance()?;
                 let args = parse_fn_arguments(tokens, Token::RBracket)?;
-                tokens.unadvance()?;
-                let end_span = tokens.peek_span()?;
-                tokens.advance()?;
+                let end_span = tokens.previous_span()?;
                 expr = Node {
                     span: expr.span + end_span,
                     data: Expression::Call(Box::new(expr), args.0, args.1),
@@ -606,9 +671,11 @@ pub fn parse_call(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                 tokens.advance()?;
                 let index_expr = parse_expression(tokens)?;
                 tokens.consume(Token::RSquare)?;
+                let end_span = tokens.previous_span()?;
+                let start = expr.span;
                 expr = Node {
                     data: Expression::Index(Box::new(expr), Box::new(index_expr)),
-                    span: span,
+                    span: start + end_span,
                 };
             }
             Token::Dot => {
@@ -901,7 +968,8 @@ impl Conditional {
     }
 }
 
-pub fn parse_conditional(tokens: &mut TokenStream) -> Result<Conditional, String> {
+pub fn parse_conditional(tokens: &mut TokenStream) -> Result<(Conditional, Span), String> {
+    let start_span = tokens.peek_span()?;
     tokens.consume(Token::If)?;
     let conditional = parse_expression(tokens)?;
 
@@ -910,13 +978,13 @@ pub fn parse_conditional(tokens: &mut TokenStream) -> Result<Conditional, String
     let else_body = if !tokens.is_empty() && *tokens.peek()? == Token::Else {
         tokens.advance()?;
         if *tokens.peek()? == Token::If {
-            let elseif = parse_conditional(tokens)?;
+            let (elseif, elseif_span) = parse_conditional(tokens)?;
             Block {
                 stmts: Vec::new(),
                 last_expr: Some(
                     Box::new(ExprNode {
                         data: Expression::If(Box::new(elseif.conditional), elseif.if_body, elseif.else_body),
-                        span: Span::start(),
+                        span: elseif_span,
                     })
                 )
             }
@@ -930,16 +998,19 @@ pub fn parse_conditional(tokens: &mut TokenStream) -> Result<Conditional, String
         }
     };
 
-    Ok(Conditional::new(conditional, if_body, else_body))
+    // Get the end span (previous token, which is the closing curly)
+    let end_span = tokens.previous_span()?;
+
+    Ok((Conditional::new(conditional, if_body, else_body), start_span + end_span))
 }
 
 pub fn parse_expression(tokens: &mut TokenStream) -> Result<ExprNode, String> {
     match *tokens.peek()? {
         Token::If => {
-            let cond = parse_conditional(tokens)?;
+            let (cond, cond_span) = parse_conditional(tokens)?;
             Ok(ExprNode {
                 data: Expression::If(Box::new(cond.conditional), cond.if_body, cond.else_body),
-                span: Span::start(),
+                span: cond_span,
             })
         },
         _ => parse_logical_or(tokens),
@@ -1022,22 +1093,34 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
     let mut last_expr: Option<Box<ExprNode>> = None;
 
     while !tokens.is_empty() && *tokens.peek()? != Token::RCurly {
+        let start_span = tokens.peek_span()?;
         let stmt = if *tokens.peek()? == Token::Let {
             tokens.advance()?;
             if tokens.is_empty() {
-                return Err("No token found after let".to_string());
+                return Err(format_script_err(
+                    start_span,
+                    &tokens.script,
+                    "No token found after let",
+                ));
             }
             let ident = match tokens.pop()? {
                 Token::Identifier(ident) => ident.clone(),
-                token => return Err(format!("Expected ident after let, found {:?}", token)),
+                token => {
+                    tokens.unadvance()?;
+                    return Err(tokens.format_peek_err(&format!("Expected ident after let, found {:?}", token)));
+                }
             };
 
             match tokens.pop()? {
                 Token::Equal => (),
-                token => return Err(format!("Expected = after `let ident`, found {:?}", token)),
+                token => {
+                    tokens.unadvance()?;
+                    return Err(tokens.format_peek_err(&format!("Expected = after `let ident`, found {:?}", token)));
+                }
             }
 
             let expr = parse_expression(tokens)?;
+            let end_span = tokens.peek_span()?;
             match tokens.pop()? {
                 Token::Semicolon => (),
                 token => {
@@ -1049,11 +1132,19 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
                 }
             }
 
-            Statement::Let(ident, expr)
+            StatementNode {
+                data: Statement::Let(ident, expr),
+                span: start_span + end_span,
+            }
         } else if *tokens.peek()? == Token::Fn {
-            Statement::Fn(parse_function(tokens)?)
+            let fn_result = parse_function(tokens)?;
+            let end_span = tokens.previous_span()?;
+            StatementNode {
+                data: Statement::Fn(fn_result),
+                span: start_span + end_span,
+            }
         } else if *tokens.peek()? == Token::If {
-            let cond = parse_conditional(tokens)?;
+            let (cond, cond_span) = parse_conditional(tokens)?;
 
             // Do we treat this as an expression or statement?
             if *tokens.peek()? == Token::RCurly {
@@ -1061,11 +1152,14 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
                 let expr = Expression::If(Box::new(cond.conditional), cond.if_body, cond.else_body);
                 last_expr = Some(Box::new(ExprNode {
                     data: expr,
-                    span: Span::start(),
+                    span: cond_span,
                 }));
                 break;
             } else {
-                Statement::If(cond.conditional, cond.if_body, cond.else_body)
+                StatementNode {
+                    data: Statement::If(cond.conditional, cond.if_body, cond.else_body),
+                    span: cond_span,
+                }
             }
         } else if *tokens.peek()? == Token::For {
             tokens.advance()?;
@@ -1081,21 +1175,37 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
             let expr = parse_expression(tokens)?;
             let body = parse_block(tokens)?;
 
-            Statement::For(ident, expr, body)
+            let end_span = tokens.previous_span()?;
+            StatementNode {
+                data: Statement::For(ident, expr, body),
+                span: start_span + end_span,
+            }
         } else if *tokens.peek()? == Token::While {
             tokens.advance()?;
             let conditional = parse_expression(tokens)?;
             let loop_body = parse_block(tokens)?;
 
-            Statement::While(conditional, loop_body)
+            let end_span = tokens.previous_span()?;
+            StatementNode {
+                data: Statement::While(conditional, loop_body),
+                span: start_span + end_span,
+            }
         } else if *tokens.peek()? == Token::Break {
             tokens.advance()?;
+            let end_span = tokens.peek_span()?;
             tokens.consume(Token::Semicolon)?;
-            Statement::Break
+            StatementNode {
+                data: Statement::Break,
+                span: start_span + end_span,
+            }
         } else if *tokens.peek()? == Token::Continue {
             tokens.advance()?;
+            let end_span = tokens.peek_span()?;
             tokens.consume(Token::Semicolon)?;
-            Statement::Continue
+            StatementNode {
+                data: Statement::Continue,
+                span: start_span + end_span,
+            }
         } else if *tokens.peek()? == Token::Struct {
             tokens.advance()?;
             let ident = match tokens.pop()? {
@@ -1164,32 +1274,48 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
                     }
                 }
             }
+            let end_span = tokens.peek_span()?;
             tokens.consume(Token::RCurly)?;
 
-            Statement::Struct(Struct {
-                ident,
-                members_required: members,
-                members_optional: optional_members,
-                methods,
-            })
+            StatementNode {
+                data: Statement::Struct(Struct {
+                    ident,
+                    members_required: members,
+                    members_optional: optional_members,
+                    methods,
+                }),
+                span: start_span + end_span,
+            }
         } else if *tokens.peek()? == Token::Return {
             tokens.advance()?;
             if *tokens.peek()? == Token::Semicolon {
+                let end_span = tokens.peek_span()?;
                 tokens.advance()?;
-                Statement::Return(None)
+                StatementNode {
+                    data: Statement::Return(None),
+                    span: start_span + end_span,
+                }
             } else {
                 let expr = parse_expression(tokens)?;
+                let end_span = tokens.peek_span()?;
                 match tokens.pop()? {
                     Token::Semicolon => (),
                     token => {
                         tokens.unadvance()?;
-                        return Err(tokens.format_peek_err(&format!(
-                            "Expected semicolon after `return <expr>`, found {:?}",
-                            token
-                        )));
+                        return Err(format_script_err(
+                            start_span + expr.span,
+                            &tokens.script,
+                            &format!(
+                                "Expected semicolon after `return <expr>`, found {:?}",
+                                token
+                            ),
+                        ));
                     }
                 }
-                Statement::Return(Some(expr))
+                StatementNode {
+                    data: Statement::Return(Some(expr)),
+                    span: start_span + end_span,
+                }
             }
         } else {
             let expr = parse_expression(tokens)?;
@@ -1204,26 +1330,42 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
                     break;
                 }
                 Token::Semicolon => {
+                    let end_span = tokens.peek_span()?;
                     tokens.pop()?;
-                    Statement::Expression(expr)
+                    StatementNode {
+                        data: Statement::Expression(expr),
+                        span: start_span + end_span,
+                    }
                 }
                 Token::Equal => {
                     tokens.pop()?;
                     match expr.data {
                         Expression::Primary(Primary::Identifier(ident)) => {
                             let expr_to_assign = parse_expression(tokens)?;
+                            let end_span = tokens.peek_span()?;
                             tokens.consume(Token::Semicolon)?;
-                            Statement::Assignment(ident.clone(), expr_to_assign)
+                            StatementNode {
+                                data: Statement::Assignment(ident.clone(), expr_to_assign),
+                                span: start_span + end_span,
+                            }
                         }
                         Expression::Attribute(expr, ident) => {
                             let expr_to_assign = parse_expression(tokens)?;
+                            let end_span = tokens.peek_span()?;
                             tokens.consume(Token::Semicolon)?;
-                            Statement::AttributeAssignment(*expr, ident.clone(), expr_to_assign)
+                            StatementNode {
+                                data: Statement::AttributeAssignment(*expr, ident.clone(), expr_to_assign),
+                                span: start_span + end_span,
+                            }
                         }
                         Expression::Index(expr, index_expr) => {
                             let expr_to_assign = parse_expression(tokens)?;
+                            let end_span = tokens.peek_span()?;
                             tokens.consume(Token::Semicolon)?;
-                            Statement::IndexAssignment(*expr, *index_expr, expr_to_assign)
+                            StatementNode {
+                                data: Statement::IndexAssignment(*expr, *index_expr, expr_to_assign),
+                                span: start_span + end_span,
+                            }
                         }
                         expr_data => {
                             return Err(format_script_err(
@@ -1235,10 +1377,15 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
                     }
                 }
                 token => {
-                    return Err(tokens.format_peek_err(&format!(
-                        "Expected semicolon after expression statement, found {:?}",
-                        token
-                    )));
+                    let next_span = tokens.peek_span()?;
+                    return Err(format_script_err(
+                        expr.span + next_span,
+                        &tokens.script,
+                        &format!(
+                            "Expected semicolon after expression statement, found {:?}",
+                            token
+                        ),
+                    ));
                 }
             }
         };
@@ -5561,7 +5708,8 @@ pub struct Program {
 
 pub fn compile_ast(ast: &Ast) -> Result<Program, String> {
     let mut program = Vec::new();
-    compile_block_inner(&ast.block, true, &mut program)?;
+    let ast_span = Span { start: 0, end: ast.script.len() as u32 };
+    compile_block_inner(&ast.block, true, ast_span, &mut program)?;
     let (bytecode, spans): (Vec<u8>, Vec<Span>) = program.into_iter().unzip();
     Ok(Program {
         bytecode: bytecode,
@@ -5582,36 +5730,37 @@ pub fn compile_fn_body_inner(
     pos_args_required: &Vec<Vec<u8>>,
     pos_args_optional: &Vec<(Vec<u8>, ExprNode)>,
     body: &Block,
+    fn_span: Span,
 ) -> Result<Vec<(u8, Span)>, String> {
 
     let mut asm = Vec::new();
-    asm.push((ByteCode::UnpackArgs as u8, Span { start: 0, end: 1 }));
+    asm.push((ByteCode::UnpackArgs as u8, fn_span));
     asm.push((
         pos_args_required.len() as u8,
-        Span { start: 0, end: 1 },
+        fn_span,
     ));
     asm.push((
         pos_args_optional.len() as u8,
-        Span { start: 0, end: 1 },
+        fn_span,
     ));
 
     for param in pos_args_required.iter() {
         asm.push((
             param.len().try_into().expect("Param len should into u8"),
-            Span { start: 0, end: 1 },
+            fn_span,
         ));
         for b in param {
-            asm.push((*b, Span { start: 0, end: 1 }));
+            asm.push((*b, fn_span));
         }
     }
 
     for (param, _) in pos_args_optional.iter() {
         asm.push((
             param.len().try_into().expect("Param len should into u8"),
-            Span { start: 0, end: 1 },
+            fn_span,
         ));
         for b in param {
-            asm.push((*b, Span { start: 0, end: 1 }));
+            asm.push((*b, fn_span));
         }
     }
 
@@ -5636,10 +5785,10 @@ pub fn compile_fn_body_inner(
 
     if let Some(expr) = &body.last_expr {
         let val: Option<&ExprNode> = Some(expr);
-        asm.extend(compile_return(&val)?);
+        asm.extend(compile_return(&val, expr.span)?);
     } else {
         let needs_implicit_return = if body.stmts.len() > 1 {
-            match body.stmts[body.stmts.len() - 1] {
+            match &body.stmts[body.stmts.len() - 1].data {
                 Statement::Return(_) => false,
                 _ => true,
             }
@@ -5650,10 +5799,10 @@ pub fn compile_fn_body_inner(
         if needs_implicit_return {
             let expr = ExprNode {
                 data: Expression::Primary(Primary::None),
-                span: Span::start(),
+                span: fn_span,
             };
             let val: Option<&ExprNode> = Some(&expr);
-            asm.extend(compile_return(&val)?);
+            asm.extend(compile_return(&val, fn_span)?);
         }
     }
 
@@ -5667,19 +5816,21 @@ pub fn compile_fn_expression(
     pos_args_required: &Vec<Vec<u8>>,
     pos_args_optional: &Vec<(Vec<u8>, ExprNode)>,
     body: &Block,
+    fn_span: Span,
 ) -> Result<Vec<(u8, Span)>, String> {
     // This will be replaced with a relative jump to after the function
     // declaration
     let mut asm = vec![
-        (ByteCode::Jmp as u8, Span { start: 0, end: 1 }),
-        (0, Span { start: 0, end: 1 }),
-        (0, Span { start: 0, end: 1 }),
+        (ByteCode::Jmp as u8, fn_span),
+        (0, fn_span),
+        (0, fn_span),
     ];
     asm.extend(
         compile_fn_body_inner(
             pos_args_required,
             pos_args_optional,
             body,
+            fn_span,
         )?
     );
 
@@ -5691,14 +5842,14 @@ pub fn compile_fn_expression(
 
     // Assign the value to the ident
     let pc_offset = asm.len() as u16 - 3;
-    asm.push((ByteCode::CreateFn as u8, Span { start: 0, end: 1 }));
-    asm.push(((pc_offset >> 8) as u8, Span { start: 0, end: 1 }));
-    asm.push(((pc_offset & 0xff) as u8, Span { start: 0, end: 1 }));
+    asm.push((ByteCode::CreateFn as u8, fn_span));
+    asm.push(((pc_offset >> 8) as u8, fn_span));
+    asm.push(((pc_offset & 0xff) as u8, fn_span));
 
     Ok(asm)
 }
 
-pub fn compile_fn(func: &Fn) -> Result<Vec<(u8, Span)>, String> {
+pub fn compile_fn(func: &Fn, fn_span: Span) -> Result<Vec<(u8, Span)>, String> {
     let ident = if let Some(ident) = &func.ident {
         ident
     } else {
@@ -5709,47 +5860,50 @@ pub fn compile_fn(func: &Fn) -> Result<Vec<(u8, Span)>, String> {
         &func.pos_args_required,
         &func.pos_args_optional,
         &func.body,
+        fn_span,
     )?;
 
     asm.push((
         ByteCode::VariableDeclaration as u8,
-        Span { start: 0, end: 1 },
+        fn_span,
     ));
     asm.push((
         ident
             .len()
             .try_into()
             .expect("Ident len should into u8"),
-        Span { start: 0, end: 1 },
+        fn_span,
     ));
     for b in ident.iter() {
-        asm.push((*b, Span { start: 0, end: 1 }));
+        asm.push((*b, fn_span));
     }
 
     Ok(asm)
 }
 
-pub fn compile_fn_body(func: &Fn) -> Result<Vec<(u8, Span)>, String> {
+pub fn compile_fn_body(func: &Fn, fn_span: Span) -> Result<Vec<(u8, Span)>, String> {
     compile_fn_body_inner(
         &func.pos_args_required,
         &func.pos_args_optional,
         &func.body,
+        fn_span,
     )
 }
 
-pub fn compile_return(expr: &Option<&ExprNode>) -> Result<Vec<(u8, Span)>, String> {
+pub fn compile_return(expr: &Option<&ExprNode>, span: Span) -> Result<Vec<(u8, Span)>, String> {
     let mut res = Vec::new();
     if let Some(expr) = expr {
         res.extend(compile_expression(expr)?);
     } else {
-        res.push((ByteCode::LiteralNone as u8, Span { start: 0, end: 1 }));
+        res.push((ByteCode::LiteralNone as u8, span));
     }
-    res.push((ByteCode::Return as u8, Span { start: 0, end: 1 }));
+    res.push((ByteCode::Return as u8, span));
     Ok(res)
 }
 
-pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
-    match stmt {
+pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, String> {
+    let stmt_span = stmt_node.span;
+    match &stmt_node.data {
         Statement::Let(ident, expr) => {
             // Expression evaluates to a value that's on the top of the stack
             let mut expr_asm = compile_expression(expr)?;
@@ -5802,7 +5956,7 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
             Ok(expr_asm)
         }
         Statement::Fn(func) => {
-            compile_fn(func)
+            compile_fn(func, stmt_span)
         }
         Statement::Struct(Struct {
             ident,
@@ -5811,14 +5965,14 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
             methods,
         }) => {
             let mut asm = vec![
-                (ByteCode::CreateStruct as u8, Span { start: 0, end: 1 }),
-                (0, Span { start: 0, end: 1 }),
-                (0, Span { start: 0, end: 1 }),
+                (ByteCode::CreateStruct as u8, stmt_span),
+                (0, stmt_span),
+                (0, stmt_span),
             ];
-            asm.push(((members_required.len() + members_optional.len()) as u8, Span { start: 0, end: 1 }));
+            asm.push(((members_required.len() + members_optional.len()) as u8, stmt_span));
 
             // The +1 is for the constructor
-            asm.push(((methods.len() + 1) as u8, Span { start: 0, end: 1 }));
+            asm.push(((methods.len() + 1) as u8, stmt_span));
 
             // Add struct name
             asm.push((
@@ -5826,10 +5980,10 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
                     .len()
                     .try_into()
                     .expect("Struct name len should into u8"),
-                Span { start: 0, end: 1 },
+                stmt_span,
             ));
             for b in ident.into_iter() {
-                asm.push((*b, Span { start: 0, end: 1 }));
+                asm.push((*b, stmt_span));
             }
 
             let member_names: Vec<Vec<u8>> = members_required.iter().cloned().chain(members_optional.iter().map(|(x, _)| x.clone())).collect();
@@ -5840,17 +5994,17 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
                         .len()
                         .try_into()
                         .expect("Member ident len should into u8"),
-                    Span { start: 0, end: 1 },
+                    stmt_span,
                 ));
                 for b in member.into_iter() {
-                    asm.push((*b, Span { start: 0, end: 1 }));
+                    asm.push((*b, stmt_span));
                 }
             }
 
             let arg_list = member_names.into_iter()
                 .map(|name| Node {
                         data: Expression::Primary(Primary::Identifier(name)),
-                        span: Span::start(),
+                        span: stmt_span,
                     }
                 )
                 .collect();
@@ -5871,17 +6025,18 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
                                             Box::new(
                                                 Node {
                                                     data: Expression::Primary(Primary::Identifier(ident.clone())),
-                                                    span: Span::start(),
+                                                    span: stmt_span,
                                                 }
                                             ),
                                             arg_list,
                                             Vec::new()
                                         ),
-                                        span: Span::start(),
+                                        span: stmt_span,
                                     }
                                 )
                             ),
-                        }
+                        },
+                        stmt_span,
                     )?
                 )
             );
@@ -5891,23 +6046,23 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
                 } else {
                     return Err(format!("Method does not have ident!"));
                 };
-                method_defs.push((&ident, compile_fn_body(method)?));
+                method_defs.push((&ident, compile_fn_body(method, stmt_span)?));
             }
 
             let mut jump_asm_idx = Vec::new();
             for (ident, _method_def) in method_defs.iter() {
                 jump_asm_idx.push(asm.len());
-                asm.push((0, Span { start: 0, end: 1 }));
-                asm.push((0, Span { start: 0, end: 1 }));
+                asm.push((0, stmt_span));
+                asm.push((0, stmt_span));
                 asm.push((
                     ident
                         .len()
                         .try_into()
                         .expect("Method ident len should into u8"),
-                    Span { start: 0, end: 1 },
+                    stmt_span,
                 ));
                 for b in ident.into_iter() {
-                    asm.push((*b, Span { start: 0, end: 1 }));
+                    asm.push((*b, stmt_span));
                 }
             }
 
@@ -5925,15 +6080,15 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
 
             asm.push((
                 ByteCode::VariableDeclaration as u8,
-                Span { start: 0, end: 1 },
+                stmt_span,
             ));
             asm.push((
                 ident.len().try_into().expect("Ident len should into u8"),
-                Span { start: 0, end: 1 },
+                stmt_span,
             ));
 
             for b in ident.into_iter() {
-                asm.push((*b, Span { start: 0, end: 1 }));
+                asm.push((*b, stmt_span));
             }
 
             Ok(asm)
@@ -5968,9 +6123,9 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
 
             let loop_start_idx = asm.len();
             asm.extend(vec![
-                (ByteCode::LoopStart as u8, Span { start: 0, end: 1 }),
-                (0, Span { start: 0, end: 1 }),
-                (0, Span { start: 0, end: 1 }),
+                (ByteCode::LoopStart as u8, stmt_span),
+                (0, stmt_span),
+                (0, stmt_span),
             ]);
 
             // Copy the .next bound method and call it
@@ -5983,17 +6138,17 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
             asm.push((ByteCode::Copy as u8, expr.span));
             asm.push((
                 ByteCode::VariableDeclaration as u8,
-                Span { start: 0, end: 1 },
+                stmt_span,
             ));
             asm.push((
                 ident
                     .len()
                     .try_into()
                     .expect("For loop ident len should into u8"),
-                Span { start: 0, end: 1 },
+                stmt_span,
             ));
             for b in ident {
-                asm.push((*b, Span { start: 0, end: 1 }));
+                asm.push((*b, stmt_span));
             }
 
             asm.push((ByteCode::LiteralNone as u8, expr.span));
@@ -6001,17 +6156,17 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
 
             // Jump to `LoopEnd` if calling .next() returns None
             let none_check_idx = asm.len();
-            asm.push((ByteCode::JmpNZ as u8, Span { start: 0, end: 0 }));
-            asm.push((0, Span { start: 0, end: 0 }));
-            asm.push((0, Span { start: 0, end: 0 }));
+            asm.push((ByteCode::JmpNZ as u8, stmt_span));
+            asm.push((0, stmt_span));
+            asm.push((0, stmt_span));
 
-            asm.extend(compile_block(body, false)?);
+            asm.extend(compile_block(body, false, stmt_span)?);
 
             // Jump to start of loop to check the condition again
             let loop_start_offset = u16_to_u8s(asm.len() as u16 - loop_start_idx as u16 - 3);
-            asm.push((ByteCode::JmpUp as u8, Span { start: 0, end: 0 }));
-            asm.push((loop_start_offset[0], Span { start: 0, end: 0 }));
-            asm.push((loop_start_offset[1], Span { start: 0, end: 0 }));
+            asm.push((ByteCode::JmpUp as u8, stmt_span));
+            asm.push((loop_start_offset[0], stmt_span));
+            asm.push((loop_start_offset[1], stmt_span));
 
             // This is the offset from none_check_idx that will get us
             // out of the loop
@@ -6023,34 +6178,34 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
             asm[loop_start_idx + 1].0 = loop_end[0];
             asm[loop_start_idx + 2].0 = loop_end[1];
 
-            asm.push((ByteCode::LoopEnd as u8, Span { start: 0, end: 0 }));
+            asm.push((ByteCode::LoopEnd as u8, stmt_span));
 
             // Remove the `iter` method from the stack
-            asm.push((ByteCode::Pop as u8, Span { start: 0, end: 0 }));
+            asm.push((ByteCode::Pop as u8, stmt_span));
 
             Ok(asm)
         }
         Statement::While(conditional, body) => {
             let mut asm = vec![
-                (ByteCode::LoopStart as u8, Span { start: 0, end: 1 }),
-                (0, Span { start: 0, end: 1 }),
-                (0, Span { start: 0, end: 1 }),
+                (ByteCode::LoopStart as u8, stmt_span),
+                (0, stmt_span),
+                (0, stmt_span),
             ];
             asm.extend(compile_expression(conditional)?);
 
             // Jump to `LoopEnd` if the condition is falsy
             let conditional_check_idx = asm.len();
-            asm.push((ByteCode::JmpZ as u8, Span { start: 0, end: 0 }));
-            asm.push((0, Span { start: 0, end: 0 }));
-            asm.push((0, Span { start: 0, end: 0 }));
+            asm.push((ByteCode::JmpZ as u8, stmt_span));
+            asm.push((0, stmt_span));
+            asm.push((0, stmt_span));
 
-            asm.extend(compile_block(body, false)?);
+            asm.extend(compile_block(body, false, stmt_span)?);
 
             // Jump to start of loop to check the condition again
             let loop_start_offset = u16_to_u8s(asm.len() as u16 - 3);
-            asm.push((ByteCode::JmpUp as u8, Span { start: 0, end: 0 }));
-            asm.push((loop_start_offset[0], Span { start: 0, end: 0 }));
-            asm.push((loop_start_offset[1], Span { start: 0, end: 0 }));
+            asm.push((ByteCode::JmpUp as u8, stmt_span));
+            asm.push((loop_start_offset[0], stmt_span));
+            asm.push((loop_start_offset[1], stmt_span));
 
             // This is the offset from conditional_check_idx that will get us
             // out of the loop
@@ -6062,15 +6217,15 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
             asm[1].0 = loop_end[0];
             asm[2].0 = loop_end[1];
 
-            asm.push((ByteCode::LoopEnd as u8, Span { start: 0, end: 0 }));
+            asm.push((ByteCode::LoopEnd as u8, stmt_span));
 
             Ok(asm)
         }
-        Statement::Break => Ok(vec![(ByteCode::Break as u8, Span { start: 0, end: 1 })]),
-        Statement::Continue => Ok(vec![(ByteCode::Continue as u8, Span { start: 0, end: 1 })]),
-        Statement::Return(expr) => compile_return(&expr.as_ref()),
+        Statement::Break => Ok(vec![(ByteCode::Break as u8, stmt_span)]),
+        Statement::Continue => Ok(vec![(ByteCode::Continue as u8, stmt_span)]),
+        Statement::Return(expr) => compile_return(&expr.as_ref(), stmt_span),
         Statement::If(conditional, if_body, else_body) => {
-            compile_if(conditional, if_body, else_body, false)
+            compile_if(conditional, if_body, else_body, false, stmt_span)
         }
         Statement::Expression(expr) => {
             // Expression evaluates to a value that's on the top of the stack
@@ -6083,28 +6238,28 @@ pub fn compile_statement(stmt: &Statement) -> Result<Vec<(u8, Span)>, String> {
     }
 }
 
-pub fn compile_block_inner(block: &Block, is_expr: bool, asm: &mut Vec<(u8, Span)>) -> Result<(), String> {
+pub fn compile_block_inner(block: &Block, is_expr: bool, block_span: Span, asm: &mut Vec<(u8, Span)>) -> Result<(), String> {
     for stmt in block.stmts.iter() {
         asm.extend(compile_statement(&stmt)?);
     }
     if let Some(last_expr) = &block.last_expr {
         asm.extend(compile_expression(&last_expr)?);
     } else {
-        asm.push((ByteCode::LiteralNone as u8, Span::start()));
+        asm.push((ByteCode::LiteralNone as u8, block_span));
     }
     if !is_expr {
-        asm.push((ByteCode::Pop as u8, Span::start()));
+        asm.push((ByteCode::Pop as u8, block_span));
     }
 
     Ok(())
 }
 
-pub fn compile_block(block: &Block, is_expr: bool) -> Result<Vec<(u8, Span)>, String> {
+pub fn compile_block(block: &Block, is_expr: bool, block_span: Span) -> Result<Vec<(u8, Span)>, String> {
     let mut asm = Vec::new();
 
-    asm.push((ByteCode::StartScope as u8, Span { start: 0, end: 1 }));
-    compile_block_inner(block, is_expr, &mut asm)?;
-    asm.push((ByteCode::EndScope as u8, Span { start: 0, end: 1 }));
+    asm.push((ByteCode::StartScope as u8, block_span));
+    compile_block_inner(block, is_expr, block_span, &mut asm)?;
+    asm.push((ByteCode::EndScope as u8, block_span));
 
     Ok(asm)
 }
@@ -6114,20 +6269,21 @@ pub fn compile_if(
     if_body: &Block,
     else_body: &Block,
     is_expr: bool,
+    span: Span,
 ) -> Result<Vec<(u8, Span)>, String> {
     let mut asm = compile_expression(conditional)?;
     let conditional_check_idx = asm.len();
-    asm.push((ByteCode::JmpZ as u8, Span { start: 0, end: 0 }));
-    asm.push((0, Span { start: 0, end: 0 }));
-    asm.push((0, Span { start: 0, end: 0 }));
-    asm.extend(compile_block(if_body, is_expr)?);
-    asm.push((ByteCode::Jmp as u8, Span { start: 0, end: 0 }));
-    asm.push((0, Span { start: 0, end: 0 }));
-    asm.push((0, Span { start: 0, end: 0 }));
+    asm.push((ByteCode::JmpZ as u8, span));
+    asm.push((0, span));
+    asm.push((0, span));
+    asm.extend(compile_block(if_body, is_expr, span)?);
+    asm.push((ByteCode::Jmp as u8, span));
+    asm.push((0, span));
+    asm.push((0, span));
     // We jump to here when the condition is false
     let else_case_start_idx = asm.len();
 
-    asm.extend(compile_block(else_body, is_expr)?);
+    asm.extend(compile_block(else_body, is_expr, span)?);
 
     // Offset from conditional to the else branch
     let else_jump_offset = u16_to_u8s(else_case_start_idx as u16 - conditional_check_idx as u16);
@@ -6213,15 +6369,15 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
         Expression::Primary(Primary::Expression(expr)) => compile_expression(&expr),
         Expression::BooleanOp(BooleanOp::And(a, b)) => {
             let mut asm = compile_expression(&a)?;
-            asm.push((ByteCode::Copy as u8, Span { start: 0, end: 0 }));
+            asm.push((ByteCode::Copy as u8, span));
 
             let short_circuit_idx = asm.len();
-            asm.push((ByteCode::JmpZ as u8, Span { start: 0, end: 0 }));
-            asm.push((0, Span { start: 0, end: 0 }));
-            asm.push((0, Span { start: 0, end: 0 }));
+            asm.push((ByteCode::JmpZ as u8, span));
+            asm.push((0, span));
+            asm.push((0, span));
 
             // Since the result of a is truthy we get rid of it and return the result of b
-            asm.push((ByteCode::Pop as u8, Span { start: 0, end: 0 }));
+            asm.push((ByteCode::Pop as u8, span));
 
             asm.extend(compile_expression(&b)?);
 
@@ -6233,15 +6389,15 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
         }
         Expression::BooleanOp(BooleanOp::Or(a, b)) => {
             let mut asm = compile_expression(&a)?;
-            asm.push((ByteCode::Copy as u8, Span { start: 0, end: 0 }));
+            asm.push((ByteCode::Copy as u8, span));
 
             let short_circuit_idx = asm.len();
-            asm.push((ByteCode::JmpNZ as u8, Span { start: 0, end: 0 }));
-            asm.push((0, Span { start: 0, end: 0 }));
-            asm.push((0, Span { start: 0, end: 0 }));
+            asm.push((ByteCode::JmpNZ as u8, span));
+            asm.push((0, span));
+            asm.push((0, span));
 
             // Since the result of a is falsy we get rid of it and return the result of b
-            asm.push((ByteCode::Pop as u8, Span { start: 0, end: 0 }));
+            asm.push((ByteCode::Pop as u8, span));
 
             asm.extend(compile_expression(&b)?);
 
@@ -6332,15 +6488,16 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
             }
             Ok(res)
         }
-        Expression::Block(block) => compile_block(block, true),
+        Expression::Block(block) => compile_block(block, true, span),
         Expression::If(conditional, if_body, else_body) => {
-            compile_if(conditional, if_body, else_body, true)
+            compile_if(conditional, if_body, else_body, true, span)
         },
         Expression::Fn(func) => {
             compile_fn_expression(
                 &func.pos_args_required,
                 &func.pos_args_optional,
                 &func.body,
+                span,
             )
         },
     }
@@ -6872,7 +7029,9 @@ impl Interpreter {
                 val if val == ByteCode::Sub as u8 => {
                     let b = stack.pop().expect("Operand for add");
                     let a = stack.pop().expect("Operand for add");
-                    stack.push(a.sub(&b)?);
+                    stack.push(a.sub(&b).map_err(|err_str| {
+                        format_script_err(self.program.spans[pc], &self.program.script, &err_str)
+                    })?);
                 }
                 val if val == ByteCode::Equal as u8 => {
                     let b = stack.pop().expect("Operand for add");
@@ -6887,37 +7046,51 @@ impl Interpreter {
                 val if val == ByteCode::Multiply as u8 => {
                     let b = stack.pop().expect("Operand for ByteCode::Multiply");
                     let a = stack.pop().expect("Operand for ByteCode::Multiply");
-                    stack.push(a.mul(self, &b)?);
+                    stack.push(a.mul(self, &b).map_err(|err_str| {
+                        format_script_err(self.program.spans[pc], &self.program.script, &err_str)
+                    })?);
                 }
                 val if val == ByteCode::Divide as u8 => {
                     let b = stack.pop().expect("Operand for ByteCode::Divide");
                     let a = stack.pop().expect("Operand for ByteCode::Divide");
-                    stack.push(a.div(self, &b)?);
+                    stack.push(a.div(self, &b).map_err(|err_str| {
+                        format_script_err(self.program.spans[pc], &self.program.script, &err_str)
+                    })?);
                 }
                 val if val == ByteCode::Modulus as u8 => {
                     let b = stack.pop().expect("Operand for ByteCode::Modulus");
                     let a = stack.pop().expect("Operand for ByteCode::Modulus");
-                    stack.push(a.modulus(self, &b)?);
+                    stack.push(a.modulus(self, &b).map_err(|err_str| {
+                        format_script_err(self.program.spans[pc], &self.program.script, &err_str)
+                    })?);
                 }
                 val if val == ByteCode::GT as u8 => {
                     let b = stack.pop().expect("Operand for ByteCode::GT");
                     let a = stack.pop().expect("Operand for ByteCode::GT");
-                    stack.push(a.gt(self, &b)?);
+                    stack.push(a.gt(self, &b).map_err(|err_str| {
+                        format_script_err(self.program.spans[pc], &self.program.script, &err_str)
+                    })?);
                 }
                 val if val == ByteCode::GTE as u8 => {
                     let b = stack.pop().expect("Operand for ByteCode::GTE");
                     let a = stack.pop().expect("Operand for ByteCode::GTE");
-                    stack.push(a.gte(self, &b)?);
+                    stack.push(a.gte(self, &b).map_err(|err_str| {
+                        format_script_err(self.program.spans[pc], &self.program.script, &err_str)
+                    })?);
                 }
                 val if val == ByteCode::LT as u8 => {
                     let b = stack.pop().expect("Operand for ByteCode::LT");
                     let a = stack.pop().expect("Operand for ByteCode::LT");
-                    stack.push(a.lt(self, &b)?);
+                    stack.push(a.lt(self, &b).map_err(|err_str| {
+                        format_script_err(self.program.spans[pc], &self.program.script, &err_str)
+                    })?);
                 }
                 val if val == ByteCode::LTE as u8 => {
                     let b = stack.pop().expect("Operand for ByteCode::LTE");
                     let a = stack.pop().expect("Operand for ByteCode::LTE");
-                    stack.push(a.lte(self, &b)?);
+                    stack.push(a.lte(self, &b).map_err(|err_str| {
+                        format_script_err(self.program.spans[pc], &self.program.script, &err_str)
+                    })?);
                 }
                 val if val == ByteCode::In as u8 => {
                     let b = stack.pop().expect("Operand for ByteCode::In");

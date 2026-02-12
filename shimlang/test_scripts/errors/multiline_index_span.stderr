@@ -1,0 +1,8 @@
+Error: Key String(7, 0, u24([0, 0, 7])) not in dict
+   --> 2:1
+   |
+ 2 | / d[
+ 3 | |     "missing"
+ 4 | | ];
+   | |_^
+
