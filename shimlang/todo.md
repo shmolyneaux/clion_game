@@ -1,8 +1,21 @@
 - Tuple
 - Tuple unpacking
-- Anonymous functions (non-closures?)
-- Native range type
 - String methods
+  - split
+  - join
+  - upper
+  - lower
+  - strip
+  - remove_prefix
+  - remove_suffix
+  - split_lines
+  - contains
+  - ends_with
+  - starts_with
+  - find
+  - lstrip
+  - rstrip
+  - replace
 - `*args`, and `**kwargs`
 - Numeric literals with underscores
 - Integer division
@@ -31,5 +44,3 @@
 - Stack viewer
 - Spans for statements
 - Adding ident cache to Fn bytecode
-- Closures
-

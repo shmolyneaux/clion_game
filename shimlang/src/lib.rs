@@ -1656,7 +1656,14 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
             b'\n' => (),
             b'\r' => (),
             b':' => tokens.push(Token::Colon),
-            b'!' => tokens.push(Token::Bang),
+            b'!' => {
+                if text.len() > 1 && text[1] == b'=' {
+                    text = &text[1..];
+                    tokens.push(Token::BangEqual);
+                } else {
+                    tokens.push(Token::Bang);
+                }
+            },
             b'.' => {
                 if text.len() > 1 && text[1] == b'.' {
                     text = &text[1..];
