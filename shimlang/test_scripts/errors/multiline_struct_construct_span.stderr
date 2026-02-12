@@ -1,0 +1,11 @@
+ 5 | Point(
+     ^^^^^^^
+ 6 |     1,
+     ^^^^^^^
+ 7 |     2,
+     ^^^^^^^
+ 8 |     3
+     ^^^^^^
+ 9 | );
+     ^
+Error: Too many positional args, 1 remaining
