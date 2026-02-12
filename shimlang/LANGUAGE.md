@@ -26,7 +26,7 @@ with methods, and a growing standard library of built-in types and functions.
   - [Negation](#negation)
   - [Range](#range)
 - [Control Flow](#control-flow)
-  - [If / Else](#if--else)
+  - [If / Else / Else If](#if--else--else-if)
   - [While Loops](#while-loops)
   - [For Loops](#for-loops)
   - [Break and Continue](#break-and-continue)
@@ -471,6 +471,7 @@ Output:
 | Operator | Description |
 |----------|-------------|
 | `==` | Equal to |
+| `!=` | Not equal to |
 | `<` | Less than |
 | `>` | Greater than |
 | `<=` | Less than or equal |
@@ -482,6 +483,8 @@ print(2 > 1);
 print(1 <= 1);
 print(1 >= 2);
 print(1 == 1);
+print(1 != 2);
+print(1 != 1);
 ```
 
 Output:
@@ -492,6 +495,8 @@ true
 true
 false
 true
+true
+false
 ```
 
 ### Logical
@@ -607,9 +612,10 @@ Output:
 
 ## Control Flow
 
-### If / Else
+### If / Else / Else If
 
-Conditionals use `if` and `else` with curly braces:
+Conditionals use `if` and `else` with curly braces. Chains of conditions use
+`else if`:
 
 ```rust
 let x = 10;
@@ -626,7 +632,28 @@ Output:
 big
 ```
 
-`if`/`else` can also be used as an expression (see
+`else if` flattens conditional chains without nesting:
+
+```rust
+let x = 3;
+if x == 1 {
+    print("one");
+} else if x == 2 {
+    print("two");
+} else if x == 3 {
+    print("three");
+} else {
+    print("other");
+}
+```
+
+Output:
+
+```
+three
+```
+
+`if`/`else if`/`else` can also be used as an expression (see
 [Block Expressions](#block-expressions)).
 
 ### While Loops
@@ -1269,13 +1296,8 @@ environment rather than conditions to catch at runtime.
 
 The following changes would improve the Shimlang experience for users:
 
-- **Inequality operator (`!=`):** The `!=` token is defined internally but
-  not yet wired into the lexer. Currently the only way to test inequality is
-  `!(a == b)`, which is less readable than `a != b`.
 - **Compound assignment operators:** `+=`, `-=`, `*=`, and `/=` would reduce
   boilerplate in expressions like `count = count + 1`.
-- **Else-if chains (`else if`):** Currently each `else if` requires nested
-  braces. A dedicated `else if` syntax would flatten conditional chains.
 - **Error handling:** The absence of `try`/`catch` is a deliberate design
   choice (see [Error Handling Philosophy](#error-handling-philosophy)). Future
   work in this area focuses on the time-travelling debugger and expanding the
