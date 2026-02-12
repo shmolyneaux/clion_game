@@ -1,0 +1,3 @@
+ 5 | add(1, 2, 3);
+     ^^^^^^^^^^^^
+Error: Too many positional args, 1 remaining

@@ -1,0 +1,5 @@
+Parse Error:
+ 3 | }
+     ^
+Error: Expected semicolon after `return <expr>`, found RCurly
+Failed to parse script

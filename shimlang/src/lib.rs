@@ -270,10 +270,36 @@ fn format_script_err(span: Span, script: &[u8], msg: &str) -> String {
     let script_lines = script_lines(script);
     let mut out = "".to_string();
 
+    let span_start_idx = span.start;
+    let span_end_idx = span.end;
+
+    // Find which lines the span covers
+    let mut first_line: Option<usize> = None;
+    let mut last_line: Option<usize> = None;
+    for (lineno, line_info) in script_lines.iter().enumerate() {
+        if line_info.start_idx <= span_start_idx && span_start_idx <= line_info.end_idx {
+            first_line = Some(lineno);
+        }
+        if line_info.start_idx <= span_end_idx && span_end_idx <= line_info.end_idx + 1 {
+            last_line = Some(lineno);
+        }
+    }
+
+    // If we couldn't find either line, fall back to showing the start line
+    let first_line = first_line.unwrap_or(0);
+    let last_line = last_line.unwrap_or(first_line);
+
     // The `gutter_size` includes everything up to the first character of the line
     let gutter_size = script_lines.len().to_string().len() + 4;
-    for (lineno, line_info) in script_lines.iter().enumerate() {
-        let lineno = lineno + 1;
+    let is_multiline = first_line != last_line;
+
+    for (lineno_0, line_info) in script_lines.iter().enumerate() {
+        let lineno = lineno_0 + 1;
+
+        // Only show lines that are part of the span
+        if lineno_0 < first_line || lineno_0 > last_line {
+            continue;
+        }
 
         let line: String = unsafe {
             std::str::from_utf8_unchecked(
@@ -281,22 +307,55 @@ fn format_script_err(span: Span, script: &[u8], msg: &str) -> String {
             )
             .to_string()
         };
-        out.push_str(&format!(
-            " {:lineno_size$} | {}",
-            lineno,
-            line,
-            lineno_size = gutter_size - 4
-        ));
-        if !line.ends_with("\n") {
-            // Last line?
-            out.push_str("\n");
-        }
 
-        let span_start_idx = span.start;
-        let span_end_idx = span.end;
+        if is_multiline {
+            // Rust-style multi-line error display
+            out.push_str(&format!(
+                " {:lineno_size$} | {}",
+                lineno,
+                line,
+                lineno_size = gutter_size - 4
+            ));
+            if !line.ends_with("\n") {
+                out.push_str("\n");
+            }
 
-        // TODO: handle token going across line breaks
-        if line_info.start_idx <= span_start_idx && span_start_idx <= line_info.end_idx {
+            if lineno_0 == first_line {
+                // First line: show carets from span start to end of line content
+                let line_span_start = span_start_idx - line_info.start_idx;
+                let line_len = line_info.end_idx - line_info.start_idx + 1;
+                let caret_len = line_len - line_span_start;
+
+                out.push_str(&" ".repeat(gutter_size));
+                out.push_str(&" ".repeat(line_span_start as usize));
+                out.push_str(&"^".repeat(caret_len as usize));
+                out.push('\n');
+            } else if lineno_0 == last_line {
+                // Last line: show carets from start of line to span end
+                let line_span_end = span_end_idx - line_info.start_idx;
+
+                out.push_str(&" ".repeat(gutter_size));
+                out.push_str(&"^".repeat(line_span_end as usize));
+                out.push('\n');
+            } else {
+                // Middle lines: show carets for full line
+                let line_len = line_info.end_idx - line_info.start_idx + 1;
+                out.push_str(&" ".repeat(gutter_size));
+                out.push_str(&"^".repeat(line_len as usize));
+                out.push('\n');
+            }
+        } else {
+            // Single-line span display (original behavior)
+            out.push_str(&format!(
+                " {:lineno_size$} | {}",
+                lineno,
+                line,
+                lineno_size = gutter_size - 4
+            ));
+            if !line.ends_with("\n") {
+                out.push_str("\n");
+            }
+
             let line_span_start = span_start_idx - line_info.start_idx;
             let line_span_end = span_end_idx - line_info.start_idx;
 
@@ -439,19 +498,20 @@ pub fn parse_primary(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                                 expr = Expression::BinaryOp(
                                     BinaryOp::Add(
                                         Box::new(
-                                            Node::lazy(expr)
+                                            Node { data: expr, span }
                                         ),
                                         Box::new(
-                                            Node::lazy(
-                                                Expression::Stringify(Box::new(interp_expr))
-                                            )
+                                            Node {
+                                                data: Expression::Stringify(Box::new(interp_expr)),
+                                                span,
+                                            }
                                         ),
                                     )
                                 );
                                 expr = Expression::BinaryOp(
                                     BinaryOp::Add(
-                                        Box::new(Node::lazy(expr)),
-                                        Box::new(Node::lazy(Expression::Primary(Primary::String(s)))),
+                                        Box::new(Node { data: expr, span }),
+                                        Box::new(Node { data: Expression::Primary(Primary::String(s)), span }),
                                     )
                                 );
                             },
