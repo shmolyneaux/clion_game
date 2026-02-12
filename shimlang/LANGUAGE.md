@@ -49,6 +49,7 @@ with methods, and a growing standard library of built-in types and functions.
 - [Comments](#comments)
 - [Custom Iterators](#custom-iterators)
 - [Built-in Functions](#built-in-functions)
+- [Error Handling Philosophy](#error-handling-philosophy)
 - [Suggested Improvements](#suggested-improvements)
 
 ## Hello, World!
@@ -1224,6 +1225,46 @@ Output:
 None
 ```
 
+## Error Handling Philosophy
+
+Shimlang intentionally does not include a `try`/`catch` mechanism. Exceptions
+are not part of normal control flow. When an invalid operation occurs — such as
+an out-of-bounds access, a failed type conversion, or a violated assertion — it
+represents programmer error, not a recoverable condition.
+
+The built-in `panic` function and `assert` halt execution immediately:
+
+```rust
+assert(1 == 1);   // passes silently
+assert(1 == 2);   // halts with an error
+
+panic("something went wrong");  // always halts
+```
+
+For operations that might legitimately fail with user-supplied data, Shimlang
+provides `try_` variants that return `None` instead of panicking:
+
+```rust
+let n = try_int("not a number");
+if n == None {
+    print("invalid input");
+}
+```
+
+Output:
+
+```
+invalid input
+```
+
+Rather than adding exception handling, the plan is to introduce a
+**time-travelling debugger with hot reloading** that automatically opens a
+debugger at the offending line during development. This means that when a panic
+occurs, the developer can inspect the full program state, step backward through
+execution, fix the code, and resume — without restarting the program. GDScript
+takes a similar approach by treating errors as signals for the development
+environment rather than conditions to catch at runtime.
+
 ## Suggested Improvements
 
 The following changes would improve the Shimlang experience for users:
@@ -1235,9 +1276,10 @@ The following changes would improve the Shimlang experience for users:
   boilerplate in expressions like `count = count + 1`.
 - **Else-if chains (`else if`):** Currently each `else if` requires nested
   braces. A dedicated `else if` syntax would flatten conditional chains.
-- **Error handling:** There is no `try`/`catch` mechanism. `panic` halts
-  execution immediately with no way to recover. A structured error-handling
-  system would make Shimlang more robust for larger programs.
+- **Error handling:** The absence of `try`/`catch` is a deliberate design
+  choice (see [Error Handling Philosophy](#error-handling-philosophy)). Future
+  work in this area focuses on the time-travelling debugger and expanding the
+  set of `try_` variants for operations that can fail with user-supplied data.
 - **Module / import system:** All code lives in a single file. An import
   system would allow organizing projects into reusable modules.
 - **Tuple type and destructuring:** Tuples and pattern-matching destructuring
