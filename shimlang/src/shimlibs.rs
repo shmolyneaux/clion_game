@@ -1,7 +1,392 @@
 use crate::runtime::*;
+use crate::lex::debug_u8s;
+use std::any::{Any, type_name};
 use shm_tracy::*;
 use shm_tracy::zone_scoped;
 use crate::mem::*;
+
+pub(crate) struct ListIterator {
+    pub(crate) lst: ShimValue,
+    pub(crate) idx: usize,
+}
+impl ShimNative for ListIterator {
+    fn get_attr(&self, self_as_val: &ShimValue, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
+        if ident == b"next" {
+            fn shim_list_iter_next(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+                if args.args.len() != 1 {
+                    return Err(format!("Can't provide positional args to ListIterator.next()"));
+                }
+
+                let itr: &mut ListIterator = args.args[0].as_native(interpreter)?;
+                let lst = itr.lst.list(interpreter)?;
+                if itr.idx >= lst.len() {
+                    Ok(ShimValue::None)
+                } else {
+                    let result = lst.get(&mut interpreter.mem, itr.idx as isize)?;
+                    itr.idx += 1;
+
+                    Ok(result)
+                }
+            }
+
+            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_list_iter_next))
+        } else {
+            Err(format!("Can't get_attr {} on {}", debug_u8s(ident), type_name::<Self>() ))
+        }
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any where Self: Sized {
+        self
+    }
+
+    fn gc_vals(&self) -> Vec<ShimValue> {
+        vec![self.lst]
+    }
+}
+
+pub(crate) struct DictKeysIterator {
+    pub(crate) dict: ShimValue,
+    pub(crate) idx: usize,
+}
+impl ShimNative for DictKeysIterator {
+    fn get_attr(&self, self_as_val: &ShimValue, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
+        if ident == b"next" {
+            fn shim_dict_keys_iter_next(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+                if args.args.len() != 1 {
+                    return Err(format!("Can't provide positional args to DictKeysIterator.next()"));
+                }
+
+                let itr: &mut DictKeysIterator = args.args[0].as_native(interpreter)?;
+                let dict = itr.dict.dict(interpreter)?;
+                let entries = dict.entries_array(interpreter);
+                
+                // Skip invalid entries (tombstones)
+                while itr.idx < entries.len() {
+                    if entries[itr.idx].is_valid() {
+                        let result = entries[itr.idx].key;
+                        itr.idx += 1;
+                        return Ok(result);
+                    }
+                    itr.idx += 1;
+                }
+                
+                Ok(ShimValue::None)
+            }
+
+            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_dict_keys_iter_next))
+        } else if ident == b"iter" {
+            fn shim_dict_keys_iter_iter(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+                let mut unpacker = ArgUnpacker::new(args);
+                let obj = unpacker.required(b"obj")?;
+                unpacker.end()?;
+                Ok(obj)
+            }
+
+            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_dict_keys_iter_iter))
+        } else {
+            Err(format!("Can't get_attr {} on {}", debug_u8s(ident), type_name::<Self>() ))
+        }
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any where Self: Sized {
+        self
+    }
+
+    fn gc_vals(&self) -> Vec<ShimValue> {
+        vec![self.dict]
+    }
+}
+
+pub(crate) struct DictValuesIterator {
+    pub(crate) dict: ShimValue,
+    pub(crate) idx: usize,
+}
+impl ShimNative for DictValuesIterator {
+    fn get_attr(&self, self_as_val: &ShimValue, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
+        if ident == b"next" {
+            fn shim_dict_values_iter_next(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+                if args.args.len() != 1 {
+                    return Err(format!("Can't provide positional args to DictValuesIterator.next()"));
+                }
+
+                let itr: &mut DictValuesIterator = args.args[0].as_native(interpreter)?;
+                let dict = itr.dict.dict(interpreter)?;
+                let entries = dict.entries_array(interpreter);
+                
+                // Skip invalid entries (tombstones)
+                while itr.idx < entries.len() {
+                    if entries[itr.idx].is_valid() {
+                        let result = entries[itr.idx].value;
+                        itr.idx += 1;
+                        return Ok(result);
+                    }
+                    itr.idx += 1;
+                }
+                
+                Ok(ShimValue::None)
+            }
+
+            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_dict_values_iter_next))
+        } else if ident == b"iter" {
+            fn shim_dict_values_iter_iter(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+                let mut unpacker = ArgUnpacker::new(args);
+                let obj = unpacker.required(b"obj")?;
+                unpacker.end()?;
+                Ok(obj)
+            }
+
+            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_dict_values_iter_iter))
+        } else {
+            Err(format!("Can't get_attr {} on {}", debug_u8s(ident), type_name::<Self>() ))
+        }
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any where Self: Sized {
+        self
+    }
+
+    fn gc_vals(&self) -> Vec<ShimValue> {
+        vec![self.dict]
+    }
+}
+
+pub(crate) struct DictEntryNative {
+    pub(crate) key: ShimValue,
+    pub(crate) value: ShimValue,
+}
+impl ShimNative for DictEntryNative {
+    fn get_attr(&self, _self_as_val: &ShimValue, _interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
+        if ident == b"key" {
+            Ok(self.key)
+        } else if ident == b"value" {
+            Ok(self.value)
+        } else {
+            Err(format!("Can't get_attr {} on {}", debug_u8s(ident), type_name::<Self>() ))
+        }
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any where Self: Sized {
+        self
+    }
+
+    fn gc_vals(&self) -> Vec<ShimValue> {
+        vec![self.key, self.value]
+    }
+}
+
+pub(crate) struct DictItemsIterator {
+    pub(crate) dict: ShimValue,
+    pub(crate) idx: usize,
+}
+impl ShimNative for DictItemsIterator {
+    fn get_attr(&self, self_as_val: &ShimValue, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
+        if ident == b"next" {
+            fn shim_dict_items_iter_next(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+                if args.args.len() != 1 {
+                    return Err(format!("Can't provide positional args to DictItemsIterator.next()"));
+                }
+
+                let itr: &mut DictItemsIterator = args.args[0].as_native(interpreter)?;
+                let dict = itr.dict.dict(interpreter)?;
+                let entries = dict.entries_array(interpreter);
+                
+                // Skip invalid entries (tombstones)
+                while itr.idx < entries.len() {
+                    if entries[itr.idx].is_valid() {
+                        let entry = &entries[itr.idx];
+                        let result = interpreter.mem.alloc_native(DictEntryNative {
+                            key: entry.key,
+                            value: entry.value,
+                        });
+                        itr.idx += 1;
+                        return Ok(result);
+                    }
+                    itr.idx += 1;
+                }
+                
+                Ok(ShimValue::None)
+            }
+
+            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_dict_items_iter_next))
+        } else if ident == b"iter" {
+            fn shim_dict_items_iter_iter(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+                let mut unpacker = ArgUnpacker::new(args);
+                let obj = unpacker.required(b"obj")?;
+                unpacker.end()?;
+                Ok(obj)
+            }
+
+            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_dict_items_iter_iter))
+        } else {
+            Err(format!("Can't get_attr {} on {}", debug_u8s(ident), type_name::<Self>() ))
+        }
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any where Self: Sized {
+        self
+    }
+
+    fn gc_vals(&self) -> Vec<ShimValue> {
+        vec![self.dict]
+    }
+}
+
+pub(crate) struct RangeNative {
+    pub(crate) start: ShimValue,
+    pub(crate) end: ShimValue,
+}
+
+impl ShimNative for RangeNative {
+    fn to_string(&self, interpreter: &mut Interpreter) -> String {
+        format!("Range({}, {})", self.start.to_string(interpreter), self.end.to_string(interpreter))
+    }
+
+    fn get_attr(&self, self_as_val: &ShimValue, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
+        if ident == b"step" {
+            fn shim_range_step(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+                let mut unpacker = ArgUnpacker::new(args);
+                let obj = unpacker.required(b"obj")?;
+                let step = unpacker.required(b"step")?;
+                unpacker.end()?;
+
+                let range: &RangeNative = obj.as_native(interpreter)?;
+                
+                // Check for zero step
+                let is_zero = match step {
+                    ShimValue::Integer(0) => true,
+                    ShimValue::Float(f) if f == 0.0 => true,
+                    _ => false,
+                };
+                
+                if is_zero {
+                    return Err(format!("Step cannot be zero"));
+                }
+
+                let iterator = RangeIterator {
+                    current: range.start,
+                    end: range.end,
+                    step: step,
+                };
+                Ok(interpreter.mem.alloc_native(iterator))
+            }
+
+            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_range_step))
+        } else if ident == b"iter" {
+            fn shim_range_iter(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+                let mut unpacker = ArgUnpacker::new(args);
+                let obj = unpacker.required(b"obj")?;
+                unpacker.end()?;
+
+                let range: &RangeNative = obj.as_native(interpreter)?;
+                let iterator = RangeIterator {
+                    current: range.start,
+                    end: range.end,
+                    step: ShimValue::Integer(1),
+                };
+                Ok(interpreter.mem.alloc_native(iterator))
+            }
+
+            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_range_iter))
+        } else {
+            Err(format!("Can't get_attr {} on {}", debug_u8s(ident), type_name::<Self>()))
+        }
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any where Self: Sized {
+        self
+    }
+
+    fn gc_vals(&self) -> Vec<ShimValue> {
+        vec![self.start, self.end]
+    }
+}
+
+pub(crate) struct RangeIterator {
+    pub(crate) current: ShimValue,
+    pub(crate) end: ShimValue,
+    pub(crate) step: ShimValue,
+}
+
+impl ShimNative for RangeIterator {
+    fn get_attr(&self, self_as_val: &ShimValue, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
+        if ident == b"next" {
+            fn shim_range_iter_next(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+                if args.args.len() != 1 {
+                    return Err(format!("Can't provide positional args to RangeIterator.next()"));
+                }
+
+                let itr: &mut RangeIterator = args.args[0].as_native(interpreter)?;
+                
+                // Determine if we've reached the end based on step direction
+                // For positive steps: iterate while current < end
+                // For negative steps: iterate while current > end
+                let step_is_positive = match itr.step.gt(interpreter, &ShimValue::Integer(0))? {
+                    ShimValue::Bool(b) => b,
+                    _ => return Err(format!("Step comparison failed")),
+                };
+                
+                let has_more = if step_is_positive {
+                    // current < end
+                    match itr.current.lt(interpreter, &itr.end)? {
+                        ShimValue::Bool(b) => b,
+                        _ => return Err(format!("Range comparison failed")),
+                    }
+                } else {
+                    // current > end
+                    match itr.current.gt(interpreter, &itr.end)? {
+                        ShimValue::Bool(b) => b,
+                        _ => return Err(format!("Range comparison failed")),
+                    }
+                };
+                
+                if !has_more {
+                    Ok(ShimValue::None)
+                } else {
+                    let result = itr.current;
+                    // current = current + step
+                    let mut pending_args = ArgBundle::new();
+                    match itr.current.add(interpreter, &itr.step, &mut pending_args)? {
+                        CallResult::ReturnValue(new_current) => {
+                            itr.current = new_current;
+                            Ok(result)
+                        }
+                        CallResult::PC(pc, captured_scope) => {
+                            let mut new_env = Environment::with_scope(captured_scope);
+                            let new_current = interpreter.execute_bytecode_extended(
+                                &mut (pc as usize),
+                                pending_args,
+                                &mut new_env,
+                            )?;
+                            itr.current = new_current;
+                            Ok(result)
+                        }
+                    }
+                }
+            }
+
+            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_range_iter_next))
+        } else if ident == b"iter" {
+            fn shim_range_iterator_iter(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+                let mut unpacker = ArgUnpacker::new(args);
+                let obj = unpacker.required(b"obj")?;
+                unpacker.end()?;
+                Ok(obj)
+            }
+
+            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_range_iterator_iter))
+        } else {
+            Err(format!("Can't get_attr {} on {}", debug_u8s(ident), type_name::<Self>()))
+        }
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any where Self: Sized {
+        self
+    }
+
+    fn gc_vals(&self) -> Vec<ShimValue> {
+        vec![self.current, self.end, self.step]
+    }
+}
 
 const fn generate_size_table() -> [u32; 256] {
     let mut table = [0; 256];
@@ -978,7 +1363,6 @@ pub(crate) fn shim_list_filter(interpreter: &mut Interpreter, args: &ArgBundle) 
                     let val = interpreter.execute_bytecode_extended(
                         &mut (pc as usize),
                         args,
-                        // TODO: this doesn't even have print...
                         &mut new_env,
                     )?;
                     val
@@ -1018,7 +1402,6 @@ pub(crate) fn shim_list_map(interpreter: &mut Interpreter, args: &ArgBundle) -> 
                 let val = interpreter.execute_bytecode_extended(
                     &mut (pc as usize),
                     args,
-                    // TODO: this doesn't even have print...
                     &mut new_env,
                 )?;
                 val

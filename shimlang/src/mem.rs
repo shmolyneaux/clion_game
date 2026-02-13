@@ -570,14 +570,14 @@ impl<'a> GC<'a> {
                         // Push the keys/vals
                         let count: usize = dict.entry_count as usize;
                         for entry in &entries[..count] {
-                            if entry.key.is_uninitialized() {
+                            if !entry.key.is_uninitialized() {
                                 vals.push(entry.key);
                                 vals.push(entry.value);
                             }
                         }
 
                         // Mark the space for the dict struct
-                        for idx in pos..(pos + (std::mem::size_of::<ShimDict>()/8)) {
+                        for idx in pos..(pos + std::mem::size_of::<ShimDict>().div_ceil(8)) {
                             self.mask.set(idx);
                         }
 
