@@ -1620,6 +1620,83 @@ impl StructDef {
     }
 }
 
+// MMU methods that depend on runtime types (ShimValue, ShimDict, ShimList, ShimFn, etc.)
+impl MMU {
+    pub(crate) fn alloc_str(&mut self, contents: &[u8]) -> ShimValue {
+        assert!(contents.len() <= u16::MAX as usize, "String length exceeds u16::MAX");
+        let pos = self.alloc_str_raw(contents);
+        ShimValue::String(contents.len() as u16, 0, pos.0)
+    }
+
+    pub(crate) fn alloc_dict_raw(&mut self) -> Word {
+        let word_count = Word((std::mem::size_of::<ShimDict>() as u32).div_ceil(8).into());
+        let position = alloc!(self, word_count, "Dict");
+        unsafe {
+            let ptr: *mut ShimDict =
+                std::mem::transmute(&mut self.mem[usize::from(position.0)]);
+            ptr.write(ShimDict::new());
+        }
+        position
+    }
+
+    pub(crate) fn alloc_dict(&mut self) -> ShimValue {
+        ShimValue::Dict(self.alloc_dict_raw())
+    }
+
+    pub(crate) fn alloc_list(&mut self) -> ShimValue {
+        let word_count = Word((std::mem::size_of::<ShimList>() as u32).div_ceil(8).into());
+        let position = alloc!(self, word_count, "List");
+        unsafe {
+            let ptr: *mut ShimList =
+                std::mem::transmute(&mut self.mem[usize::from(position.0)]);
+            ptr.write(ShimList::new());
+        }
+        ShimValue::List(position)
+    }
+
+    pub(crate) fn alloc_fn(&mut self, pc: u32, name: &[u8], captured_scope: u32) -> ShimValue {
+        let word_count = Word((std::mem::size_of::<ShimFn>() as u32).div_ceil(8).into());
+        let position = alloc!(self, word_count, &format!("Fn `{}`", debug_u8s(name)));
+
+        // Allocate the name string
+        let name_pos = self.alloc_str_raw(name);
+
+        unsafe {
+            let ptr: *mut ShimFn =
+                std::mem::transmute(&mut self.mem[usize::from(position.0)]);
+            ptr.write(ShimFn { pc, name_len: name.len() as u16, name: name_pos, captured_scope });
+        }
+        ShimValue::Fn(position)
+    }
+
+    pub(crate) fn alloc_native<T: ShimNative>(&mut self, val: T) -> ShimValue {
+        assert!(std::mem::size_of::<Box<dyn ShimNative>>() == 16);
+        let word_count = Word(2.into());
+        let position = alloc!(self, word_count, "Native");
+        unsafe {
+            let ptr: *mut Box<dyn ShimNative> =
+                std::mem::transmute(&mut self.mem[usize::from(position.0)]);
+            ptr.write(Box::new(val));
+        }
+        ShimValue::Native(position)
+    }
+
+    pub(crate) fn alloc_bound_native_fn(&mut self, obj: &ShimValue, func: NativeFn) -> ShimValue {
+        let position = alloc!(self, Word(2.into()), "Bound Native Fn");
+        unsafe {
+            let obj_ptr: *mut ShimValue =
+                std::mem::transmute(&mut self.mem[usize::from(position.0)]);
+            obj_ptr.write(*obj);
+            let fn_ptr: *mut NativeFn = std::mem::transmute(
+                &mut self.mem[usize::from(position.0) + 1],
+            );
+            fn_ptr.write(func);
+
+            ShimValue::BoundNativeMethod(position)
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(crate) enum CallResult {
     ReturnValue(ShimValue),
@@ -1628,8 +1705,8 @@ pub(crate) enum CallResult {
 
 #[derive(Debug)]
 pub struct ArgBundle {
-    args: Vec<ShimValue>,
-    kwargs: Vec<(Ident, ShimValue)>,
+    pub(crate) args: Vec<ShimValue>,
+    pub(crate) kwargs: Vec<(Ident, ShimValue)>,
 }
 
 impl ArgBundle {
@@ -1640,7 +1717,7 @@ impl ArgBundle {
         }
     }
 
-    fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.args.len() + self.kwargs.len()
     }
 
@@ -1657,15 +1734,15 @@ pub(crate) struct ArgUnpacker<'a> {
 }
 
 impl<'a> ArgUnpacker<'a> {
-    fn new(bundle: &'a ArgBundle) -> Self {
+    pub(crate) fn new(bundle: &'a ArgBundle) -> Self {
         Self { bundle, pos: 0, kwargs_consumed: 0 }
     }
 
-    fn required(&mut self, name: &[u8]) -> Result<ShimValue, String> {
+    pub(crate) fn required(&mut self, name: &[u8]) -> Result<ShimValue, String> {
         self.optional(name).ok_or_else(|| format!("Missing required argument: '{}'", debug_u8s(name)))
     }
 
-    fn optional(&mut self, name: &[u8]) -> Option<ShimValue> {
+    pub(crate) fn optional(&mut self, name: &[u8]) -> Option<ShimValue> {
         for (ident, arg) in self.bundle.kwargs.iter() {
             if ident == name {
                 self.kwargs_consumed += 1;
@@ -1682,7 +1759,7 @@ impl<'a> ArgUnpacker<'a> {
         }
     }
 
-    fn end(&self) -> Result<(), String> {
+    pub(crate) fn end(&self) -> Result<(), String> {
         let consumed = self.pos + self.kwargs_consumed;
         if self.bundle.len() != consumed {
             Err(format!("Got {} arguments, but only used {}", self.bundle.len(), consumed))
@@ -1730,7 +1807,7 @@ impl ShimValue {
         }
     }
 
-    fn is_none(&self) -> bool {
+    pub(crate) fn is_none(&self) -> bool {
         matches!(self, ShimValue::None)
     }
 
@@ -1837,7 +1914,7 @@ impl ShimValue {
         }
     }
 
-    fn dict_mut(&self, interpreter: &mut Interpreter) -> Result<&mut ShimDict, String> {
+    pub(crate) fn dict_mut(&self, interpreter: &mut Interpreter) -> Result<&mut ShimDict, String> {
         match self {
             ShimValue::Dict(position) => {
                 let dict: &mut ShimDict = unsafe {
@@ -1865,7 +1942,7 @@ impl ShimValue {
         }
     }
 
-    fn list_mut(&self, interpreter: &mut Interpreter) -> Result<&mut ShimList, String> {
+    pub(crate) fn list_mut(&self, interpreter: &mut Interpreter) -> Result<&mut ShimList, String> {
         match self {
             ShimValue::List(position) => {
                 unsafe {
@@ -1878,7 +1955,7 @@ impl ShimValue {
         }
     }
 
-    fn list(&self, interpreter: &Interpreter) -> Result<&ShimList, String> {
+    pub(crate) fn list(&self, interpreter: &Interpreter) -> Result<&ShimList, String> {
         match self {
             ShimValue::List(position) => {
                 unsafe {
@@ -1908,7 +1985,7 @@ impl ShimValue {
         self.string(interpreter).unwrap()
     }
 
-    fn string(&self, interpreter: &Interpreter) -> Result<&[u8], String> {
+    pub(crate) fn string(&self, interpreter: &Interpreter) -> Result<&[u8], String> {
         match self {
             ShimValue::String(len, offset, position) => {
                 let len = *len as usize;
@@ -2337,7 +2414,7 @@ impl ShimValue {
         }
     }
 
-    fn get_attr(&self, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
+    pub(crate) fn get_attr(&self, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
         match self {
             ShimValue::Struct(pos) => {
                 // Handle __type__ special attribute
@@ -2499,11 +2576,11 @@ impl ShimValue {
         }
     }
 
-    fn to_bytes(&self) -> [u8; 8] {
+    pub(crate) fn to_bytes(&self) -> [u8; 8] {
         unsafe { std::mem::transmute(*self) }
     }
 
-    fn from_bytes(bytes: [u8; 8]) -> Self {
+    pub(crate) fn from_bytes(bytes: [u8; 8]) -> Self {
         unsafe { std::mem::transmute(bytes) }
     }
 
