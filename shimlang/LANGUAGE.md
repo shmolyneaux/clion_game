@@ -22,6 +22,7 @@ with methods, and a growing standard library of built-in types and functions.
 - [Operators](#operators)
   - [Arithmetic](#arithmetic)
   - [Comparison](#comparison)
+  - [Membership](#membership)
   - [Logical](#logical)
   - [Negation](#negation)
   - [Range](#range)
@@ -495,6 +496,35 @@ true
 true
 false
 true
+true
+false
+```
+
+### Membership
+
+The `in` operator tests containment in dictionaries, lists, and strings:
+
+```rust
+let d = dict();
+d["x"] = 1;
+print("x" in d);
+print("y" in d);
+
+let lst = [1, 2, 3];
+print(2 in lst);
+print(5 in lst);
+
+print("ell" in "hello");
+print("xyz" in "hello");
+```
+
+Output:
+
+```
+true
+false
+true
+false
 true
 false
 ```
@@ -1010,7 +1040,25 @@ true false
 
 ### Operator Overloading
 
-Defining an `add` method allows instances to be combined with the `+` operator:
+Structs can override the following operators by defining methods with these
+names:
+
+| Method | Operator |
+|--------|----------|
+| `add` | `+` |
+| `sub` | `-` |
+| `mul` | `*` |
+| `div` | `/` |
+| `modulus` | `%` |
+| `eq` | `==` |
+| `gt` | `>` |
+| `gte` | `>=` |
+| `lt` | `<` |
+| `lte` | `<=` |
+| `contains` | `in` |
+
+Each method takes `self` and the right-hand operand as arguments and returns the
+result:
 
 ```rust
 struct Vec2 {
@@ -1019,18 +1067,26 @@ struct Vec2 {
     fn add(self, other) {
         Vec2(self.x + other.x, self.y + other.y)
     }
+
+    fn eq(self, other) {
+        self.x == other.x and self.y == other.y
+    }
 }
 
 let a = Vec2(1, 2);
 let b = Vec2(3, 4);
 let c = a + b;
 print(c.x, c.y);
+print(a == b);
+print(a == Vec2(1, 2));
 ```
 
 Output:
 
 ```
 4 6
+false
+true
 ```
 
 ### Struct Introspection
