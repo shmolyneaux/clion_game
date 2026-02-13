@@ -1335,6 +1335,28 @@ pub(crate) fn compare_values(interpreter: &mut Interpreter, a: &ShimValue, b: &S
             }
             Ok(lst_a.len().cmp(&lst_b.len()))
         },
+        (ShimValue::Struct(_), _) => {
+            // Try struct method overrides for comparison operators
+            if let Some(gt_result) = a.try_struct_override(interpreter, b"gt", b) {
+                let gt_val: ShimValue = gt_result?;
+                if gt_val.is_truthy(interpreter)? {
+                    return Ok(Ordering::Greater);
+                }
+            }
+            if let Some(lt_result) = a.try_struct_override(interpreter, b"lt", b) {
+                let lt_val: ShimValue = lt_result?;
+                if lt_val.is_truthy(interpreter)? {
+                    return Ok(Ordering::Less);
+                }
+            }
+            if let Some(eq_result) = a.try_struct_override(interpreter, b"eq", b) {
+                let eq_val: ShimValue = eq_result?;
+                if eq_val.is_truthy(interpreter)? {
+                    return Ok(Ordering::Equal);
+                }
+            }
+            Err(format!("Cannot compare {:?} and {:?}", a, b))
+        },
         _ => Err(format!("Cannot compare {:?} and {:?}", a, b)),
     }
 }

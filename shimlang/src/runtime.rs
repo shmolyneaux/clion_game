@@ -585,12 +585,22 @@ pub fn fnv1a_hash(key: &[u8]) -> u64 {
 }
 
 macro_rules! numeric_op {
-    ($lhs:tt $op:tt $rhs:expr) => {
+    ($lhs:tt $op:tt $rhs:expr, $interpreter:expr, $method:expr) => {
         match ($lhs, $rhs) {
             (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Integer(*a $op *b)),
             (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Float(*a $op *b)),
             (ShimValue::Integer(a), ShimValue::Float(b)) => Ok(ShimValue::Float((*a as f32) $op *b)),
             (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(ShimValue::Float(*a $op (*b as f32))),
+            (ShimValue::Struct(_), _) => {
+                if let Some(result) = $lhs.try_struct_override($interpreter, $method, $rhs) {
+                    result
+                } else {
+                    Err(format!(
+                        "Operation '{}' not supported between {:?} and {:?}",
+                        stringify!($op), $lhs, $rhs
+                    ))
+                }
+            },
             (a, b) => Err(format!(
                 "Operation '{}' not supported between {:?} and {:?}",
                 stringify!($op), a, b
@@ -602,7 +612,7 @@ macro_rules! numeric_op {
 impl ShimValue {
     /// Try to call a named method on a struct as an operator override.
     /// Returns None if self is not a Struct or the method doesn't exist.
-    fn try_struct_override(&self, interpreter: &mut Interpreter, method: &[u8], other: &ShimValue) -> Option<Result<ShimValue, String>> {
+    pub(crate) fn try_struct_override(&self, interpreter: &mut Interpreter, method: &[u8], other: &ShimValue) -> Option<Result<ShimValue, String>> {
         if let ShimValue::Struct(_) = self {
             match self.get_attr(interpreter, method) {
                 Ok(method_fn) => {
@@ -1039,10 +1049,7 @@ impl ShimValue {
     }
 
     fn sub(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
-        if let Some(result) = self.try_struct_override(interpreter, b"sub", other) {
-            return result;
-        }
-        numeric_op!(self - other)
+        numeric_op!(self - other, interpreter, b"sub")
     }
 
     pub(crate) fn equal_inner(&self, interpreter: &mut Interpreter, other: &Self) -> Result<bool, String> {
@@ -1113,30 +1120,18 @@ impl ShimValue {
     }
 
     fn mul(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
-        if let Some(result) = self.try_struct_override(interpreter, b"mul", other) {
-            return result;
-        }
-        numeric_op!(self * other)
+        numeric_op!(self * other, interpreter, b"mul")
     }
 
     fn div(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
-        if let Some(result) = self.try_struct_override(interpreter, b"div", other) {
-            return result;
-        }
-        numeric_op!(self / other)
+        numeric_op!(self / other, interpreter, b"div")
     }
 
     fn modulus(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
-        if let Some(result) = self.try_struct_override(interpreter, b"modulus", other) {
-            return result;
-        }
-        numeric_op!(self % other)
+        numeric_op!(self % other, interpreter, b"modulus")
     }
 
     pub(crate) fn gt(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
-        if let Some(result) = self.try_struct_override(interpreter, b"gt", other) {
-            return result;
-        }
         match compare_values(interpreter, self, other) {
             Ok(std::cmp::Ordering::Greater) => Ok(ShimValue::Bool(true)),
             Ok(_) => Ok(ShimValue::Bool(false)),
@@ -1145,9 +1140,6 @@ impl ShimValue {
     }
 
     fn gte(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
-        if let Some(result) = self.try_struct_override(interpreter, b"gte", other) {
-            return result;
-        }
         match compare_values(interpreter, self, other) {
             Ok(std::cmp::Ordering::Greater) | Ok(std::cmp::Ordering::Equal) => Ok(ShimValue::Bool(true)),
             Ok(std::cmp::Ordering::Less) => Ok(ShimValue::Bool(false)),
@@ -1156,9 +1148,6 @@ impl ShimValue {
     }
 
     pub(crate) fn lt(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
-        if let Some(result) = self.try_struct_override(interpreter, b"lt", other) {
-            return result;
-        }
         match compare_values(interpreter, self, other) {
             Ok(std::cmp::Ordering::Less) => Ok(ShimValue::Bool(true)),
             Ok(_) => Ok(ShimValue::Bool(false)),
@@ -1167,9 +1156,6 @@ impl ShimValue {
     }
 
     fn lte(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
-        if let Some(result) = self.try_struct_override(interpreter, b"lte", other) {
-            return result;
-        }
         match compare_values(interpreter, self, other) {
             Ok(std::cmp::Ordering::Less) | Ok(std::cmp::Ordering::Equal) => Ok(ShimValue::Bool(true)),
             Ok(std::cmp::Ordering::Greater) => Ok(ShimValue::Bool(false)),
@@ -1207,12 +1193,11 @@ impl ShimValue {
                 Ok(ShimValue::Bool(false))
             }
             ShimValue::String(..) => {
-                let haystack = self.string(interpreter)?;
-                let needle = some_key.string(interpreter)?;
-                // Check if needle is a substring of haystack
-                let haystack_str = unsafe { std::str::from_utf8_unchecked(haystack) };
-                let needle_str = unsafe { std::str::from_utf8_unchecked(needle) };
-                Ok(ShimValue::Bool(haystack_str.contains(needle_str)))
+                let text = self.string(interpreter)?;
+                let substring = some_key.string(interpreter)?;
+                let text_str = unsafe { std::str::from_utf8_unchecked(text) };
+                let substring_str = unsafe { std::str::from_utf8_unchecked(substring) };
+                Ok(ShimValue::Bool(text_str.contains(substring_str)))
             }
             ShimValue::Struct(_) => {
                 if let Some(result) = self.try_struct_override(interpreter, b"contains", some_key) {
