@@ -2764,7 +2764,7 @@ impl<'a> GC<'a> {
                             }
                         }
 
-                        // Mark the sapce for the dict struct
+                        // Mark the space for the dict struct
                         for idx in pos..(pos + (std::mem::size_of::<ShimDict>()/8)) {
                             self.mask.set(idx);
                         }

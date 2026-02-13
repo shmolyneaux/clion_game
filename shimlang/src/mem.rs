@@ -334,7 +334,7 @@ impl MMU {
     }
 
     /**
-     * Returns the position in `self.mem` of the block allocted
+     * Returns the position in `self.mem` of the block allocated
      */
     fn alloc(&mut self, size: Word) -> Word {
         self.alloc_debug(size, "Unspecified alloc")
@@ -347,7 +347,7 @@ impl MMU {
 
         // eprintln!("Free {}: {}", usize::from(size.0), usize::from(pos));
 
-        // This is the idx of the frst free block containing addresses greater than the
+        // This is the idx of the first free block containing addresses greater than the
         // position we need to free
         let idx = {
             let mut ret = None;
