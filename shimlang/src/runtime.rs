@@ -1044,11 +1044,11 @@ impl ShimDict {
         }
     }
 
-    fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.used as usize
     }
 
-    fn get(&self, interpreter: &mut Interpreter, key: ShimValue) -> Result<ShimValue, String> {
+    pub(crate) fn get(&self, interpreter: &mut Interpreter, key: ShimValue) -> Result<ShimValue, String> {
         // Check if dict is empty
         if self.size_pow == 0 {
             return Err(format!("Key {key:?} not in dict"));
@@ -1309,7 +1309,7 @@ impl ShimDict {
         }
     }
 
-    fn set(&mut self, interpreter: &mut Interpreter, key: ShimValue, val: ShimValue) -> Result<(), String> {
+    pub(crate) fn set(&mut self, interpreter: &mut Interpreter, key: ShimValue, val: ShimValue) -> Result<(), String> {
         if self.entry_count as usize == self.capacity() {
             self.expand_capacity(interpreter);
         }
@@ -1341,7 +1341,7 @@ impl ShimDict {
         Ok(())
     }
 
-    fn pop(&mut self, interpreter: &mut Interpreter, key: ShimValue, default: Option<ShimValue>) -> Result<ShimValue, String> {
+    pub(crate) fn pop(&mut self, interpreter: &mut Interpreter, key: ShimValue, default: Option<ShimValue>) -> Result<ShimValue, String> {
         match self.probe(interpreter, key) {
             Ok(DictSlot::Occupied(indices_idx, entry)) => {
                 let value = entry.value;
@@ -1437,7 +1437,7 @@ impl ShimDict {
         entry_idx as usize
     }
 
-    fn shrink_to_fit(&mut self, interpreter: &mut Interpreter) {
+    pub(crate) fn shrink_to_fit(&mut self, interpreter: &mut Interpreter) {
         if self.used == 0 {
             // Empty dict - reset to minimal size
             let old_size = self.index_size();
@@ -1494,7 +1494,7 @@ impl ShimDict {
 pub(crate) struct ShimList {
     // The memory is limited to u24, so we know there can't be more than this
     // number of values
-    len: u24,
+    pub(crate) len: u24,
     // We don't really need any more than 64 distinct capacities
     capacity_lut: u8,
     // Add 1 byte of padding so that ShimList is 8 bytes
@@ -1517,11 +1517,11 @@ impl ShimList {
         }
     }
 
-    fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.len.into()
     }
 
-    fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
@@ -1529,7 +1529,7 @@ impl ShimList {
         LIST_CAPACITY_LUT[self.capacity_lut as usize] as usize
     }
 
-    fn wrap_idx(&self, idx: isize) -> Result<usize, String> {
+    pub(crate) fn wrap_idx(&self, idx: isize) -> Result<usize, String> {
         if idx >= self.len() as isize {
             return Err(format!("Index {idx} is out of bounds"));
         }
@@ -1548,18 +1548,18 @@ impl ShimList {
         )
     }
 
-    fn get(&self, mem: &MMU, idx: isize) -> Result<ShimValue, String> {
+    pub(crate) fn get(&self, mem: &MMU, idx: isize) -> Result<ShimValue, String> {
         let idx = self.wrap_idx(idx)?;
         unsafe { Ok(ShimValue::from_u64(mem.mem[usize::from(self.data) + idx])) }
     }
 
-    fn set(&self, mem: &mut MMU, idx: isize, value: ShimValue) -> Result<(), String> {
+    pub(crate) fn set(&self, mem: &mut MMU, idx: isize, value: ShimValue) -> Result<(), String> {
         let idx = self.wrap_idx(idx)?;
         mem.mem[usize::from(self.data) + idx] = value.to_u64();
         Ok(())
     }
 
-    fn push(&mut self, mem: &mut MMU, val: ShimValue) {
+    pub(crate) fn push(&mut self, mem: &mut MMU, val: ShimValue) {
         if self.len() == self.capacity() {
             let old_capacity = self.capacity();
             self.capacity_lut += 1;
@@ -1847,7 +1847,7 @@ impl ShimValue {
         }
     }
 
-    fn call(
+    pub(crate) fn call(
         &self,
         interpreter: &mut Interpreter,
         args: &mut ArgBundle,
@@ -2011,7 +2011,7 @@ impl ShimValue {
         }
     }
 
-    fn integer(&self) -> Result<i32, String> {
+    pub(crate) fn integer(&self) -> Result<i32, String> {
         match self {
             ShimValue::Integer(i) => Ok(*i),
             _ => Err(format!("Not an integer")),
@@ -2156,7 +2156,7 @@ impl ShimValue {
         }
     }
 
-    fn is_truthy(&self, interpreter: &mut Interpreter) -> Result<bool, String> {
+    pub(crate) fn is_truthy(&self, interpreter: &mut Interpreter) -> Result<bool, String> {
         match self {
             ShimValue::None => Ok(false),
             ShimValue::Integer(i) => Ok(*i != 0),
