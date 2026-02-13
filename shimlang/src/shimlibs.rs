@@ -1,4 +1,3 @@
-use crate::lex::debug_u8s;
 use crate::runtime::*;
 use shm_tracy::*;
 use shm_tracy::zone_scoped;

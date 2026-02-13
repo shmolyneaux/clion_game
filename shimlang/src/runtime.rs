@@ -8,7 +8,7 @@ use shm_tracy::*;
 use shm_tracy::zone_scoped;
 
 use crate::parse::*;
-use crate::lex::{TokenStream, Token, debug_u8s, format_script_err};
+use crate::lex::{debug_u8s, format_script_err};
 use crate::compile::*;
 use crate::mem::*;
 use crate::shimlibs::*;
@@ -437,8 +437,8 @@ pub(crate) trait ShimNative: Any {
 }
 
 pub(crate) struct ListIterator {
-    lst: ShimValue,
-    idx: usize,
+    pub(crate) lst: ShimValue,
+    pub(crate) idx: usize,
 }
 impl ShimNative for ListIterator {
     fn get_attr(&self, self_as_val: &ShimValue, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
@@ -476,8 +476,8 @@ impl ShimNative for ListIterator {
 }
 
 pub(crate) struct DictKeysIterator {
-    dict: ShimValue,
-    idx: usize,
+    pub(crate) dict: ShimValue,
+    pub(crate) idx: usize,
 }
 impl ShimNative for DictKeysIterator {
     fn get_attr(&self, self_as_val: &ShimValue, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
@@ -529,8 +529,8 @@ impl ShimNative for DictKeysIterator {
 }
 
 pub(crate) struct DictValuesIterator {
-    dict: ShimValue,
-    idx: usize,
+    pub(crate) dict: ShimValue,
+    pub(crate) idx: usize,
 }
 impl ShimNative for DictValuesIterator {
     fn get_attr(&self, self_as_val: &ShimValue, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
@@ -606,8 +606,8 @@ impl ShimNative for DictEntryNative {
 }
 
 pub(crate) struct DictItemsIterator {
-    dict: ShimValue,
-    idx: usize,
+    pub(crate) dict: ShimValue,
+    pub(crate) idx: usize,
 }
 impl ShimNative for DictItemsIterator {
     fn get_attr(&self, self_as_val: &ShimValue, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
@@ -663,8 +663,8 @@ impl ShimNative for DictItemsIterator {
 }
 
 pub(crate) struct RangeNative {
-    start: ShimValue,
-    end: ShimValue,
+    pub(crate) start: ShimValue,
+    pub(crate) end: ShimValue,
 }
 
 impl ShimNative for RangeNative {
@@ -2210,7 +2210,7 @@ impl ShimValue {
         numeric_op!(self - other)
     }
 
-    fn equal_inner(&self, interpreter: &mut Interpreter, other: &Self) -> Result<bool, String> {
+    pub(crate) fn equal_inner(&self, interpreter: &mut Interpreter, other: &Self) -> Result<bool, String> {
         match (self, other) {
             (ShimValue::Bool(a), ShimValue::Bool(b)) => Ok(a == b),
             (ShimValue::Float(a), ShimValue::Float(b)) => Ok(a == b),

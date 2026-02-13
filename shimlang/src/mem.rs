@@ -1,7 +1,5 @@
 use std::ops::{Add, Sub, AddAssign, SubAssign};
-use std::any::{Any, TypeId, type_name_of_val};
-use std::mem::size_of;
-use crate::lex::debug_u8s;
+use std::any::TypeId;
 
 #[derive(Debug)]
 pub struct Config {
@@ -21,7 +19,7 @@ impl Default for Config {
 #[allow(non_camel_case_types)]
 #[derive(Hash, Eq, PartialOrd, Ord, Copy, Clone, Debug, PartialEq)]
 #[repr(packed)]
-pub struct u24([u8; 3]);
+pub struct u24(pub(crate) [u8; 3]);
 pub(crate) const MAX_U24: u32 = 0xFFFFFF;
 
 impl From<Word> for usize {
