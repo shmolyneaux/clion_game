@@ -459,7 +459,7 @@ impl ShimDict {
             },
         };
         match indices {
-            TypedIndices::Zero => panic!("probingn nothing"),
+            TypedIndices::Zero => panic!("probing nothing"),
             TypedIndices::U8(_) => Ok(DictSlot::UnoccupiedU8(longhash as u32, idx as usize)),
             TypedIndices::U16(_) => Ok(DictSlot::UnoccupiedU16(longhash as u32, idx as usize)),
             TypedIndices::U32(_) => Ok(DictSlot::UnoccupiedU32(longhash as u32, idx as usize)),
