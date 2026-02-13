@@ -1,4 +1,4 @@
-// Test sorting with a complex key that returns a list (multi-field sort)
+# Test sorting with a complex key that returns a list (multi-field sort)
 struct Point {
     x,
     y,
@@ -12,10 +12,10 @@ let points = [
     Point(1, 1, "d")
 ];
 
-// Sort by [x, y] - first by x, then by y
+# Sort by [x, y] - first by x, then by y
 points.sort(fn(p) { [p.x, p.y] });
 
-// Expected order: (1,1,"a"), (1,1,"d"), (1,2,"c"), (2,1,"b")
+# Expected order: (1,1,"a"), (1,1,"d"), (1,2,"c"), (2,1,"b")
 assert(points[0].x == 1);
 assert(points[0].y == 1);
 assert(points[0].name == "a");

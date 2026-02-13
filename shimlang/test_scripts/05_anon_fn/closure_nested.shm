@@ -1,4 +1,4 @@
-// Test closure with multiple nested functions
+# Test closure with multiple nested functions
 fn outer(x) {
     fn middle(y) {
         fn inner(z) {

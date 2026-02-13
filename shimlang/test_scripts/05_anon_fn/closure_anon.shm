@@ -1,10 +1,10 @@
-// Test anonymous functions capturing variables
+# Test anonymous functions capturing variables
 let x = 5;
 let add_x = fn(y) { x + y };
 
 print(add_x(10));
 
-// Test closure that captures from parent scope
+# Test closure that captures from parent scope
 fn make_adder(n) {
     let adder = fn(val) { n + val };
     adder

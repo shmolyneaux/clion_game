@@ -407,10 +407,9 @@ impl MMU {
             panic!("Mis-sized free overlaps with idx block!");
         }
     }
-}
 
-// MMU methods that depend on runtime types (ShimValue, ShimDict, ShimList, ShimFn, etc.)
-impl MMU {
+    // MMU methods that depend on runtime types (ShimValue, ShimDict, ShimList, ShimFn, etc.)
+
     pub(crate) fn alloc_str(&mut self, contents: &[u8]) -> ShimValue {
         assert!(contents.len() <= u16::MAX as usize, "String length exceeds u16::MAX");
         let pos = self.alloc_str_raw(contents);

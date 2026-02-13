@@ -1,0 +1,25 @@
+struct Vec3 {
+    x,
+    y,
+    z,
+
+    fn add(self, other) {
+        Vec3(self.x + other.x, self.y + other.y, self.z + other.z)
+    }
+
+    fn eq(self, other) {
+        self.x == other.x and self.y == other.y and self.z == other.z
+    }
+}
+
+let a = Vec3(1, 2, 3);
+let b = Vec3(1, 2, 3);
+let c = Vec3(4, 5, 6);
+
+print(a == b);
+print(a == c);
+print(b == c);
+
+let d = a + c;
+print(d == Vec3(5, 7, 9));
+print(d.x, d.y, d.z);

@@ -1,4 +1,4 @@
-// Test scope with many variables to exercise data block growth
+# Test scope with many variables to exercise data block growth
 let v00 = 0;
 let v01 = 1;
 let v02 = 2;
@@ -30,12 +30,12 @@ let v27 = 27;
 let v28 = 28;
 let v29 = 29;
 
-// Verify first, middle, and last variables
+# Verify first, middle, and last variables
 assert(v00 == 0);
 assert(v14 == 14);
 assert(v29 == 29);
 
-// Reassign some and verify
+# Reassign some and verify
 v00 = 100;
 v15 = 115;
 v29 = 129;
@@ -43,7 +43,7 @@ assert(v00 == 100);
 assert(v15 == 115);
 assert(v29 == 129);
 
-// Test many variables in a child scope with parent access
+# Test many variables in a child scope with parent access
 fn test_child_scope() {
     let c00 = 200;
     let c01 = 201;
@@ -66,11 +66,11 @@ fn test_child_scope() {
     let c18 = 218;
     let c19 = 219;
 
-    // Verify child variables
+    # Verify child variables
     assert(c00 == 200);
     assert(c19 == 219);
 
-    // Verify parent variables are still accessible
+    # Verify parent variables are still accessible
     assert(v00 == 100);
     assert(v29 == 129);
 
@@ -79,7 +79,7 @@ fn test_child_scope() {
 
 test_child_scope();
 
-// Verify parent variables unchanged after child scope
+# Verify parent variables unchanged after child scope
 assert(v00 == 100);
 assert(v29 == 129);
 

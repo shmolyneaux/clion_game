@@ -1,4 +1,4 @@
-// Test empty dict iteration
+# Test empty dict iteration
 let empty = dict();
 print("Empty dict keys:");
 for k in empty {
@@ -6,7 +6,7 @@ for k in empty {
 }
 print("Done with empty");
 
-// Test dict with multiple types of keys
+# Test dict with multiple types of keys
 let mixed = dict();
 mixed.set(1, "one");
 mixed.set("two", 2);
@@ -27,7 +27,7 @@ for item in mixed.items() {
     print(item.key, "=>", item.value);
 }
 
-// Test that we can reuse iterators
+# Test that we can reuse iterators
 print("Keys again:");
 for k in mixed.keys() {
     print(k);

@@ -22,6 +22,7 @@ with methods, and a growing standard library of built-in types and functions.
 - [Operators](#operators)
   - [Arithmetic](#arithmetic)
   - [Comparison](#comparison)
+  - [Membership](#membership)
   - [Logical](#logical)
   - [Negation](#negation)
   - [Range](#range)
@@ -143,18 +144,18 @@ Output:
 -2.5
 ```
 
-Integer division truncates toward zero. Use floats for decimal results:
+Integer division uses `//` which truncates toward zero. The `/` operator always produces a float result:
 
 ```rust
 print(10 / 3);
-print(10.0 / 3.0);
+print(10 // 3);
 ```
 
 Output:
 
 ```
-3
 3.3333333
+3
 ```
 
 ### Booleans
@@ -445,7 +446,8 @@ c => 3
 | `+` | Addition (also string concatenation) |
 | `-` | Subtraction |
 | `*` | Multiplication |
-| `/` | Division (integer division truncates) |
+| `/` | Division (always returns a float) |
+| `//` | Integer division (truncates toward zero) |
 | `%` | Modulus |
 
 ```rust
@@ -453,6 +455,7 @@ print(10 + 3);
 print(10 - 3);
 print(10 * 3);
 print(10 / 3);
+print(10 // 3);
 print(10 % 3);
 ```
 
@@ -462,6 +465,7 @@ Output:
 13
 7
 30
+3.3333333
 3
 1
 ```
@@ -495,6 +499,35 @@ true
 true
 false
 true
+true
+false
+```
+
+### Membership
+
+The `in` operator tests containment in dictionaries, lists, and strings:
+
+```rust
+let d = dict();
+d["x"] = 1;
+print("x" in d);
+print("y" in d);
+
+let lst = [1, 2, 3];
+print(2 in lst);
+print(5 in lst);
+
+print("ell" in "hello");
+print("xyz" in "hello");
+```
+
+Output:
+
+```
+true
+false
+true
+false
 true
 false
 ```
@@ -1010,7 +1043,8 @@ true false
 
 ### Operator Overloading
 
-Defining an `add` method allows instances to be combined with the `+` operator:
+Defining an `add` method allows instances to be combined with the `+` operator.
+Defining an `eq` method allows instances to be compared with `==`:
 
 ```rust
 struct Vec2 {
@@ -1019,18 +1053,26 @@ struct Vec2 {
     fn add(self, other) {
         Vec2(self.x + other.x, self.y + other.y)
     }
+
+    fn eq(self, other) {
+        self.x == other.x and self.y == other.y
+    }
 }
 
 let a = Vec2(1, 2);
 let b = Vec2(3, 4);
 let c = a + b;
 print(c.x, c.y);
+print(a == b);
+print(a == Vec2(1, 2));
 ```
 
 Output:
 
 ```
 4 6
+false
+true
 ```
 
 ### Struct Introspection
@@ -1136,10 +1178,10 @@ big
 
 ## Comments
 
-Single-line comments start with `//`:
+Single-line comments start with `#`:
 
 ```rust
-// This is a comment
+# This is a comment
 let x = 42;
 print(x);
 ```
@@ -1262,10 +1304,10 @@ represents programmer error, not a recoverable condition.
 The built-in `panic` function and `assert` halt execution immediately:
 
 ```rust
-assert(1 == 1);   // passes silently
-assert(1 == 2);   // halts with an error
+assert(1 == 1);   # passes silently
+assert(1 == 2);   # halts with an error
 
-panic("something went wrong");  // always halts
+panic("something went wrong");  # always halts
 ```
 
 For operations that might legitimately fail with user-supplied data, Shimlang

@@ -1,11 +1,11 @@
-// Test iteration after popping entries (tombstones)
+# Test iteration after popping entries (tombstones)
 let d = dict();
 d.set("a", 1);
 d.set("b", 2);
 d.set("c", 3);
 d.set("d", 4);
 
-// Remove middle entries
+# Remove middle entries
 d.pop("b");
 
 print("After pop:");

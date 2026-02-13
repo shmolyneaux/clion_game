@@ -57,6 +57,7 @@ pub enum BinaryOp {
     Subtract(Box<ExprNode>, Box<ExprNode>),
     Multiply(Box<ExprNode>, Box<ExprNode>),
     Divide(Box<ExprNode>, Box<ExprNode>),
+    FloorDivide(Box<ExprNode>, Box<ExprNode>),
     Equal(Box<ExprNode>, Box<ExprNode>),
     NotEqual(Box<ExprNode>, Box<ExprNode>),
     GT(Box<ExprNode>, Box<ExprNode>),
@@ -535,6 +536,16 @@ pub fn parse_factor(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                 tokens.advance()?;
                 expr = Node {
                     data: Expression::BinaryOp(BinaryOp::Divide(
+                        Box::new(expr),
+                        Box::new(parse_unary(tokens)?),
+                    )),
+                    span: span,
+                };
+            }
+            Token::SlashSlash => {
+                tokens.advance()?;
+                expr = Node {
+                    data: Expression::BinaryOp(BinaryOp::FloorDivide(
                         Box::new(expr),
                         Box::new(parse_unary(tokens)?),
                     )),

@@ -1,5 +1,5 @@
-// Test list extend with custom iterator
-// Using a simpler approach that works within language limitations
+# Test list extend with custom iterator
+# Using a simpler approach that works within language limitations
 
 struct Counter {
     current,

@@ -1,4 +1,4 @@
-// Test mutual recursion with closures
+# Test mutual recursion with closures
 fn is_even(n) {
     if n == 0 {
         true

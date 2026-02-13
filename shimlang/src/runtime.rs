@@ -1016,6 +1016,8 @@ impl ShimValue {
             (ShimValue::Bool(a), ShimValue::Bool(b)) => Ok(a == b),
             (ShimValue::Float(a), ShimValue::Float(b)) => Ok(a == b),
             (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(a == b),
+            (ShimValue::Integer(a), ShimValue::Float(b)) => Ok((*a as f32) == *b),
+            (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(*a == (*b as f32)),
             (a @ ShimValue::String(..), b @ ShimValue::String(..)) => {
                 let a = a.string(interpreter)?;
                 let b = b.string(interpreter)?;
@@ -1036,6 +1038,27 @@ impl ShimValue {
                     }
                 }
                 Ok(true)
+            },
+            (ShimValue::Struct(_), ShimValue::Struct(_)) => {
+                match self.get_attr(interpreter, b"eq") {
+                    Ok(eq_fn) => {
+                        let mut args = ArgBundle::new();
+                        args.args.push(*other);
+                        match eq_fn.call(interpreter, &mut args)? {
+                            CallResult::ReturnValue(val) => Ok(val.is_truthy(interpreter)?),
+                            CallResult::PC(pc, captured_scope) => {
+                                let mut new_env = Environment::with_scope(captured_scope);
+                                let val = interpreter.execute_bytecode_extended(
+                                    &mut (pc as usize),
+                                    args,
+                                    &mut new_env,
+                                )?;
+                                Ok(val.is_truthy(interpreter)?)
+                            }
+                        }
+                    },
+                    Err(_) => Ok(false),
+                }
             },
             _ => Ok(false),
         }
@@ -1060,116 +1083,60 @@ impl ShimValue {
     }
 
     fn div(&self, _interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
-        // NOTE: All division is floating point division
+        // All division produces floating point results
         match (self, other) {
             (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Float(a / b)),
-            (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Integer(a / b)),
+            (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Float((*a as f32) / (*b as f32))),
             (ShimValue::Integer(a), ShimValue::Float(b)) => Ok(ShimValue::Float((*a as f32) / *b)),
             (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(ShimValue::Float(*a / (*b as f32))),
             (a, b) => Err(format!("Can't Divide {:?} and {:?}", a, b)),
         }
     }
 
-    fn modulus(&self, _interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
-        // NOTE: All division is floating point division
+    fn floor_div(&self, _interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
+        // Integer division that truncates toward zero
         match (self, other) {
-            (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Float(a % b)),
-            (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Integer(a % b)),
-            (ShimValue::Integer(a), ShimValue::Float(b)) => Ok(ShimValue::Float((*a as f32) % *b)),
-            (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(ShimValue::Float(*a % (*b as f32))),
-            (a, b) => Err(format!("Can't Divide {:?} and {:?}", a, b)),
+            (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Integer(a / b)),
+            (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Integer((*a as i32) / (*b as i32))),
+            (ShimValue::Integer(a), ShimValue::Float(b)) => Ok(ShimValue::Integer(*a / (*b as i32))),
+            (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(ShimValue::Integer((*a as i32) / *b)),
+            (a, b) => Err(format!("Can't FloorDivide {:?} and {:?}", a, b)),
         }
     }
 
+    fn modulus(&self, _interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
+        numeric_op!(self % other)
+    }
+
     pub(crate) fn gt(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
-        match (self, other) {
-            (ShimValue::Bool(a), ShimValue::Bool(b)) => {
-                Ok(ShimValue::Bool(*a == true && *b == false))
-            }
-            (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Bool(a > b)),
-            (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(a > b)),
-            (ShimValue::Integer(a), ShimValue::Float(b)) => Ok(ShimValue::Bool((*a as f32) > *b)),
-            (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(*a > (*b as f32))),
-            (ShimValue::None, ShimValue::None) => Ok(ShimValue::Bool(false)),
-            (ShimValue::String(..), ShimValue::String(..)) => {
-                Ok(ShimValue::Bool(self.string(interpreter)? > other.string(interpreter)?))
-            },
-            (ShimValue::List(_), ShimValue::List(_)) => {
-                match compare_values(interpreter, self, other) {
-                    Ok(std::cmp::Ordering::Greater) => Ok(ShimValue::Bool(true)),
-                    Ok(_) => Ok(ShimValue::Bool(false)),
-                    Err(e) => Err(e),
-                }
-            },
-            (a, b) => Err(format!("Can't GT {:?} and {:?}", a, b)),
+        match compare_values(interpreter, self, other) {
+            Ok(std::cmp::Ordering::Greater) => Ok(ShimValue::Bool(true)),
+            Ok(_) => Ok(ShimValue::Bool(false)),
+            Err(e) => Err(e),
         }
     }
 
     fn gte(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
-        match (self, other) {
-            (ShimValue::Bool(a), ShimValue::Bool(b)) => Ok(ShimValue::Bool(a == b)),
-            (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Bool(a >= b)),
-            (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(a >= b)),
-            (ShimValue::Integer(a), ShimValue::Float(b)) => Ok(ShimValue::Bool((*a as f32) >= *b)),
-            (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(*a >= (*b as f32))),
-            (ShimValue::None, ShimValue::None) => Ok(ShimValue::Bool(true)),
-            (ShimValue::String(..), ShimValue::String(..)) => {
-                Ok(ShimValue::Bool(self.string(interpreter)? >= other.string(interpreter)?))
-            },
-            (ShimValue::List(_), ShimValue::List(_)) => {
-                match compare_values(interpreter, self, other) {
-                    Ok(std::cmp::Ordering::Greater) | Ok(std::cmp::Ordering::Equal) => Ok(ShimValue::Bool(true)),
-                    Ok(std::cmp::Ordering::Less) => Ok(ShimValue::Bool(false)),
-                    Err(e) => Err(e),
-                }
-            },
-            (a, b) => Err(format!("Can't GTE {:?} and {:?}", a, b)),
+        match compare_values(interpreter, self, other) {
+            Ok(std::cmp::Ordering::Greater) | Ok(std::cmp::Ordering::Equal) => Ok(ShimValue::Bool(true)),
+            Ok(std::cmp::Ordering::Less) => Ok(ShimValue::Bool(false)),
+            Err(e) => Err(e),
         }
     }
 
     pub(crate) fn lt(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
-        match (self, other) {
-            (ShimValue::Bool(a), ShimValue::Bool(b)) => {
-                Ok(ShimValue::Bool(*a == false && *b == true))
-            }
-            (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Bool(a < b)),
-            (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(a < b)),
-            (ShimValue::Integer(a), ShimValue::Float(b)) => Ok(ShimValue::Bool((*a as f32) < *b)),
-            (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(*a < (*b as f32))),
-            (ShimValue::String(..), ShimValue::String(..)) => {
-                Ok(ShimValue::Bool(self.string(interpreter)? < other.string(interpreter)?))
-            },
-            (ShimValue::None, ShimValue::None) => Ok(ShimValue::Bool(false)),
-            (ShimValue::List(_), ShimValue::List(_)) => {
-                match compare_values(interpreter, self, other) {
-                    Ok(std::cmp::Ordering::Less) => Ok(ShimValue::Bool(true)),
-                    Ok(_) => Ok(ShimValue::Bool(false)),
-                    Err(e) => Err(e),
-                }
-            },
-            (a, b) => Err(format!("Can't LT {:?} and {:?}", a, b)),
+        match compare_values(interpreter, self, other) {
+            Ok(std::cmp::Ordering::Less) => Ok(ShimValue::Bool(true)),
+            Ok(_) => Ok(ShimValue::Bool(false)),
+            Err(e) => Err(e),
         }
     }
 
     fn lte(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
-        match (self, other) {
-            (ShimValue::Bool(a), ShimValue::Bool(b)) => Ok(ShimValue::Bool(a == b)),
-            (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Bool(a <= b)),
-            (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(a <= b)),
-            (ShimValue::Integer(a), ShimValue::Float(b)) => Ok(ShimValue::Bool((*a as f32) <= *b)),
-            (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(*a <= (*b as f32))),
-            (ShimValue::None, ShimValue::None) => Ok(ShimValue::Bool(true)),
-            (ShimValue::String(..), ShimValue::String(..)) => {
-                Ok(ShimValue::Bool(self.string(interpreter)? <= other.string(interpreter)?))
-            },
-            (ShimValue::List(_), ShimValue::List(_)) => {
-                match compare_values(interpreter, self, other) {
-                    Ok(std::cmp::Ordering::Less) | Ok(std::cmp::Ordering::Equal) => Ok(ShimValue::Bool(true)),
-                    Ok(std::cmp::Ordering::Greater) => Ok(ShimValue::Bool(false)),
-                    Err(e) => Err(e),
-                }
-            },
-            (a, b) => Err(format!("Can't LTE {:?} and {:?}", a, b)),
+        match compare_values(interpreter, self, other) {
+            Ok(std::cmp::Ordering::Less) | Ok(std::cmp::Ordering::Equal) => Ok(ShimValue::Bool(true)),
+            Ok(std::cmp::Ordering::Greater) => Ok(ShimValue::Bool(false)),
+            Err(e) => Err(e),
         }
     }
 
@@ -1191,6 +1158,24 @@ impl ShimValue {
                 } else {
                     return Ok(ShimValue::Bool(false));
                 }
+            }
+            ShimValue::List(_) => {
+                let lst = self.list(interpreter)?;
+                for idx in 0..lst.len() {
+                    let item = lst.get(&interpreter.mem, idx as isize)?;
+                    if item.equal_inner(interpreter, some_key)? {
+                        return Ok(ShimValue::Bool(true));
+                    }
+                }
+                Ok(ShimValue::Bool(false))
+            }
+            ShimValue::String(..) => {
+                let haystack = self.string(interpreter)?;
+                let needle = some_key.string(interpreter)?;
+                // Check if needle is a substring of haystack
+                let haystack_str = unsafe { std::str::from_utf8_unchecked(haystack) };
+                let needle_str = unsafe { std::str::from_utf8_unchecked(needle) };
+                Ok(ShimValue::Bool(haystack_str.contains(needle_str)))
             }
             _ => Err(format!("Can't `in` {:?} and {:?}", self, some_key)),
         }
@@ -1640,6 +1625,13 @@ impl Interpreter {
                     let b = stack.pop().expect("Operand for ByteCode::Divide");
                     let a = stack.pop().expect("Operand for ByteCode::Divide");
                     stack.push(a.div(self, &b).map_err(|err_str| {
+                        format_script_err(self.program.spans[pc], &self.program.script, &err_str)
+                    })?);
+                }
+                val if val == ByteCode::FloorDivide as u8 => {
+                    let b = stack.pop().expect("Operand for ByteCode::FloorDivide");
+                    let a = stack.pop().expect("Operand for ByteCode::FloorDivide");
+                    stack.push(a.floor_div(self, &b).map_err(|err_str| {
                         format_script_err(self.program.spans[pc], &self.program.script, &err_str)
                     })?);
                 }

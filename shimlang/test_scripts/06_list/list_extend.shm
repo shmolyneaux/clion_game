@@ -1,4 +1,4 @@
-// Test list extend method
+# Test list extend method
 let lst1 = [1, 2, 3];
 let lst2 = [4, 5, 6];
 
@@ -12,7 +12,7 @@ assert(lst1[3] == 4);
 assert(lst1[4] == 5);
 assert(lst1[5] == 6);
 
-// Original list2 should be unchanged
+# Original list2 should be unchanged
 assert(lst2.len() == 3);
 
 print("List extend passed");
