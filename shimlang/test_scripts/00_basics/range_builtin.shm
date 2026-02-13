@@ -1,4 +1,4 @@
-# Test Range() builtin function
+// Test Range() builtin function
 let r = Range(1, 5);
 print(r);
 for i in r {

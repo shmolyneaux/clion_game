@@ -144,18 +144,18 @@ Output:
 -2.5
 ```
 
-Integer division uses `//` which truncates toward zero. The `/` operator always produces a float result:
+Integer division truncates toward zero. Use floats for decimal results:
 
 ```rust
 print(10 / 3);
-print(10 // 3);
+print(10.0 / 3.0);
 ```
 
 Output:
 
 ```
-3.3333333
 3
+3.3333333
 ```
 
 ### Booleans
@@ -446,8 +446,7 @@ c => 3
 | `+` | Addition (also string concatenation) |
 | `-` | Subtraction |
 | `*` | Multiplication |
-| `/` | Division (always returns a float) |
-| `//` | Integer division (truncates toward zero) |
+| `/` | Division (integer division truncates) |
 | `%` | Modulus |
 
 ```rust
@@ -455,7 +454,6 @@ print(10 + 3);
 print(10 - 3);
 print(10 * 3);
 print(10 / 3);
-print(10 // 3);
 print(10 % 3);
 ```
 
@@ -465,7 +463,6 @@ Output:
 13
 7
 30
-3.3333333
 3
 1
 ```
@@ -1043,8 +1040,25 @@ true false
 
 ### Operator Overloading
 
-Defining an `add` method allows instances to be combined with the `+` operator.
-Defining an `eq` method allows instances to be compared with `==`:
+Structs can override the following operators by defining methods with these
+names:
+
+| Method | Operator |
+|--------|----------|
+| `add` | `+` |
+| `sub` | `-` |
+| `mul` | `*` |
+| `div` | `/` |
+| `modulus` | `%` |
+| `eq` | `==` |
+| `gt` | `>` |
+| `gte` | `>=` |
+| `lt` | `<` |
+| `lte` | `<=` |
+| `contains` | `in` |
+
+Each method takes `self` and the right-hand operand as arguments and returns the
+result:
 
 ```rust
 struct Vec2 {
@@ -1178,10 +1192,10 @@ big
 
 ## Comments
 
-Single-line comments start with `#`:
+Single-line comments start with `//`:
 
 ```rust
-# This is a comment
+// This is a comment
 let x = 42;
 print(x);
 ```
@@ -1304,10 +1318,10 @@ represents programmer error, not a recoverable condition.
 The built-in `panic` function and `assert` halt execution immediately:
 
 ```rust
-assert(1 == 1);   # passes silently
-assert(1 == 2);   # halts with an error
+assert(1 == 1);   // passes silently
+assert(1 == 2);   // halts with an error
 
-panic("something went wrong");  # always halts
+panic("something went wrong");  // always halts
 ```
 
 For operations that might legitimately fail with user-supplied data, Shimlang

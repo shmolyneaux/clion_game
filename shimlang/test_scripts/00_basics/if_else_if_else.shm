@@ -1,4 +1,4 @@
-# If path taken
+// If path taken
 let path = None;
 if true {
     path = "if";
@@ -9,7 +9,7 @@ if true {
 }
 assert(path == "if");
 
-# Else path taken
+// Else path taken
 let b = 2;
 let path2 = if b == 1 {
     "if"
@@ -20,7 +20,7 @@ let path2 = if b == 1 {
 };
 assert(path2 == "else");
 
-# Second else-if path taken
+// Second else-if path taken
 assert(
     if b == 1 {
         false

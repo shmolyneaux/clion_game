@@ -1,4 +1,4 @@
-# Test basic list sorting without a key
+// Test basic list sorting without a key
 let lst = [5, 2, 8, 1, 9, 3];
 lst.sort();
 

@@ -12,7 +12,6 @@ pub enum Token {
     Plus,
     Minus,
     Slash,
-    SlashSlash,
     Star,
     Let,
     Fn,
@@ -676,27 +675,23 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
             b'%' => tokens.push(Token::Percent),
             b'/' => match text[1] {
                 b'/' => {
-                    text = &text[1..];
-                    tokens.push(Token::SlashSlash);
+                    loop {
+                        text = &text[1..];
+                        if text.is_empty() {
+                            break;
+                        }
+                        match text[0] {
+                            b'\n' => break,
+                            _ => (),
+                        }
+                    }
+                    // NOTE: no token to push since this is a comment
                 },
                 b'*' => {
                     let idx = lex_multiline_comment_end_idx(&text)?;
                     text = &text[(idx-1)..];
                 }
                 _ => tokens.push(Token::Slash),
-            },
-            b'#' => {
-                loop {
-                    text = &text[1..];
-                    if text.is_empty() {
-                        break;
-                    }
-                    match text[0] {
-                        b'\n' => break,
-                        _ => (),
-                    }
-                }
-                // NOTE: no token to push since this is a comment
             },
             b'-' => tokens.push(Token::Minus),
             b'=' => match text[1] {

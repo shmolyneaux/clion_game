@@ -15,7 +15,7 @@ struct Person {
 let person = Person("Alice", 30, "NYC");
 print(person);
 
-# Test with integer values
+// Test with integer values
 struct Vec2 {
     x,
     y
@@ -24,12 +24,12 @@ struct Vec2 {
 let v = Vec2(5, 10);
 print(v);
 
-# Empty struct
+// Empty struct
 struct Empty {}
 let e = Empty();
 print(e);
 
-# Test with nested struct
+// Test with nested struct
 struct Rectangle {
     top_left,
     bottom_right
@@ -38,7 +38,7 @@ struct Rectangle {
 let rect = Rectangle(Point(1.0, 2.0), Point(3.0, 4.0));
 print(rect);
 
-# Test with bool and list
+// Test with bool and list
 struct Config {
     enabled,
     values

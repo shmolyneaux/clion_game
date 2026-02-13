@@ -25,7 +25,6 @@ pub(crate) enum ByteCode {
     NotEqual,
     Multiply,
     Divide,
-    FloorDivide,
     Modulus,
     GT,
     GTE,
@@ -786,7 +785,6 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
                 BinaryOp::Multiply(a, b) => (ByteCode::Multiply, a, b),
                 BinaryOp::Modulus(a, b) => (ByteCode::Modulus, a, b),
                 BinaryOp::Divide(a, b) => (ByteCode::Divide, a, b),
-                BinaryOp::FloorDivide(a, b) => (ByteCode::FloorDivide, a, b),
                 BinaryOp::GT(a, b) => (ByteCode::GT, a, b),
                 BinaryOp::GTE(a, b) => (ByteCode::GTE, a, b),
                 BinaryOp::LT(a, b) => (ByteCode::LT, a, b),
@@ -938,8 +936,6 @@ pub fn format_asm(bytes: &[u8]) -> String {
             out.push_str("multiply");
         } else if *b == ByteCode::Divide as u8 {
             out.push_str("divide");
-        } else if *b == ByteCode::FloorDivide as u8 {
-            out.push_str("floor_divide");
         } else if *b == ByteCode::Modulus as u8 {
             out.push_str("modulus");
         } else if *b == ByteCode::Equal as u8 {

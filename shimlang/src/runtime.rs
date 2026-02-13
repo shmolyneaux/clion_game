@@ -600,6 +600,37 @@ macro_rules! numeric_op {
 }
 
 impl ShimValue {
+    /// Try to call a named method on a struct as an operator override.
+    /// Returns None if self is not a Struct or the method doesn't exist.
+    fn try_struct_override(&self, interpreter: &mut Interpreter, method: &[u8], other: &ShimValue) -> Option<Result<ShimValue, String>> {
+        if let ShimValue::Struct(_) = self {
+            match self.get_attr(interpreter, method) {
+                Ok(method_fn) => {
+                    let mut args = ArgBundle::new();
+                    args.args.push(*other);
+                    match method_fn.call(interpreter, &mut args) {
+                        Ok(CallResult::ReturnValue(val)) => Some(Ok(val)),
+                        Ok(CallResult::PC(pc, captured_scope)) => {
+                            let mut new_env = Environment::with_scope(captured_scope);
+                            match interpreter.execute_bytecode_extended(
+                                &mut (pc as usize),
+                                args,
+                                &mut new_env,
+                            ) {
+                                Ok(val) => Some(Ok(val)),
+                                Err(e) => Some(Err(e)),
+                            }
+                        }
+                        Err(e) => Some(Err(e)),
+                    }
+                },
+                Err(_) => None,
+            }
+        } else {
+            None
+        }
+    }
+
     pub(crate) fn is_uninitialized(&self) -> bool {
         if let ShimValue::Uninitialized = self {
             true
@@ -1007,7 +1038,10 @@ impl ShimValue {
         }
     }
 
-    fn sub(&self, other: &Self) -> Result<ShimValue, String> {
+    fn sub(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
+        if let Some(result) = self.try_struct_override(interpreter, b"sub", other) {
+            return result;
+        }
         numeric_op!(self - other)
     }
 
@@ -1078,37 +1112,31 @@ impl ShimValue {
         }
     }
 
-    fn mul(&self, _interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
+    fn mul(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
+        if let Some(result) = self.try_struct_override(interpreter, b"mul", other) {
+            return result;
+        }
         numeric_op!(self * other)
     }
 
-    fn div(&self, _interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
-        // All division produces floating point results
-        match (self, other) {
-            (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Float(a / b)),
-            (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Float((*a as f32) / (*b as f32))),
-            (ShimValue::Integer(a), ShimValue::Float(b)) => Ok(ShimValue::Float((*a as f32) / *b)),
-            (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(ShimValue::Float(*a / (*b as f32))),
-            (a, b) => Err(format!("Can't Divide {:?} and {:?}", a, b)),
+    fn div(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
+        if let Some(result) = self.try_struct_override(interpreter, b"div", other) {
+            return result;
         }
+        numeric_op!(self / other)
     }
 
-    fn floor_div(&self, _interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
-        // Integer division that truncates toward zero
-        match (self, other) {
-            (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Integer(a / b)),
-            (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Integer((*a as i32) / (*b as i32))),
-            (ShimValue::Integer(a), ShimValue::Float(b)) => Ok(ShimValue::Integer(*a / (*b as i32))),
-            (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(ShimValue::Integer((*a as i32) / *b)),
-            (a, b) => Err(format!("Can't FloorDivide {:?} and {:?}", a, b)),
+    fn modulus(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
+        if let Some(result) = self.try_struct_override(interpreter, b"modulus", other) {
+            return result;
         }
-    }
-
-    fn modulus(&self, _interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
         numeric_op!(self % other)
     }
 
     pub(crate) fn gt(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
+        if let Some(result) = self.try_struct_override(interpreter, b"gt", other) {
+            return result;
+        }
         match compare_values(interpreter, self, other) {
             Ok(std::cmp::Ordering::Greater) => Ok(ShimValue::Bool(true)),
             Ok(_) => Ok(ShimValue::Bool(false)),
@@ -1117,6 +1145,9 @@ impl ShimValue {
     }
 
     fn gte(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
+        if let Some(result) = self.try_struct_override(interpreter, b"gte", other) {
+            return result;
+        }
         match compare_values(interpreter, self, other) {
             Ok(std::cmp::Ordering::Greater) | Ok(std::cmp::Ordering::Equal) => Ok(ShimValue::Bool(true)),
             Ok(std::cmp::Ordering::Less) => Ok(ShimValue::Bool(false)),
@@ -1125,6 +1156,9 @@ impl ShimValue {
     }
 
     pub(crate) fn lt(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
+        if let Some(result) = self.try_struct_override(interpreter, b"lt", other) {
+            return result;
+        }
         match compare_values(interpreter, self, other) {
             Ok(std::cmp::Ordering::Less) => Ok(ShimValue::Bool(true)),
             Ok(_) => Ok(ShimValue::Bool(false)),
@@ -1133,6 +1167,9 @@ impl ShimValue {
     }
 
     fn lte(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
+        if let Some(result) = self.try_struct_override(interpreter, b"lte", other) {
+            return result;
+        }
         match compare_values(interpreter, self, other) {
             Ok(std::cmp::Ordering::Less) | Ok(std::cmp::Ordering::Equal) => Ok(ShimValue::Bool(true)),
             Ok(std::cmp::Ordering::Greater) => Ok(ShimValue::Bool(false)),
@@ -1176,6 +1213,12 @@ impl ShimValue {
                 let haystack_str = unsafe { std::str::from_utf8_unchecked(haystack) };
                 let needle_str = unsafe { std::str::from_utf8_unchecked(needle) };
                 Ok(ShimValue::Bool(haystack_str.contains(needle_str)))
+            }
+            ShimValue::Struct(_) => {
+                if let Some(result) = self.try_struct_override(interpreter, b"contains", some_key) {
+                    return result;
+                }
+                Err(format!("Can't `in` {:?} and {:?}", self, some_key))
             }
             _ => Err(format!("Can't `in` {:?} and {:?}", self, some_key)),
         }
@@ -1600,7 +1643,7 @@ impl Interpreter {
                 val if val == ByteCode::Sub as u8 => {
                     let b = stack.pop().expect("Operand for add");
                     let a = stack.pop().expect("Operand for add");
-                    stack.push(a.sub(&b).map_err(|err_str| {
+                    stack.push(a.sub(self, &b).map_err(|err_str| {
                         format_script_err(self.program.spans[pc], &self.program.script, &err_str)
                     })?);
                 }
@@ -1625,13 +1668,6 @@ impl Interpreter {
                     let b = stack.pop().expect("Operand for ByteCode::Divide");
                     let a = stack.pop().expect("Operand for ByteCode::Divide");
                     stack.push(a.div(self, &b).map_err(|err_str| {
-                        format_script_err(self.program.spans[pc], &self.program.script, &err_str)
-                    })?);
-                }
-                val if val == ByteCode::FloorDivide as u8 => {
-                    let b = stack.pop().expect("Operand for ByteCode::FloorDivide");
-                    let a = stack.pop().expect("Operand for ByteCode::FloorDivide");
-                    stack.push(a.floor_div(self, &b).map_err(|err_str| {
                         format_script_err(self.program.spans[pc], &self.program.script, &err_str)
                     })?);
                 }
@@ -1673,7 +1709,7 @@ impl Interpreter {
                 val if val == ByteCode::In as u8 => {
                     let b = stack.pop().expect("Operand for ByteCode::In");
                     let a = stack.pop().expect("Operand for ByteCode::In");
-                    stack.push(a.contains(self, &b)?);
+                    stack.push(b.contains(self, &a)?);
                 }
                 val if val == ByteCode::Range as u8 => {
                     let end = stack.pop().expect("Operand for ByteCode::Range");
