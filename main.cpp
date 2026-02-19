@@ -114,12 +114,34 @@ extern "C" {
         va_end(args);
     }
 
+    void igRemoveSpacingH() {
+        // Move back to the same line with 0 pixels of horizontal spacing
+        ImGui::SameLine(0, 0); 
+    }
+
     void igTextColoredC(float r, float g, float b, float a, const char* fmt, ...) {
         ZoneScoped;
         va_list args;
         va_start(args, fmt);
         ImGui::TextColoredV(ImVec4(r, g, b, a), fmt, args);
         va_end(args);
+    }
+
+    void igTextColoredBC(float r, float g, float b, float a, float br, float bg, float bb, float ba, const char* text) {
+        ImVec2 pos = ImGui::GetCursorScreenPos();
+        ImVec2 textSize = ImGui::CalcTextSize(text);
+
+        ImVec4 bgColor = ImVec4(br, bg, bb, ba);
+        
+        ImGui::GetWindowDrawList()->AddRectFilled(
+            pos, 
+            ImVec2(pos.x + textSize.x, pos.y + textSize.y), 
+            ImGui::ColorConvertFloat4ToU32(bgColor)
+        );
+
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(r, g, b, a));
+        ImGui::TextUnformatted(text);
+        ImGui::PopStyleColor();
     }
 
     bool igButton(const char* label) {

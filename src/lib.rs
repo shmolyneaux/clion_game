@@ -60,6 +60,8 @@ unsafe extern "C" {
     fn igInputText(label: *const core::ffi::c_char, buffer: *mut core::ffi::c_char, buffer_size: i32, flags: i32) -> bool;
     fn igTextC(fmt: *const core::ffi::c_char, ...);
     fn igTextColoredC(r: f32, g: f32, b: f32, a: f32, fmt: *const core::ffi::c_char, ...);
+    fn igTextColoredBC(r: f32, g: f32, b: f32, a: f32, br: f32, bg: f32, bb: f32, ba: f32, text: *const core::ffi::c_char);
+    fn igRemoveSpacingH();
     fn igButton(label: *const core::ffi::c_char) -> bool;
     fn igSliderFloat(label: *const core::ffi::c_char, v: *mut f32, v_min: f32, v_max: f32, format: *const core::ffi::c_char);
     fn igCheckbox(label: *const core::ffi::c_char, value: *mut bool) -> bool;
@@ -104,6 +106,8 @@ mod test_mocks {
     pub fn SHM_GetDrawableSize(display_w: *mut i32, display_h: *mut i32) {panic!("Can't call SHM_GetDrawableSize in test context")}
     pub fn igBegin(name: *const core::ffi::c_char, p_open: *mut bool, flags: ImGuiWindowFlags) -> bool {panic!("Can't call igBegin in test context")}
     pub fn igEnd() {panic!("Can't call igEnd in test context")}
+    pub fn igTextColoredBC(r: f32, g: f32, b: f32, a: f32, br: f32, bg: f32, bb: f32, ba: f32, text: *const core::ffi::c_char) {panic!("Can't call igTextColoredBC in test context")}
+    pub fn igRemoveSpacingH() {}
     pub fn igBeginDisabled() {panic!("Can't call igBeginDisabled in test context")}
     pub fn igEndDisabled() {panic!("Can't call igEndDisabled in test context")}
     pub fn igIsItemHovered(flags: i32) -> bool {panic!("Can't call igIsItemHovered in test context")}
@@ -1250,19 +1254,26 @@ fn frame(state: &mut State, delta: f32) {
         //imgui_debug(state);
     }
 
-    {
-        let _zone = zone_scoped!("Run interpreter");
-        let mut pc = 0;
-        match state.interpreter.execute_bytecode_extended(&mut pc, shimlang::ArgBundle::new(), &mut state.env) {
-            Ok(_) => {},
-            Err(msg) => {
-                eprintln!("{msg}");
-            }
-        };
-        state.interpreter.gc(&state.env);
-    }
-
     unsafe {
+        let mut open = true;
+        igBegin(c"From Rust".as_ptr(), &mut open as *mut bool, IMGUI_WINDOW_FLAGS_NO_FOCUS_ON_APPEARING);
+
+        if igButton(CString::new(format!("Execute One Frame")).unwrap().as_ptr()) {
+            let _zone = zone_scoped!("Run interpreter");
+            let mut pc = 0;
+            match state.interpreter.execute_bytecode_extended(&mut pc, shimlang::ArgBundle::new(), &mut state.env) {
+                Ok(_) => {},
+                Err(msg) => {
+                    eprintln!("{msg}");
+                }
+            };
+            state.interpreter.gc(&state.env);
+        }
+
+        igTextColoredBC(1.0, 1.0, 1.0, 1.0, 0.5, 0.5, 0.5, 0.5,
+        CString::new(format!("BG text")).unwrap().as_ptr()
+        );
+
         let _zone = zone_scoped!("rust frame unsafe block");
         update_keys(state);
 
@@ -1349,8 +1360,6 @@ fn frame(state: &mut State, delta: f32) {
         ctx.insert("view".to_string(), ShaderValue::Mat4(state.view));
         ctx.insert("projection".to_string(), ShaderValue::Mat4(state.projection));
 
-        let mut open = true;
-        igBegin(c"From Rust".as_ptr(), &mut open as *mut bool, IMGUI_WINDOW_FLAGS_NO_FOCUS_ON_APPEARING);
         igText(CString::new(format!("Display size: {}x{}", display_w, display_h)).unwrap().as_ptr());
 
         #[cfg(target_arch = "wasm32")]
@@ -1380,7 +1389,7 @@ fn frame(state: &mut State, delta: f32) {
             {
                 let _zone = zone_scoped!("ShimLang Debug");
 
-                state.debug_state.shimlang_debug_window.debug_window(&mut state.interpreter);
+                state.debug_state.shimlang_debug_window.debug_window(&mut state.interpreter, &state.env);
                 state.debug_state.shimlang_repl.window(&mut state.interpreter);
 
                 draw_log_window();

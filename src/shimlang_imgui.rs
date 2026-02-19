@@ -74,7 +74,7 @@ fn idx_in_free_block(idx: Word, free_list: &[FreeBlock]) -> bool {
 }
 
 impl Navigation {
-    pub fn debug_window(&mut self, interpreter: &mut shimlang::Interpreter) {
+    pub fn debug_window(&mut self, interpreter: &mut shimlang::Interpreter, env: &shimlang::Environment) {
         let _zone = zone_scoped!("Navigation::debug_window");
         let mut open = true;
         unsafe {
@@ -120,6 +120,7 @@ impl Navigation {
 
             let page_size: usize = 128;
             let item_offset: usize = page_size * self.memory_page as usize;
+            let index_description = interpreter.describe_memory(env);
             for (relative_idx, x) in interpreter.mem.mem.iter().skip(item_offset).take(page_size).enumerate() {
                 let idx = relative_idx + item_offset;
                 if !(idx % 4 == 0) {
@@ -128,22 +129,30 @@ impl Navigation {
                     igSameLine();
                 } else {
                     // Start of a new line, show the memory address
-                    igTextColored(0.6, 0.6, 0.6, 1.0, CString::new(format!("{:08X}", idx)).unwrap().as_ptr());
+                    igTextColored(0.6, 0.6, 0.6, 1.0, CString::new(format!("{:08X} ", idx)).unwrap().as_ptr());
                     igSameLine();
                 }
-                let mut is_free_memory = false;
-                for block in interpreter.mem.free_list.iter() {
-                    if usize::from(block.pos) > idx {
-                        break;
+                if let Some(s) = index_description.get(&idx) {
+                    if idx == s.start {
+                        igTextColoredBC(
+                            1.0, 1.0, 1.0, 1.0, 
+                            0.5, 0.5, 0.5, 1.0, 
+                            CString::new(format!("{:016X}", x)).unwrap().as_ptr()
+                        );
+                    } else {
+                        igRemoveSpacingH();
+                        igTextColoredBC(
+                            1.0, 1.0, 1.0, 1.0, 
+                            0.5, 0.5, 0.5, 1.0, 
+                            CString::new(format!(" {:016X}", x)).unwrap().as_ptr()
+                        );
                     }
-                    if usize::from(block.pos) <= idx && idx < block.end().into() {
-                        is_free_memory = true;
+                    if igIsItemHovered(IMGUI_HOVERED_FLAGS_ALLOW_WHEN_DISABLED) {
+                        igSetTooltip(CString::new(format!("{:?}", s)).unwrap().as_ptr());
                     }
-                }
-                if is_free_memory {
-                    igTextColored(0.3, 0.3, 0.3, 0.3, CString::new(format!("{:016X}", x)).unwrap().as_ptr());
                 } else {
-                    igTextColored(1.0, 1.0, 1.0, 1.0, CString::new(format!("{:016X}", x)).unwrap().as_ptr());
+                    // Grey out the text
+                    igTextColored(0.3, 0.3, 0.3, 0.3, CString::new(format!("{:016X}", x)).unwrap().as_ptr());
                 }
             }
             igText(CString::new(format!("Did that work?")).unwrap().as_ptr());

@@ -5,6 +5,9 @@ use shm_tracy::*;
 use shm_tracy::zone_scoped;
 use crate::runtime::*;
 use crate::shimlibs::*;
+use std::collections::HashMap;
+
+use crate::lex::debug_u8s;
 
 #[derive(Debug)]
 pub struct Config {
@@ -193,7 +196,7 @@ pub struct MMU {
     // The second value is the number of words
     // Sorted for sanity's sake, though I'm not
     // sure if necessary?
-    pub(crate) free_list: Vec<FreeBlock>,
+    pub free_list: Vec<FreeBlock>,
     // We don't store metadata about any allocations
     // It's up to the caller to know how much memory
     // should be freed.
@@ -485,8 +488,31 @@ impl MMU {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct MemDescriptor {
+    pub start: usize,
+    pub end: usize,
+    pub t: MemDescriptorType
+}
+
+impl MemDescriptor {
+    fn other(start: usize, end: usize, text: &str) -> Self {
+        Self {
+            start,
+            end,
+            t: MemDescriptorType::Other(text.to_string())
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum MemDescriptorType {
+    Other(String)
+}
+
 #[derive(Debug)]
 pub struct Bitmask {
+    pub description: HashMap<usize, MemDescriptor>,
     data: Vec<u64>,
 }
 
@@ -496,13 +522,15 @@ impl Bitmask {
         let blocks = num_bits.div_ceil(64);
 
         Bitmask {
+            description: HashMap::new(),
             data: vec![0; blocks],
         }
     }
 
-    pub fn set(&mut self, index: usize) {
+    pub fn set(&mut self, index: usize, description: &MemDescriptor) {
         let (block_idx, bit_offset) = self.pos(index);
         self.data[block_idx] |= 1 << bit_offset;
+        self.description.insert(index, description.clone());
     }
 
     pub fn is_set(&self, index: usize) -> bool {
@@ -575,16 +603,16 @@ impl Bitmask {
 }
 
 pub(crate) struct GC<'a> {
-    mem: &'a mut MMU,
-    mask: Bitmask,
+    pub mem: &'a MMU,
+    pub mask: Bitmask,
 }
 
 impl<'a> GC<'a> {
-    pub(crate) fn new(mem: &'a mut MMU) -> Self {
+    pub(crate) fn new(mem: &'a MMU) -> Self {
         let last_block_start = mem.free_list[mem.free_list.len()-1].pos;
         let mut mask = Bitmask::new(last_block_start.into());
         // Mark word 0 so the GC never frees the sentinel reserved by MMU::with_capacity
-        mask.set(0);
+        mask.set(0, &MemDescriptor::other(0, 1, "null"));
         Self {
             mem,
             mask,
@@ -604,7 +632,7 @@ impl<'a> GC<'a> {
                             continue;
                         }
                         // Mark the ShimFn struct (8 bytes = 1 word: u32 pc + Word name)
-                        self.mask.set(pos);
+                        self.mask.set(pos, &MemDescriptor::other(pos, pos+1, "ShimFn"));
                         
                         // Mark the function name string
                         let shim_fn: &ShimFn = self.mem.get(fn_pos);
@@ -618,17 +646,20 @@ impl<'a> GC<'a> {
                         }
 
                         let contents_pos = usize::from(lst.data);
+                        let desc = MemDescriptor::other(contents_pos, contents_pos + lst.capacity(), "List item");
                         for idx in contents_pos..(contents_pos + lst.capacity()) {
-                            self.mask.set(idx);
+                            self.mask.set(idx,&desc);
                         }
                     },
-                    ShimValue::String(len, offset, pos) => {
+                    s @ ShimValue::String(len, offset, pos) => {
+                        let contents = s.string_from_mem(&self.mem).unwrap();
                         let len = len as usize;
                         let offset = offset as usize;
                         let pos: usize = usize::from(pos);
+                        let desc = MemDescriptor::other(pos, (offset + len).div_ceil(8), &format!("String: {}", debug_u8s(contents)));
                         // TODO: check this...
                         for idx in pos..(pos + (offset + len).div_ceil(8)) {
-                            self.mask.set(idx);
+                            self.mask.set(idx, &desc);
                         }
                     },
                     ShimValue::Dict(pos) => {
@@ -653,22 +684,26 @@ impl<'a> GC<'a> {
                         }
 
                         // Mark the space for the dict struct
+                        let header_desc = MemDescriptor::other(pos, (pos + std::mem::size_of::<ShimDict>().div_ceil(8)), "dict header");
                         for idx in pos..(pos + std::mem::size_of::<ShimDict>().div_ceil(8)) {
-                            self.mask.set(idx);
+                            self.mask.set(idx, &header_desc);
                         }
 
                         let size = 1 << dict.size_pow;
 
                         // Mark the indices array
                         let indices_pos: usize = dict.indices.into();
+                        let indices_desc = MemDescriptor::other(indices_pos, (indices_pos + size), "dict index");
+                        // TODO: I'm pretty sure this is wrong? The stride of the indices is 1 byte for dicts with less than 256 entries
                         for idx in indices_pos..(indices_pos + size) {
-                            self.mask.set(idx);
+                            self.mask.set(idx, &indices_desc);
                         }
 
                         // Mark the entries array
                         let entries_pos: usize = dict.entries.into();
+                        let entries_desc = MemDescriptor::other(entries_pos, (entries_pos + size*3), "dict index");
                         for idx in entries_pos..(entries_pos + size*3) {
-                            self.mask.set(idx);
+                            self.mask.set(idx, &entries_desc);
                         }
                     },
                     ShimValue::StructDef(pos) => {
@@ -677,8 +712,13 @@ impl<'a> GC<'a> {
                             continue;
                         }
                         let def: &StructDef = self.mem.get(pos.into());
+                        let desc = MemDescriptor::other(
+                            pos,
+                            (pos + def.mem_size()),
+                            &format!("struct {}", debug_u8s(&def.name)),
+                        );
                         for idx in pos..(pos + def.mem_size()) {
-                            self.mask.set(idx);
+                            self.mask.set(idx, &desc);
                         }
                     },
                     ShimValue::Struct(pos) => {
@@ -689,8 +729,13 @@ impl<'a> GC<'a> {
                         let def_pos: usize = self.mem.mem[pos] as usize;
                         let def: &StructDef = self.mem.get(def_pos.into());
 
+                        let desc = MemDescriptor::other(
+                            pos,
+                            (pos + def.member_count as usize + 1),
+                            "struct instance",
+                        );
                         for idx in pos..(pos + def.member_count as usize + 1) {
-                            self.mask.set(idx);
+                            self.mask.set(idx, &desc);
                             // Push the members
                             if idx != pos {
                                 vals.push(
@@ -702,13 +747,13 @@ impl<'a> GC<'a> {
                     },
                     ShimValue::NativeFn(pos) => {
                         let pos: usize = pos.into();
-                        self.mask.set(pos);
+                        self.mask.set(pos, &MemDescriptor::other(pos, pos+1, "NativeFn"));
                     },
                     ShimValue::Native(pos) => {
                         let pos: usize = pos.into();
                         assert!(std::mem::size_of::<Box<dyn ShimNative>>() == 16);
-                        self.mask.set(pos);
-                        self.mask.set(pos+1);
+                        self.mask.set(pos, &MemDescriptor::other(pos, pos+2, "Native"));
+                        self.mask.set(pos+1, &MemDescriptor::other(pos, pos+2, "Native"));
 
                         let ptr: &Box<dyn ShimNative> = std::mem::transmute(&self.mem.mem[pos]);
 
@@ -724,9 +769,9 @@ impl<'a> GC<'a> {
                     ShimValue::BoundNativeMethod(pos) => {
                         let pos: usize = pos.into();
                         // Native ShimValue
-                        self.mask.set(pos);
+                        self.mask.set(pos, &MemDescriptor::other(pos, pos+2, "BoundNativeMethod"));
                         // Pointer to the fn
-                        self.mask.set(pos+1);
+                        self.mask.set(pos+1, &MemDescriptor::other(pos, pos+2, "BoundNativeMethod"));
 
                         // Any values that the obj holds
                         let ptr: &Box<dyn ShimNative> = std::mem::transmute(&self.mem.mem[pos]);
@@ -738,15 +783,26 @@ impl<'a> GC<'a> {
 
                         // Chunk of memory that store the EnvScope metadata
                         let pos: usize = pos.into();
+                        let desc = MemDescriptor::other(
+                            pos,
+                            (pos + std::mem::size_of::<EnvScope>().div_ceil(8)),
+                            "Envscope header",
+                        );
                         for bit in pos..(pos + std::mem::size_of::<EnvScope>().div_ceil(8)) {
-                            self.mask.set(bit);
+                            self.mask.set(bit, &desc);
                         }
+
 
                         // Data block
                         let start = usize::from(scope.data);
                         let end = start + scope.capacity as usize;
+                        let scope_description = MemDescriptor::other(
+                            start,
+                            end,
+                            &scope.to_string(&self.mem),
+                        );
                         for bit in start..end {
-                            self.mask.set(bit);
+                            self.mask.set(bit, &scope_description);
                         }
                         
                         // Walk the contiguous data block and collect values
@@ -773,23 +829,25 @@ impl<'a> GC<'a> {
         }
     }
 
-    pub(crate) fn sweep(&mut self) {
+    pub(crate) fn sweep(&mut self) -> Vec<FreeBlock> {
         let _zone = zone_scoped!("GC sweep");
 
         // TODO: need to add the original last block from the free list
         let last_block = self.mem.free_list[self.mem.free_list.len()-1];
-        self.mem.free_list = self.mask
+        let mut free_list: Vec<FreeBlock> = self.mask
             .find_zeros()
             .iter()
             .map(|block| FreeBlock { pos: block.start.into(), size: (block.end-block.start).into() }).collect();
-        let new_last_block = self.mem.free_list[self.mem.free_list.len()-1];
+        let new_last_block = free_list[free_list.len()-1];
         if new_last_block.end() >= last_block.pos {
             // Merge with the new last block
-            let len = self.mem.free_list.len();
-            self.mem.free_list[len - 1].size = last_block.end() - self.mem.free_list[len - 1].pos;
+            let len = free_list.len();
+            free_list[len - 1].size = last_block.end() - free_list[len - 1].pos;
         } else {
             // Append the previous last free block (which was not included in the bitmask)
-            self.mem.free_list.push(last_block);
+            free_list.push(last_block);
         }
+
+        free_list
     }
 }
