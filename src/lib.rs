@@ -44,6 +44,17 @@ use shm_tracy::*;
 
 type ImGuiWindowFlags = c_int;
 
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+pub struct ImVec2 {
+    pub x: f32,
+    pub y: f32,
+}
+
+pub fn im_col32(r: u32, g: u32, b: u32, a: u32) -> u32 {
+    (a << 24) | (b << 16) | (g << 8) | r
+}
+
 #[cfg(not(test))]
 unsafe extern "C" {
     fn SDL_GL_GetProcAddress(proc: *const i8) -> *mut std::ffi::c_void;
@@ -84,6 +95,13 @@ unsafe extern "C" {
     fn igEndTable();
 
     fn igFrameRate() -> f32;
+    fn igGetCursorScreenPos(pOut: *mut ImVec2);
+    fn igDrawRectFilled(min: ImVec2, max: ImVec2, col: u32);
+    fn igDummy(size: ImVec2);
+    fn igBeginTooltip();
+    fn igEndTooltip();
+    fn igGetMousePos(pOut: *mut ImVec2);
+    fn igIsMouseHoveringRect(min: ImVec2, max: ImVec2, clip: bool) -> bool;
 }
 
 fn igText(fmt: *const core::ffi::c_char) {
@@ -936,6 +954,11 @@ fn init_state() -> State {
         x,
         y
     }
+
+    let some_p0 = Point(0, 1);
+    let some_p1 = Point(0, 1);
+    let some_p2 = Point(0, 1);
+    let some_p3 = Point(0, 1);
 
     fn rounds() {
         let d = dict();

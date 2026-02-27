@@ -95,6 +95,7 @@ impl Navigation {
             igText(CString::new(format!("Mem size is {}", interpreter.mem.mem.len())).unwrap().as_ptr());
 
 
+            draw_colored_grid(5, 5, 8.0);
 
 
             if self.memory_page == 0 {
@@ -121,45 +122,73 @@ impl Navigation {
             let page_size: usize = 128;
             let item_offset: usize = page_size * self.memory_page as usize;
             let index_description = interpreter.describe_memory(env);
+            let mut origin = ImVec2 { x: 0.0, y: 0.0 };
+            igGetCursorScreenPos(&mut origin);
+            let cell_size = 8.0;
             for (relative_idx, x) in interpreter.mem.mem.iter().skip(item_offset).take(page_size).enumerate() {
                 let idx = relative_idx + item_offset;
-                if !(idx % 4 == 0) {
-                    // We show 4 memory locations per line, so if we're not at the start of the line
-                    // we know the text should continue on the same line
-                    igSameLine();
-                } else {
-                    // Start of a new line, show the memory address
-                    igTextColored(0.6, 0.6, 0.6, 1.0, CString::new(format!("{:08X} ", idx)).unwrap().as_ptr());
-                    igSameLine();
-                }
+
+                let x = relative_idx % 32;
+                let y = relative_idx / 32;
+
+                let mut cell_min = ImVec2 {
+                    x: origin.x + (x as f32 * cell_size),
+                    y: origin.y + (y as f32 * (cell_size+1.0)),
+                };
+                let mut cell_max = ImVec2 {
+                    x: cell_min.x + cell_size,
+                    y: cell_min.y + cell_size,
+                };
+
                 if let Some(s) = index_description.get(&idx) {
                     if idx == s.start {
-                        igTextColoredBC(
-                            1.0, 1.0, 1.0, 1.0, 
-                            0.5, 0.5, 0.5, 1.0, 
-                            CString::new(format!("{:016X}", x)).unwrap().as_ptr()
-                        );
-                    } else {
-                        igRemoveSpacingH();
-                        igTextColoredBC(
-                            1.0, 1.0, 1.0, 1.0, 
-                            0.5, 0.5, 0.5, 1.0, 
-                            CString::new(format!(" {:016X}", x)).unwrap().as_ptr()
-                        );
-                    }
-                    if igIsItemHovered(IMGUI_HOVERED_FLAGS_ALLOW_WHEN_DISABLED) {
-                        igSetTooltip(CString::new(format!("{:?}", s)).unwrap().as_ptr());
+                        cell_min.x += 1.0;
+                    };
+                    if idx == s.end - 1 {
+                        cell_max.x -= 1.0;
+                    };
+                    // Draw the cell
+                    let color = match &s.t {
+                        shimlang::MemDescriptorType::EnvHeader(_) => im_col32(0, 255, 0, 255),
+                        shimlang::MemDescriptorType::EnvData(_) => im_col32(0, 200, 0, 255),
+                        shimlang::MemDescriptorType::Struct(..) => im_col32(0, 0, 220, 255),
+                        _ => im_col32(255, 0, 255, 255),
+                    };
+                    igDrawRectFilled(cell_min, cell_max, color);
+
+                    // Tooltip logic
+                    if igIsMouseHoveringRect(cell_min, cell_max, true) {
+                        igBeginTooltip();
+                        igText(CString::new(format!("{}", s.to_string())).unwrap().as_ptr());
+                        igEndTooltip();
                     }
                 } else {
-                    // Grey out the text
-                    igTextColored(0.3, 0.3, 0.3, 0.3, CString::new(format!("{:016X}", x)).unwrap().as_ptr());
+                    let color = im_col32(100, 100, 100, 255);
+                    igDrawRectFilled(cell_min, cell_max, color);
                 }
             }
+            igDummy(ImVec2 {
+                x: 0.0,
+                y: 32.0 * cell_size,
+            });
             igText(CString::new(format!("Did that work?")).unwrap().as_ptr());
 
             // TODO: Add a source code viewer
             // TODO: Add support for executing single statements
             igEnd();
         }
+    }
+}
+
+
+
+fn draw_colored_grid(rows: i32, cols: i32, cell_size: f32) {
+    unsafe {
+
+        for y in 0..rows {
+            for x in 0..cols {
+            }
+        }
+
     }
 }

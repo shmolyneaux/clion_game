@@ -127,6 +127,35 @@ extern "C" {
         va_end(args);
     }
 
+    void igGetCursorScreenPos(ImVec2* pOut) {
+        if (pOut) *pOut = ImGui::GetCursorScreenPos();
+    }
+
+    void igDrawRectFilled(ImVec2 min, ImVec2 max, ImU32 col) {
+        // Access the current window's draw list and add the rect
+        ImGui::GetWindowDrawList()->AddRectFilled(min, max, col);
+    }
+
+    void igDummy(ImVec2 size) {
+        ImGui::Dummy(size);
+    }
+
+    void igBeginTooltip() {
+        ImGui::BeginTooltip();
+    }
+
+    void igEndTooltip() {
+        ImGui::EndTooltip();
+    }
+
+    void igGetMousePos(ImVec2* pOut) {
+        if (pOut) *pOut = ImGui::GetIO().MousePos;
+    }
+
+    bool igIsMouseHoveringRect(ImVec2 min, ImVec2 max, bool clip) {
+        return ImGui::IsMouseHoveringRect(min, max, clip);
+    }
+
     void igTextColoredBC(float r, float g, float b, float a, float br, float bg, float bb, float ba, const char* text) {
         ImVec2 pos = ImGui::GetCursorScreenPos();
         ImVec2 textSize = ImGui::CalcTextSize(text);

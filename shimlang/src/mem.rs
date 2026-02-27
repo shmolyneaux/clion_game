@@ -503,11 +503,47 @@ impl MemDescriptor {
             t: MemDescriptorType::Other(text.to_string())
         }
     }
+
+    fn struct_desc(start: usize, end: usize, type_name: String, members: Vec<ShimValue>) -> Self {
+        Self {
+            start,
+            end,
+            t: MemDescriptorType::Struct(type_name, members)
+        }
+    }
+
+    fn env_header(start: usize, end: usize, text: &str) -> Self {
+        Self {
+            start,
+            end,
+            t: MemDescriptorType::EnvHeader(text.to_string())
+        }
+    }
+
+    fn env_data(start: usize, end: usize, text: &str) -> Self {
+        Self {
+            start,
+            end,
+            t: MemDescriptorType::EnvData(text.to_string())
+        }
+    }
+
+    pub fn to_string(&self) -> String {
+        match &self.t {
+            MemDescriptorType::Other(s) => s.clone(),
+            MemDescriptorType::EnvHeader(s) => s.clone(),
+            MemDescriptorType::EnvData(s) => s.clone(),
+            MemDescriptorType::Struct(type_name, members) => format!("{}({:?})", type_name, members),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
 pub enum MemDescriptorType {
-    Other(String)
+    Other(String),
+    EnvData(String),
+    EnvHeader(String),
+    Struct(String, Vec<ShimValue>),
 }
 
 #[derive(Debug)]
@@ -576,7 +612,7 @@ impl Bitmask {
 
                     if is_zero {
                         if start_of_run == None {
-                            start_of_run = Some(i);
+                            start_of_run = Some(idx*64 + i);
                         }
                     } else {
                         if let Some(start) = start_of_run {
@@ -588,7 +624,6 @@ impl Bitmask {
                 }
             }
         }
-
 
         if let Some(start_bit) = start_of_run {
             ranges.push(start_bit..self.data.len()*64);
@@ -656,7 +691,7 @@ impl<'a> GC<'a> {
                         let len = len as usize;
                         let offset = offset as usize;
                         let pos: usize = usize::from(pos);
-                        let desc = MemDescriptor::other(pos, (offset + len).div_ceil(8), &format!("String: {}", debug_u8s(contents)));
+                        let desc = MemDescriptor::other(pos, (offset + len).div_ceil(8), &format!("String: {} <- anon?", debug_u8s(contents)));
                         // TODO: check this...
                         for idx in pos..(pos + (offset + len).div_ceil(8)) {
                             self.mask.set(idx, &desc);
@@ -722,6 +757,7 @@ impl<'a> GC<'a> {
                         }
                     },
                     ShimValue::Struct(pos) => {
+                        dbg!(pos);
                         let pos: usize = pos.into();
                         if self.mask.is_set(pos) {
                             continue;
@@ -729,10 +765,19 @@ impl<'a> GC<'a> {
                         let def_pos: usize = self.mem.mem[pos] as usize;
                         let def: &StructDef = self.mem.get(def_pos.into());
 
-                        let desc = MemDescriptor::other(
+                        let mut members = Vec::new();
+                        for idx in pos..(pos + def.member_count as usize + 1) {
+                            if idx != pos {
+                                members.push(
+                                    ShimValue::from_u64(self.mem.mem[idx])
+                                );
+                            }
+                        }
+                        let desc = MemDescriptor::struct_desc(
                             pos,
                             (pos + def.member_count as usize + 1),
-                            "struct instance",
+                            "TODO struct typename".to_string(),
+                            members
                         );
                         for idx in pos..(pos + def.member_count as usize + 1) {
                             self.mask.set(idx, &desc);
@@ -783,7 +828,7 @@ impl<'a> GC<'a> {
 
                         // Chunk of memory that store the EnvScope metadata
                         let pos: usize = pos.into();
-                        let desc = MemDescriptor::other(
+                        let desc = MemDescriptor::env_header(
                             pos,
                             (pos + std::mem::size_of::<EnvScope>().div_ceil(8)),
                             "Envscope header",
@@ -796,7 +841,7 @@ impl<'a> GC<'a> {
                         // Data block
                         let start = usize::from(scope.data);
                         let end = start + scope.capacity as usize;
-                        let scope_description = MemDescriptor::other(
+                        let scope_description = MemDescriptor::env_data(
                             start,
                             end,
                             &scope.to_string(&self.mem),
@@ -838,7 +883,9 @@ impl<'a> GC<'a> {
             .find_zeros()
             .iter()
             .map(|block| FreeBlock { pos: block.start.into(), size: (block.end-block.start).into() }).collect();
+
         let new_last_block = free_list[free_list.len()-1];
+
         if new_last_block.end() >= last_block.pos {
             // Merge with the new last block
             let len = free_list.len();
