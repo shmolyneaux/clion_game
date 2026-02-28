@@ -21,8 +21,8 @@ use crate::shimlibs::*;
 // 15 bytes per entry. A scope starts with capacity 0 and lazily allocates on first insert.
 #[derive(Debug)]
 pub(crate) struct EnvScope {
-    // Pointer to the contiguous data block in MMU (Word(0) when capacity is 0)
-    pub(crate) data: Word,
+    // Pointer to the contiguous data block in MMU (0 when capacity is 0)
+    pub(crate) data: u24,
     // Allocated size of the data block in u64 words
     pub(crate) capacity: u32,
     // Used size of the data block in bytes
@@ -40,7 +40,7 @@ const ENV_SCOPE_DEFAULT_CAPACITY: u32 = 16;
 impl EnvScope {
     fn new() -> Self {
         Self {
-            data: Word(0.into()),
+            data: 0.into(),
             capacity: 0,
             used: 0,
             parent: 0.into(),
@@ -50,7 +50,7 @@ impl EnvScope {
 
     fn new_with_parent(parent_pos: u24, parent_depth: u32) -> Self {
         Self {
-            data: Word(0.into()),
+            data: 0.into(),
             capacity: 0,
             used: 0,
             parent: parent_pos,
@@ -65,7 +65,7 @@ impl EnvScope {
         if self.used == 0 {
             return &[];
         }
-        let start = usize::from(self.data.0);
+        let start = usize::from(self.data);
         let word_count = (self.used as usize).div_ceil(8);
         let u64_slice = &mem.mem[start..start + word_count];
         let ptr = u64_slice.as_ptr() as *const u8;
@@ -75,8 +75,8 @@ impl EnvScope {
     /// Get a mutable byte slice view of the full capacity of a scope's data block.
     /// Takes explicit data/capacity to avoid borrow conflicts when the EnvScope
     /// reference is obtained via raw pointer.
-    unsafe fn raw_bytes_mut_from(mem: &mut MMU, data: Word, capacity: u32) -> &mut [u8] {
-        let start = usize::from(data.0);
+    unsafe fn raw_bytes_mut_from(mem: &mut MMU, data: u24, capacity: u32) -> &mut [u8] {
+        let start = usize::from(data);
         let u64_slice = &mut mem.mem[start..start + capacity as usize];
         let ptr = u64_slice.as_mut_ptr() as *mut u8;
         unsafe { std::slice::from_raw_parts_mut(ptr, capacity as usize * 8) }
@@ -92,7 +92,7 @@ impl EnvScope {
 
     /// Write a ShimValue at the given byte offset within this scope's data block.
     /// Safety: `value_offset + 8` must be within capacity.
-    unsafe fn write_value_at(mem: &mut MMU, data: Word, capacity: u32, value_offset: usize, val: ShimValue) {
+    unsafe fn write_value_at(mem: &mut MMU, data: u24, capacity: u32, value_offset: usize, val: ShimValue) {
         unsafe {
             let buf = EnvScope::raw_bytes_mut_from(mem, data, capacity);
             let val_bytes: [u8; 8] = std::mem::transmute(val);
@@ -102,12 +102,12 @@ impl EnvScope {
 
     /// Reallocate the data block to `new_capacity` words, copying `used` bytes of
     /// existing data. Frees the old block if `capacity > 0`. Returns the new data pointer.
-    fn realloc(mem: &mut MMU, data: Word, capacity: u32, used: u32, new_capacity: u32) -> Word {
-        let new_data = alloc!(mem, Word(new_capacity.into()), "EnvScope data grow");
+    fn realloc(mem: &mut MMU, data: u24, capacity: u32, used: u32, new_capacity: u32) -> u24 {
+        let new_data = alloc!(mem, u24::from(new_capacity), "EnvScope data grow");
         // Copy old data
         if used > 0 {
-            let old_start = usize::from(data.0);
-            let new_start = usize::from(new_data.0);
+            let old_start = usize::from(data);
+            let new_start = usize::from(new_data);
             let old_word_count = (used as usize).div_ceil(8);
             unsafe {
                 std::ptr::copy_nonoverlapping(
@@ -119,7 +119,7 @@ impl EnvScope {
         }
         // Free old block (only if there was one)
         if capacity > 0 {
-            mem.free(data, Word(capacity.into()));
+            mem.free(data, capacity.into());
         }
         new_data
     }
@@ -186,7 +186,7 @@ impl Environment {
         let scope_pos = mem.alloc_and_set(EnvScope::new(), "EnvScope");
 
         Self {
-            current_scope: scope_pos.0.into(),
+            current_scope: scope_pos.into(),
         }
     }
 
@@ -223,7 +223,7 @@ impl Environment {
         assert!(key.len() <= u8::MAX as usize, "Key length {} exceeds maximum {}", key.len(), u8::MAX);
 
         // Check if key already exists in the current scope — update in place (upsert)
-        let scope: &EnvScope = unsafe { interpreter.mem.get(Word(self.current_scope.into())) };
+        let scope: &EnvScope = unsafe { interpreter.mem.get(u24::from(self.current_scope)) };
         if let Some(value_offset) = scope.scan_for_key(&interpreter.mem, &key) {
             let (data, capacity) = (scope.data, scope.capacity);
             unsafe { EnvScope::write_value_at(&mut interpreter.mem, data, capacity, value_offset, val); }
@@ -288,7 +288,7 @@ impl Environment {
             }
 
             let (parent, data, capacity, value_offset) = unsafe {
-                let scope: &EnvScope = interpreter.mem.get(Word(current_scope_pos.into()));
+                let scope: &EnvScope = interpreter.mem.get(u24::from(current_scope_pos));
                 (scope.parent, scope.data, scope.capacity, scope.scan_for_key(&interpreter.mem, key))
             };
 
@@ -312,14 +312,14 @@ impl Environment {
             }
 
             let (parent, value_offset) = unsafe {
-                let scope: &EnvScope = interpreter.mem.get(Word(current_scope_pos.into()));
+                let scope: &EnvScope = interpreter.mem.get(u24::from(current_scope_pos));
                 (scope.parent, scope.scan_for_key(&interpreter.mem, key))
             };
 
             if let Some(value_offset) = value_offset {
                 // Read the ShimValue from the byte offset
                 let val: ShimValue = unsafe {
-                    let scope: &EnvScope = interpreter.mem.get(Word(current_scope_pos.into()));
+                    let scope: &EnvScope = interpreter.mem.get(u24::from(current_scope_pos));
                     let bytes = scope.raw_bytes(&interpreter.mem);
                     let mut val_bytes = [0u8; 8];
                     std::ptr::copy_nonoverlapping(bytes[value_offset..].as_ptr(), val_bytes.as_mut_ptr(), 8);
@@ -344,7 +344,7 @@ impl Environment {
             0
         } else {
             let current: &EnvScope = unsafe {
-                mem.get(Word(self.current_scope.into()))
+                mem.get(u24::from(self.current_scope))
             };
             current.depth
         };
@@ -357,7 +357,7 @@ impl Environment {
         );
         
         // Update current scope to the new one
-        self.current_scope = scope_pos.0.into();
+        self.current_scope = scope_pos.into();
     }
 
     fn pop_scope(&mut self, mem: &MMU) -> Result<(), String> {
@@ -367,7 +367,7 @@ impl Environment {
         
         // Get the current EnvScope
         let scope: &EnvScope = unsafe {
-            mem.get(Word(self.current_scope.into()))
+            mem.get(u24::from(self.current_scope))
         };
         
         // Move to parent scope
@@ -387,7 +387,7 @@ impl Environment {
         }
         
         let scope: &EnvScope = unsafe {
-            mem.get(Word(self.current_scope.into()))
+            mem.get(u24::from(self.current_scope))
         };
         scope.depth as usize
     }
@@ -403,20 +403,20 @@ pub enum ShimValue {
     Float(f32),
     Bool(bool),
     // Memory position pointing to ShimFn structure
-    Fn(Word),
+    Fn(u24),
     BoundMethod(
         // Object
-        Word,
+        u24,
         // Fn memory position pointing to ShimFn structure
-        Word,
+        u24,
     ),
     BoundNativeMethod(
         // ShimValue followed by NativeFn
-        Word,
+        u24,
     ),
     // A function pointer doesn't fit in the ShimValue, so we need to store the
     // function pointer in interpreter memory
-    NativeFn(Word),
+    NativeFn(u24),
     // TODO: it seems like this should point to a more generic reference-counted
     // object type that all non-value types share
     String(
@@ -427,13 +427,13 @@ pub enum ShimValue {
         // position (word index into memory)
         u24,
     ),
-    List(Word),
-    Dict(Word),
-    StructDef(Word),
-    Struct(Word),
-    Native(Word),
+    List(u24),
+    Dict(u24),
+    StructDef(u24),
+    Struct(u24),
+    Native(u24),
     // For now this is really only used for GC purposes
-    Environment(Word),
+    Environment(u24),
 }
 const _: () = {
     assert!(std::mem::size_of::<ShimValue>() == 8);
@@ -482,7 +482,7 @@ pub(crate) fn format_float(val: f32) -> String {
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum StructAttribute {
     MemberInstanceOffset(u8),
-    MethodDef(Word),
+    MethodDef(u24),
 }
 
 #[derive(Debug)]
@@ -499,7 +499,7 @@ pub(crate) struct ShimFn {
     // Length of the function name string
     pub(crate) name_len: u16,
     // Memory position of the function name (stored as string)
-    pub(crate) name: Word,
+    pub(crate) name: u24,
     // The environment scope where this function was defined (for closures)
     pub(crate) captured_scope: u32,
 }
@@ -706,7 +706,7 @@ impl ShimValue {
         match self {
             ShimValue::Native(position) => unsafe {
                 let boxobj: &mut Box<dyn ShimNative> =
-                    std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
+                    std::mem::transmute(&mut interpreter.mem.mem[usize::from(*position)]);
 
                 let mutboxobj = boxobj.as_any_mut();
                 let name = type_name_of_val(mutboxobj);
@@ -758,7 +758,7 @@ impl ShimValue {
                 }
 
                 // Allocate space for each member, plus the header
-                let word_count = Word((struct_def.member_count as u32 + 1).into());
+                let word_count: u24 = (struct_def.member_count as u32 + 1).into();
                 let new_pos = alloc!(
                     interpreter.mem,
                     word_count,
@@ -766,11 +766,11 @@ impl ShimValue {
                 );
 
                 // The first word points to the StructDef
-                interpreter.mem.mem[usize::from(new_pos.0)] = u64::from(struct_def_pos.0);
+                interpreter.mem.mem[usize::from(new_pos)] = u64::from(*struct_def_pos);
 
                 // The remaining words get copies of the arguments to the initializer
                 for (idx, arg) in args.args.iter().enumerate() {
-                    interpreter.mem.mem[usize::from(new_pos.0) + 1 + idx] = arg.to_u64();
+                    interpreter.mem.mem[usize::from(new_pos) + 1 + idx] = arg.to_u64();
                 }
 
                 Ok(CallResult::ReturnValue(ShimValue::Struct(new_pos)))
@@ -790,7 +790,7 @@ impl ShimValue {
         match self {
             ShimValue::Dict(position) => {
                 let dict: &mut ShimDict = unsafe {
-                    std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)])
+                    std::mem::transmute(&mut interpreter.mem.mem[usize::from(*position)])
                 };
                 Ok(dict)
             },
@@ -804,7 +804,7 @@ impl ShimValue {
         match self {
             ShimValue::Dict(position) => {
                 let dict: &ShimDict = unsafe {
-                    std::mem::transmute(&interpreter.mem.mem[usize::from(position.0)])
+                    std::mem::transmute(&interpreter.mem.mem[usize::from(*position)])
                 };
                 Ok(dict)
             },
@@ -818,7 +818,7 @@ impl ShimValue {
         match self {
             ShimValue::List(position) => {
                 unsafe {
-                    Ok(std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]))
+                    Ok(std::mem::transmute(&mut interpreter.mem.mem[usize::from(*position)]))
                 }
             },
             _ => {
@@ -831,7 +831,7 @@ impl ShimValue {
         match self {
             ShimValue::List(position) => {
                 unsafe {
-                    Ok(std::mem::transmute(&mem.mem[usize::from(position.0)]))
+                    Ok(std::mem::transmute(&mem.mem[usize::from(*position)]))
                 }
             },
             _ => {
@@ -848,7 +848,7 @@ impl ShimValue {
         match self {
             ShimValue::Native(position) => unsafe {
                 let ptr: *const Box<dyn ShimNative> =
-                    std::mem::transmute(&mem.mem[usize::from(position.0)]);
+                    std::mem::transmute(&mem.mem[usize::from(*position)]);
                 Ok(&*ptr)
             },
             _ => {
@@ -865,7 +865,7 @@ impl ShimValue {
         match self {
             ShimValue::Native(position) => unsafe {
                 let ptr: *mut Box<dyn ShimNative> =
-                    std::mem::transmute(&mut mem.mem[usize::from(position.0)]);
+                    std::mem::transmute(&mut mem.mem[usize::from(*position)]);
                 Ok(&mut *ptr)
             },
             _ => {
@@ -942,7 +942,7 @@ impl ShimValue {
             (ShimValue::List(position), ShimValue::Integer(idx)) => {
                 unsafe {
                     let lst: &ShimList =
-                        std::mem::transmute(&interpreter.mem.mem[usize::from(position.0)]);
+                        std::mem::transmute(&interpreter.mem.mem[usize::from(*position)]);
                     lst.get(&interpreter.mem, *idx as isize)
                 }
             },
@@ -965,14 +965,14 @@ impl ShimValue {
             (ShimValue::List(position), ShimValue::Integer(index)) => {
                 let index = *index as usize;
                 let list: &mut ShimList = unsafe {
-                    std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)])
+                    std::mem::transmute(&mut interpreter.mem.mem[usize::from(*position)])
                 };
                 list.set(&mut interpreter.mem, index as isize, *value)?;
                 Ok(())
             }
             (ShimValue::Dict(position), index) => {
                 let dict: &mut ShimDict = unsafe {
-                    std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)])
+                    std::mem::transmute(&mut interpreter.mem.mem[usize::from(*position)])
                 };
 
                 dict.set(interpreter, *index, *value)
@@ -1019,7 +1019,7 @@ impl ShimValue {
             ShimValue::Struct(pos) => {
                 unsafe {
                     let def_pos: u64 = *mem.get(*pos);
-                    let def_pos: Word = Word((def_pos as u32).into());
+                    let def_pos: u24 = u24::from(def_pos as u32);
                     let def: &StructDef = mem.get(def_pos);
                     
                     // Get the struct name
@@ -1235,7 +1235,7 @@ impl ShimValue {
             ShimValue::Dict(position) => {
                 let dict: &mut ShimDict = unsafe {
                     let ptr: &mut ShimDict =
-                        std::mem::transmute(&mut interpreter.mem.mem[usize::from(position.0)]);
+                        std::mem::transmute(&mut interpreter.mem.mem[usize::from(*position)]);
                     ptr
                 };
 
@@ -1298,14 +1298,14 @@ impl ShimValue {
                 if ident == b"__type__" {
                     unsafe {
                         let def_pos: u64 = *interpreter.mem.get(*pos);
-                        let def_pos: Word = Word((def_pos as u32).into());
+                        let def_pos: u24 = u24::from(def_pos as u32);
                         return Ok(ShimValue::StructDef(def_pos));
                     }
                 }
                 
                 unsafe {
                     let def_pos: u64 = *interpreter.mem.get(*pos);
-                    let def_pos: Word = Word((def_pos as u32).into());
+                    let def_pos: u24 = u24::from(def_pos as u32);
                     let def: &StructDef = interpreter.mem.get(def_pos);
                     for (attr, loc) in def.lookup.iter() {
                         if ident == attr {
@@ -1412,7 +1412,7 @@ impl ShimValue {
             ShimValue::Struct(pos) => {
                 unsafe {
                     let def_pos: u64 = *interpreter.mem.get(*pos);
-                    let def_pos: Word = Word((def_pos as u32).into());
+                    let def_pos: u24 = u24::from(def_pos as u32);
                     let def: &StructDef = interpreter.mem.get(def_pos);
                     for (attr, loc) in def.lookup.iter() {
                         if ident == attr {
@@ -1513,7 +1513,7 @@ impl Interpreter {
             
             // Get the EnvScope
             let scope: &EnvScope = unsafe {
-                self.mem.get(Word(current_scope_pos.into()))
+                self.mem.get(u24::from(current_scope_pos))
             };
             
             // Walk the contiguous data block and print entries
@@ -1533,7 +1533,7 @@ impl Interpreter {
                     ShimValue::Struct(pos) => {
                         unsafe {
                             let def_pos: u64 = *self.mem.get(pos);
-                            let def_pos: Word = Word((def_pos as u32).into());
+                            let def_pos: u24 = u24::from(def_pos as u32);
                             let def: &StructDef = self.mem.get(def_pos);
                             for (attr, loc) in def.lookup.iter() {
                                 match loc {
@@ -1579,11 +1579,11 @@ impl Interpreter {
         //self.print_env(env);
         
         unsafe {
-            let _scope: &EnvScope = self.mem.get(Word(env.current_scope.into()));
+            let _scope: &EnvScope = self.mem.get(u24::from(env.current_scope));
         }
 
         let mut roots: Vec<ShimValue> = Vec::new();
-        roots.push(ShimValue::Environment(Word(env.current_scope.into())));
+        roots.push(ShimValue::Environment(u24::from(env.current_scope)));
         
         // Now create GC and process roots
         let mut gc = {
@@ -1595,7 +1595,7 @@ impl Interpreter {
     }
 
     pub fn create(config: &Config, program: Program) -> Self {
-        let mmu = MMU::with_capacity(Word((config.memory_space_bytes / 8).into()));
+        let mmu = MMU::with_capacity(u24::from(config.memory_space_bytes / 8));
 
         Self {
             mem: mmu,
@@ -2228,13 +2228,13 @@ impl Interpreter {
                     };
                     let pos = alloc!(
                         self.mem,
-                        Word(7.into()),
+                        u24::from(7u32),
                         &format!("ByteCode::CreateStruct def PC {pc}")
                     );
 
                     unsafe {
                         let ptr: *mut StructDef =
-                            std::mem::transmute(&mut self.mem.mem[usize::from(pos.0)]);
+                            std::mem::transmute(&mut self.mem.mem[usize::from(pos)]);
                         ptr.write(StructDef {
                             name,
                             member_count,
@@ -2266,7 +2266,7 @@ impl Interpreter {
 
     pub fn describe_memory(&self, env: &Environment) -> HashMap<usize, MemDescriptor> {
         let mut roots: Vec<ShimValue> = Vec::new();
-        roots.push(ShimValue::Environment(Word(env.current_scope.into())));
+        roots.push(ShimValue::Environment(u24::from(env.current_scope)));
         
         // Now create GC and process roots
         let mut gc = {

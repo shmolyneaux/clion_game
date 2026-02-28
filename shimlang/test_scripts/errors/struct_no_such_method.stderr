@@ -2,4 +2,4 @@
  2 | let f = Foo(1);
  3 | f.nonexistent();
       ^^^^^^^^^^^^
-Error: Ident "nonexistent" not found for Struct(Word(u24([0, 0, 15])))
+Error: Ident "nonexistent" not found for Struct(u24([0, 0, 15]))

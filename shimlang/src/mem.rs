@@ -1,5 +1,4 @@
 use std::ops::{Add, Sub, AddAssign, SubAssign};
-use std::any::TypeId;
 use std::ops::Range;
 use shm_tracy::*;
 use shm_tracy::zone_scoped;
@@ -29,12 +28,6 @@ impl Default for Config {
 #[repr(packed)]
 pub struct u24(pub(crate) [u8; 3]);
 pub(crate) const MAX_U24: u32 = 0xFFFFFF;
-
-impl From<Word> for usize {
-    fn from(val: Word) -> Self {
-        val.0.into()
-    }
-}
 
 impl From<usize> for u24 {
     fn from(val: usize) -> Self {
@@ -73,112 +66,98 @@ impl From<u24> for u64 {
     }
 }
 
-/**
- * The interpreter stores memory in 8-byte words. Each `Word` is
- * an index into the interpreter memory.
- */
-#[cfg_attr(feature = "facet", derive(Facet))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Word(pub u24);
+impl Add<u8> for u24 {
+    type Output = u24;
 
-impl Add<u8> for Word {
-    type Output = Word;
-
-    fn add(self, rhs: u8) -> Word {
+    fn add(self, rhs: u8) -> u24 {
         self + rhs as u32
     }
 }
 
-impl Add<i32> for Word {
-    type Output = Word;
+impl Add<i32> for u24 {
+    type Output = u24;
 
-    fn add(self, rhs: i32) -> Word {
-        let val = (u32::from(self.0) as i32 + rhs) as u32;
-        Word(val.into())
+    fn add(self, rhs: i32) -> u24 {
+        let val = (u32::from(self) as i32 + rhs) as u32;
+        val.into()
     }
 }
 
-impl Add<u32> for Word {
-    type Output = Word;
+impl Add<u32> for u24 {
+    type Output = u24;
 
-    fn add(self, rhs: u32) -> Word {
-        Word((u32::from(self.0) + rhs).into())
+    fn add(self, rhs: u32) -> u24 {
+        (u32::from(self) + rhs).into()
     }
 }
 
-impl Sub<u32> for Word {
-    type Output = Word;
+impl Sub<u32> for u24 {
+    type Output = u24;
 
-    fn sub(self, rhs: u32) -> Word {
-        Word((u32::from(self.0) - rhs).into())
+    fn sub(self, rhs: u32) -> u24 {
+        (u32::from(self) - rhs).into()
     }
 }
 
-impl Add<Word> for Word {
-    type Output = Word;
+impl Add<u24> for u24 {
+    type Output = u24;
 
-    fn add(self, rhs: Word) -> Word {
-        Word((u32::from(self.0) + u32::from(rhs.0)).into())
+    fn add(self, rhs: u24) -> u24 {
+        (u32::from(self) + u32::from(rhs)).into()
     }
 }
 
-impl Sub<Word> for Word {
-    type Output = Word;
+impl Sub<u24> for u24 {
+    type Output = u24;
 
-    fn sub(self, rhs: Word) -> Word {
-        Word((u32::from(self.0) - u32::from(rhs.0)).into())
+    fn sub(self, rhs: u24) -> u24 {
+        (u32::from(self) - u32::from(rhs)).into()
     }
 }
 
-impl AddAssign<u32> for Word {
+impl AddAssign<u32> for u24 {
     fn add_assign(&mut self, rhs: u32) {
-        self.0 = (u32::from(self.0) + rhs).into()
+        *self = (u32::from(*self) + rhs).into()
     }
 }
 
-impl SubAssign<u32> for Word {
+impl SubAssign<u32> for u24 {
     fn sub_assign(&mut self, rhs: u32) {
-        self.0 = (u32::from(self.0) - rhs).into()
+        *self = (u32::from(*self) - rhs).into()
     }
 }
 
-impl AddAssign<Word> for Word {
-    fn add_assign(&mut self, rhs: Word) {
-        self.0 = (u32::from(self.0) + u32::from(rhs.0)).into()
+impl AddAssign<u24> for u24 {
+    fn add_assign(&mut self, rhs: u24) {
+        *self = (u32::from(*self) + u32::from(rhs)).into()
     }
 }
 
-impl SubAssign<Word> for Word {
-    fn sub_assign(&mut self, rhs: Word) {
-        self.0 = (u32::from(self.0) - u32::from(rhs.0)).into()
-    }
-}
-
-impl From<usize> for Word {
-    fn from(val: usize) -> Word {
-        Word(val.into())
+impl SubAssign<u24> for u24 {
+    fn sub_assign(&mut self, rhs: u24) {
+        *self = (u32::from(*self) - u32::from(rhs)).into()
     }
 }
 
 #[derive(Debug, Copy, Clone)]
 pub struct FreeBlock {
     #[cfg(feature = "dev")]
-    pub pos: Word,
+    pub pos: u24,
     #[cfg(feature = "dev")]
-    pub size: Word,
+    pub size: u24,
 
     #[cfg(not(feature = "dev"))]
-    pos: Word,
+    pos: u24,
     #[cfg(not(feature = "dev"))]
-    size: Word,
+    size: u24,
 }
 
 impl FreeBlock {
-    fn new(pos: Word, size: Word) -> Self {
+    fn new(pos: u24, size: u24) -> Self {
         Self { pos, size }
     }
 
-    pub fn end(&self) -> Word {
+    pub fn end(&self) -> u24 {
         self.pos + self.size
     }
 }
@@ -227,12 +206,12 @@ impl MMU {
         }
     }
 
-    pub(crate) fn with_capacity(word_count: Word) -> Self {
-        let mem = vec![0; usize::from(word_count.0)];
+    pub(crate) fn with_capacity(word_count: u24) -> Self {
+        let mem = vec![0; usize::from(word_count)];
         // Start the free list at word 1, reserving word 0 as a sentinel.
         // This ensures no allocation ever returns position 0, which is used
         // as a "null" / "no scope" sentinel by consumers.
-        let free_list = vec![FreeBlock::new(Word(1.into()), word_count - Word(1.into()))];
+        let free_list = vec![FreeBlock::new(1.into(), word_count - u24::from(1u32))];
         Self {
             mem: mem,
             free_list: free_list,
@@ -245,43 +224,39 @@ impl MMU {
     }
     */
 
-    pub(crate) unsafe fn get<T: 'static>(&self, word: Word) -> &T {
-        if TypeId::of::<T>() == TypeId::of::<Word>() {
-            panic!("Can't MMU::get<Word>");
-        }
-
+    pub(crate) unsafe fn get<T: 'static>(&self, word: u24) -> &T {
         unsafe {
-            let ptr: *const T = std::mem::transmute(&self.mem[usize::from(word.0)]);
+            let ptr: *const T = std::mem::transmute(&self.mem[usize::from(word)]);
             &*ptr
         }
     }
 
-    pub(crate) unsafe fn get_mut<T>(&mut self, word: Word) -> &mut T {
+    pub(crate) unsafe fn get_mut<T>(&mut self, word: u24) -> &mut T {
         unsafe {
-            let ptr: *mut T = std::mem::transmute(&mut self.mem[usize::from(word.0)]);
+            let ptr: *mut T = std::mem::transmute(&mut self.mem[usize::from(word)]);
             &mut *ptr
         }
     }
 
-    pub(crate) fn alloc_and_set<T>(&mut self, value: T, _debug_name: &str) -> Word {
-        let word_count = Word((std::mem::size_of::<T>() as u32).div_ceil(8).into());
+    pub(crate) fn alloc_and_set<T>(&mut self, value: T, _debug_name: &str) -> u24 {
+        let word_count: u24 = (std::mem::size_of::<T>() as u32).div_ceil(8).into();
         let position = alloc!(self, word_count, _debug_name);
         unsafe {
-            let ptr: *mut T = std::mem::transmute(&mut self.mem[usize::from(position.0)]);
+            let ptr: *mut T = std::mem::transmute(&mut self.mem[usize::from(position)]);
             ptr.write(value);
         }
         position
     }
 
-    pub(crate) fn alloc_str_raw(&mut self, contents: &[u8]) -> Word {
+    pub(crate) fn alloc_str_raw(&mut self, contents: &[u8]) -> u24 {
         let total_len = contents.len().div_ceil(8);
-        let word_count = Word(total_len.into());
+        let word_count: u24 = total_len.into();
         let position = alloc!(self, word_count, &format!("str `{}`", debug_u8s(contents)));
 
         let bytes: &mut [u8] = unsafe {
             let u64_slice = &mut self.mem[
-                usize::from(position.0)..
-                (usize::from(position.0)+total_len)
+                usize::from(position)..
+                (usize::from(position)+total_len)
             ];
             std::slice::from_raw_parts_mut(
                 u64_slice.as_mut_ptr() as *mut u8,
@@ -296,19 +271,19 @@ impl MMU {
         position
     }
 
-    fn alloc_debug(&mut self, words: Word, msg: &str) -> Word {
+    fn alloc_debug(&mut self, words: u24, msg: &str) -> u24 {
         let result = self.alloc_no_debug(words);
-        eprintln!("Alloc {} {}: {}", usize::from(words.0), msg, usize::from(result));
+        eprintln!("Alloc {} {}: {}", usize::from(words), msg, usize::from(result));
         result
     }
 
-    pub(crate) fn alloc_no_debug(&mut self, words: Word) -> Word {
-        if u32::from(words.0) == 0u32 {
-            return Word(0.into());
+    pub(crate) fn alloc_no_debug(&mut self, words: u24) -> u24 {
+        if u32::from(words) == 0u32 {
+            return 0.into();
         }
         for idx in 0..self.free_list.len() {
             if self.free_list[idx].size >= words {
-                let returned_pos: Word = self.free_list[idx].pos;
+                let returned_pos: u24 = self.free_list[idx].pos;
 
                 if self.free_list[idx].size == words {
                     self.free_list.remove(idx);
@@ -344,12 +319,12 @@ impl MMU {
     /**
      * Returns the position in `self.mem` of the block allocated
      */
-    fn alloc(&mut self, size: Word) -> Word {
+    fn alloc(&mut self, size: u24) -> u24 {
         self.alloc_debug(size, "Unspecified alloc")
     }
 
-    pub(crate) fn free(&mut self, pos: Word, size: Word) {
-        if u32::from(size.0) == 0 || u32::from(size.0) == 0 {
+    pub(crate) fn free(&mut self, pos: u24, size: u24) {
+        if u32::from(size) == 0 || u32::from(size) == 0 {
             return;
         }
 
@@ -416,15 +391,15 @@ impl MMU {
     pub(crate) fn alloc_str(&mut self, contents: &[u8]) -> ShimValue {
         assert!(contents.len() <= u16::MAX as usize, "String length exceeds u16::MAX");
         let pos = self.alloc_str_raw(contents);
-        ShimValue::String(contents.len() as u16, 0, pos.0)
+        ShimValue::String(contents.len() as u16, 0, pos)
     }
 
-    pub(crate) fn alloc_dict_raw(&mut self) -> Word {
-        let word_count = Word((std::mem::size_of::<ShimDict>() as u32).div_ceil(8).into());
+    pub(crate) fn alloc_dict_raw(&mut self) -> u24 {
+        let word_count: u24 = (std::mem::size_of::<ShimDict>() as u32).div_ceil(8).into();
         let position = alloc!(self, word_count, "Dict");
         unsafe {
             let ptr: *mut ShimDict =
-                std::mem::transmute(&mut self.mem[usize::from(position.0)]);
+                std::mem::transmute(&mut self.mem[usize::from(position)]);
             ptr.write(ShimDict::new());
         }
         position
@@ -435,18 +410,18 @@ impl MMU {
     }
 
     pub(crate) fn alloc_list(&mut self) -> ShimValue {
-        let word_count = Word((std::mem::size_of::<ShimList>() as u32).div_ceil(8).into());
+        let word_count: u24 = (std::mem::size_of::<ShimList>() as u32).div_ceil(8).into();
         let position = alloc!(self, word_count, "List");
         unsafe {
             let ptr: *mut ShimList =
-                std::mem::transmute(&mut self.mem[usize::from(position.0)]);
+                std::mem::transmute(&mut self.mem[usize::from(position)]);
             ptr.write(ShimList::new());
         }
         ShimValue::List(position)
     }
 
     pub(crate) fn alloc_fn(&mut self, pc: u32, name: &[u8], captured_scope: u32) -> ShimValue {
-        let word_count = Word((std::mem::size_of::<ShimFn>() as u32).div_ceil(8).into());
+        let word_count: u24 = (std::mem::size_of::<ShimFn>() as u32).div_ceil(8).into();
         let position = alloc!(self, word_count, &format!("Fn `{}`", debug_u8s(name)));
 
         // Allocate the name string
@@ -454,7 +429,7 @@ impl MMU {
 
         unsafe {
             let ptr: *mut ShimFn =
-                std::mem::transmute(&mut self.mem[usize::from(position.0)]);
+                std::mem::transmute(&mut self.mem[usize::from(position)]);
             ptr.write(ShimFn { pc, name_len: name.len() as u16, name: name_pos, captured_scope });
         }
         ShimValue::Fn(position)
@@ -462,24 +437,24 @@ impl MMU {
 
     pub(crate) fn alloc_native<T: ShimNative>(&mut self, val: T) -> ShimValue {
         assert!(std::mem::size_of::<Box<dyn ShimNative>>() == 16);
-        let word_count = Word(2.into());
+        let word_count: u24 = 2.into();
         let position = alloc!(self, word_count, "Native");
         unsafe {
             let ptr: *mut Box<dyn ShimNative> =
-                std::mem::transmute(&mut self.mem[usize::from(position.0)]);
+                std::mem::transmute(&mut self.mem[usize::from(position)]);
             ptr.write(Box::new(val));
         }
         ShimValue::Native(position)
     }
 
     pub(crate) fn alloc_bound_native_fn(&mut self, obj: &ShimValue, func: NativeFn) -> ShimValue {
-        let position = alloc!(self, Word(2.into()), "Bound Native Fn");
+        let position = alloc!(self, u24::from(2u32), "Bound Native Fn");
         unsafe {
             let obj_ptr: *mut ShimValue =
-                std::mem::transmute(&mut self.mem[usize::from(position.0)]);
+                std::mem::transmute(&mut self.mem[usize::from(position)]);
             obj_ptr.write(*obj);
             let fn_ptr: *mut NativeFn = std::mem::transmute(
-                &mut self.mem[usize::from(position.0) + 1],
+                &mut self.mem[usize::from(position) + 1],
             );
             fn_ptr.write(func);
 
@@ -666,12 +641,12 @@ impl<'a> GC<'a> {
                         if self.mask.is_set(pos) {
                             continue;
                         }
-                        // Mark the ShimFn struct (8 bytes = 1 word: u32 pc + Word name)
+                        // Mark the ShimFn struct (8 bytes = 1 word: u32 pc + u24 name)
                         self.mask.set(pos, &MemDescriptor::other(pos, pos+1, "ShimFn"));
                         
                         // Mark the function name string
                         let shim_fn: &ShimFn = self.mem.get(fn_pos);
-                        vals.push(ShimValue::String(shim_fn.name_len, 0, shim_fn.name.0));
+                        vals.push(ShimValue::String(shim_fn.name_len, 0, shim_fn.name));
                     },
                     ShimValue::List(pos) => {
                         let pos: usize = pos.into();
@@ -865,7 +840,7 @@ impl<'a> GC<'a> {
                         }
 
                         if scope.parent != 0.into() {
-                            vals.push(ShimValue::Environment(Word(scope.parent)));
+                            vals.push(ShimValue::Environment(scope.parent));
                         }
                     }
                 }
