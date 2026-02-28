@@ -1294,9 +1294,7 @@ impl ShimValue {
             ShimValue::Struct(def_pos, pos) => {
                 // Handle __type__ special attribute
                 if ident == b"__type__" {
-                    unsafe {
-                        return Ok(ShimValue::StructDef(*def_pos));
-                    }
+                    return Ok(ShimValue::StructDef(*def_pos));
                 }
                 
                 unsafe {
