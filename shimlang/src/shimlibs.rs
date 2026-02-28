@@ -640,9 +640,9 @@ impl ShimDict {
         let old_entries_word = self.entries;
         let old_entries = self.entries_array(interpreter);
 
-        let free_word_count = Word((old_capacity * 3).into());
-        let alloc_word_count = Word((self.capacity() * 3).into());
-        self.entries = alloc!(interpreter.mem, alloc_word_count, "Dict entry array").0;
+        let free_word_count: u24 = (old_capacity * 3).into();
+        let alloc_word_count: u24 = (self.capacity() * 3).into();
+        self.entries = alloc!(interpreter.mem, alloc_word_count, "Dict entry array");
 
         let new_entries = self.entries_mut(interpreter);
 
@@ -666,7 +666,7 @@ impl ShimDict {
             indices.set(index_idx, entry_idx);
         }
 
-        interpreter.mem.free(Word(old_entries_word), free_word_count);
+        interpreter.mem.free(old_entries_word, free_word_count);
     }
 
     fn indices_stride_bytes(&self, size: usize) -> usize {
@@ -702,20 +702,20 @@ impl ShimDict {
      */
     fn clear_and_alloc_indices(&mut self, interpreter: &mut Interpreter, old_size: usize) {
         let new_size = self.index_size();
-        let free_word_count = if old_size == 0 {
-            Word(0.into())
+        let free_word_count: u24 = if old_size == 0 {
+            0.into()
         } else {
-            Word(old_size.div_ceil(8 / self.indices_stride_bytes(old_size)).into())
+            old_size.div_ceil(8 / self.indices_stride_bytes(old_size)).into()
         };
-        let alloc_word_count = if new_size == 0 {
-            Word(0.into())
+        let alloc_word_count: u24 = if new_size == 0 {
+            0.into()
         } else {
-            Word(new_size.div_ceil(8 / self.indices_stride_bytes(new_size)).into())
+            new_size.div_ceil(8 / self.indices_stride_bytes(new_size)).into()
         };
 
 
-        interpreter.mem.free(Word(self.indices), free_word_count);
-        self.indices = alloc!(interpreter.mem, alloc_word_count, "Dict index array").0;
+        interpreter.mem.free(self.indices, free_word_count);
+        self.indices = alloc!(interpreter.mem, alloc_word_count, "Dict index array");
 
         match self.typed_indices(interpreter) {
             TypedIndices::Zero => (),
@@ -993,8 +993,8 @@ impl ShimDict {
             self.clear_and_alloc_indices(interpreter, old_size);
             
             // Free the old entries
-            let free_word_count = Word((old_capacity * 3).into());
-            interpreter.mem.free(Word(self.entries), free_word_count);
+            let free_word_count: u24 = (old_capacity * 3).into();
+            interpreter.mem.free(self.entries, free_word_count);
             self.entries = 0.into();
             self.entry_count = 0;
             return;
@@ -1108,8 +1108,8 @@ impl ShimList {
             let new_capacity = self.capacity();
 
             let old_data = usize::from(self.data);
-            let word_count: Word = new_capacity.into();
-            self.data = alloc!(mem, word_count, "List data").0;
+            let word_count: u24 = new_capacity.into();
+            self.data = alloc!(mem, word_count, "List data");
 
             let new_data = usize::from(self.data);
 
@@ -1117,7 +1117,7 @@ impl ShimList {
                 mem.mem[new_data+idx] = mem.mem[old_data+idx];
             }
 
-            mem.free(old_data.into(), Word(old_capacity.into()));
+            mem.free(old_data.into(), old_capacity.into());
         }
 
         mem.mem[usize::from(self.data)+self.len()] = val.to_u64();
