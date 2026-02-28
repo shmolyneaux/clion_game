@@ -718,7 +718,7 @@ impl<'a> GC<'a> {
                             MemDescriptor::other(pos, (offset + len).div_ceil(8), &format!("String: {} <- anon?", debug_u8s(contents)))
                         };
                         #[cfg(not(feature = "gc_debug"))]
-                        let _ = s;
+                        let _ = s; // suppress unused binding warning
                         // TODO: check this...
                         for idx in pos..(pos + (offset + len).div_ceil(8)) {
                             mark_bit!(self.mask, idx, desc);
