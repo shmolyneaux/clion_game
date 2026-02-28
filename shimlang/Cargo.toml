@@ -15,4 +15,5 @@ facet-reflect = { path = "../facet/facet-reflect" }
 [features]
 default = ["dev"]
 facet = ["dep:facet", "dep:facet-reflect"]
-dev = []
+dev = ["gc_debug"]
+gc_debug = []
