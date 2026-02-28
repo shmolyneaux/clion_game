@@ -4,4 +4,4 @@
                         ^
  5 |     }
  6 | }
-Error: Operation '+' not supported between String(12, 0, u24([0, 0, 18])) and Integer(5)
+Error: Operation '+' not supported between not a number and 5

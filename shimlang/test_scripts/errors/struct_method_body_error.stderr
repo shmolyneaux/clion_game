@@ -4,4 +4,4 @@
                     ^
  5 |     }
  6 | }
-Error: Operation '+' not supported between Integer(1) and String(6, 0, u24([0, 0, 81]))
+Error: Operation '+' not supported between 1 and string

@@ -597,7 +597,7 @@ impl ShimDict {
     pub(crate) fn get(&self, interpreter: &mut Interpreter, key: ShimValue) -> Result<ShimValue, String> {
         // Check if dict is empty
         if self.size_pow == 0 {
-            return Err(format!("Key {key:?} not in dict"));
+            return Err(format!("Key {} not in dict", key.to_string_mem(&interpreter.mem)));
         }
         
         match self.probe(interpreter, key)? {
@@ -605,7 +605,7 @@ impl ShimDict {
                 Ok(entry.value)
             },
             DictSlot::UnoccupiedU8(..) => {
-                Err(format!("Key {key:?} not in dict"))
+                Err(format!("Key {} not in dict", key.to_string_mem(&interpreter.mem)))
             },
             _ => todo!(),
         }
@@ -1359,9 +1359,9 @@ pub(crate) fn compare_values(interpreter: &mut Interpreter, a: &ShimValue, b: &S
                     return Ok(Ordering::Equal);
                 }
             }
-            Err(format!("Cannot compare {:?} and {:?}", a, b))
+            Err(format!("Cannot compare {} and {}", a.to_string_mem(&interpreter.mem), b.to_string_mem(&interpreter.mem)))
         },
-        _ => Err(format!("Cannot compare {:?} and {:?}", a, b)),
+        _ => Err(format!("Cannot compare {} and {}", a.to_string_mem(&interpreter.mem), b.to_string_mem(&interpreter.mem))),
     }
 }
 
