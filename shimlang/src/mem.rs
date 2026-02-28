@@ -616,7 +616,7 @@ impl Bitmask {
                         }
                     } else {
                         if let Some(start) = start_of_run {
-                            ranges.push(start..i);
+                            ranges.push(start..idx*64 + i);
                             start_of_run = None;
                         }
                     }
@@ -757,7 +757,6 @@ impl<'a> GC<'a> {
                         }
                     },
                     ShimValue::Struct(pos) => {
-                        dbg!(pos);
                         let pos: usize = pos.into();
                         if self.mask.is_set(pos) {
                             continue;
