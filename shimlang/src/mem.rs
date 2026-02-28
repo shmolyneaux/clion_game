@@ -211,7 +211,7 @@ impl MMU {
         // Start the free list at word 1, reserving word 0 as a sentinel.
         // This ensures no allocation ever returns position 0, which is used
         // as a "null" / "no scope" sentinel by consumers.
-        let free_list = vec![FreeBlock::new(1.into(), word_count - u24::from(1u32))];
+        let free_list = vec![FreeBlock::new(1u32.into(), word_count - u24::from(1u32))];
         Self {
             mem: mem,
             free_list: free_list,
@@ -448,7 +448,7 @@ impl MMU {
     }
 
     pub(crate) fn alloc_bound_native_fn(&mut self, obj: &ShimValue, func: NativeFn) -> ShimValue {
-        let position = alloc!(self, u24::from(2u32), "Bound Native Fn");
+        let position = alloc!(self, 2u32.into(), "Bound Native Fn");
         unsafe {
             let obj_ptr: *mut ShimValue =
                 std::mem::transmute(&mut self.mem[usize::from(position)]);

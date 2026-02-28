@@ -2228,7 +2228,7 @@ impl Interpreter {
                     };
                     let pos = alloc!(
                         self.mem,
-                        u24::from(7u32),
+                        7u32.into(),
                         &format!("ByteCode::CreateStruct def PC {pc}")
                     );
 
