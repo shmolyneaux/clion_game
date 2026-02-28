@@ -723,7 +723,7 @@ impl<'a> GC<'a> {
                         }
 
                         // Mark the space for the dict struct
-                        let header_desc = MemDescriptor::other(pos, (pos + std::mem::size_of::<ShimDict>().div_ceil(8)), "dict header");
+                        let header_desc = MemDescriptor::other(pos, pos + std::mem::size_of::<ShimDict>().div_ceil(8), "dict header");
                         for idx in pos..(pos + std::mem::size_of::<ShimDict>().div_ceil(8)) {
                             self.mask.set(idx, &header_desc);
                         }
@@ -732,7 +732,7 @@ impl<'a> GC<'a> {
 
                         // Mark the indices array
                         let indices_pos: usize = dict.indices.into();
-                        let indices_desc = MemDescriptor::other(indices_pos, (indices_pos + size), "dict index");
+                        let indices_desc = MemDescriptor::other(indices_pos, indices_pos + size, "dict index");
                         // TODO: I'm pretty sure this is wrong? The stride of the indices is 1 byte for dicts with less than 256 entries
                         for idx in indices_pos..(indices_pos + size) {
                             self.mask.set(idx, &indices_desc);
@@ -740,7 +740,7 @@ impl<'a> GC<'a> {
 
                         // Mark the entries array
                         let entries_pos: usize = dict.entries.into();
-                        let entries_desc = MemDescriptor::other(entries_pos, (entries_pos + size*3), "dict index");
+                        let entries_desc = MemDescriptor::other(entries_pos, entries_pos + size*3, "dict index");
                         for idx in entries_pos..(entries_pos + size*3) {
                             self.mask.set(idx, &entries_desc);
                         }
@@ -753,7 +753,7 @@ impl<'a> GC<'a> {
                         let def: &StructDef = self.mem.get(pos.into());
                         let desc = MemDescriptor::other(
                             pos,
-                            (pos + def.mem_size()),
+                            pos + def.mem_size(),
                             &format!("struct {}", debug_u8s(&def.name)),
                         );
                         for idx in pos..(pos + def.mem_size()) {
@@ -775,7 +775,7 @@ impl<'a> GC<'a> {
                         }
                         let desc = MemDescriptor::struct_desc(
                             pos,
-                            (pos + def.member_count as usize),
+                            pos + def.member_count as usize,
                             "TODO struct typename".to_string(),
                             members
                         );
@@ -848,7 +848,7 @@ impl<'a> GC<'a> {
                         // Chunk of memory that store the EnvScope metadata
                         let desc = MemDescriptor::env_header(
                             pos,
-                            (pos + std::mem::size_of::<EnvScope>().div_ceil(8)),
+                            pos + std::mem::size_of::<EnvScope>().div_ceil(8),
                             "Envscope header",
                         );
                         for bit in pos..(pos + std::mem::size_of::<EnvScope>().div_ceil(8)) {

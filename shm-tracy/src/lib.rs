@@ -25,9 +25,7 @@ pub struct TracyZone {
 
 impl Drop for TracyZone {
     fn drop(&mut self) {
-        unsafe {
-            tracy_zone_end(self.ctx);
-        }
+        tracy_zone_end(self.ctx);
     }
 }
 
