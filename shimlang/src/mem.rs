@@ -48,6 +48,12 @@ impl From<u32> for u24 {
     }
 }
 
+impl From<u64> for u24 {
+    fn from(val: u64) -> Self {
+        (val as u32).into()
+    }
+}
+
 impl From<u24> for u32 {
     fn from(val: u24) -> u32 {
         u32::from_be_bytes([0, val.0[0], val.0[1], val.0[2]])
@@ -447,6 +453,14 @@ impl MMU {
         ShimValue::Native(position)
     }
 
+    pub(crate) fn alloc_bound_method(&mut self, obj: &ShimValue, func_pos: u24) -> ShimValue {
+        let position = alloc!(self, u24::from(2), "Bound Method");
+        self.mem[usize::from(position)] = obj.to_u64();
+        self.mem[usize::from(position)+1] = u64::from(func_pos);
+
+        ShimValue::BoundMethod(position)
+    }
+
     pub(crate) fn alloc_bound_native_fn(&mut self, obj: &ShimValue, func: NativeFn) -> ShimValue {
         let position = alloc!(self, 2u32.into(), "Bound Native Fn");
         unsafe {
@@ -650,6 +664,9 @@ impl<'a> GC<'a> {
                     },
                     ShimValue::List(pos) => {
                         let pos: usize = pos.into();
+                        if self.mask.is_set(pos) {
+                            continue;
+                        }
                         let lst: &ShimList = self.mem.get(pos.into());
                         for idx in 0..lst.len() {
                             vals.push(lst.get(self.mem, idx as isize).unwrap());
@@ -662,10 +679,13 @@ impl<'a> GC<'a> {
                         }
                     },
                     s @ ShimValue::String(len, offset, pos) => {
+                        let pos: usize = usize::from(pos);
+                        if self.mask.is_set(pos) {
+                            continue;
+                        }
                         let contents = s.string_from_mem(&self.mem).unwrap();
                         let len = len as usize;
                         let offset = offset as usize;
-                        let pos: usize = usize::from(pos);
                         let desc = MemDescriptor::other(pos, (offset + len).div_ceil(8), &format!("String: {} <- anon?", debug_u8s(contents)));
                         // TODO: check this...
                         for idx in pos..(pos + (offset + len).div_ceil(8)) {
@@ -674,6 +694,9 @@ impl<'a> GC<'a> {
                     },
                     ShimValue::Dict(pos) => {
                         let pos: usize = pos.into();
+                        if self.mask.is_set(pos) {
+                            continue;
+                        }
                         let dict: &ShimDict = std::mem::transmute(&self.mem.mem[pos]);
                         let u64_slice = &self.mem.mem[
                             usize::from(dict.entries)..
@@ -766,10 +789,16 @@ impl<'a> GC<'a> {
                     },
                     ShimValue::NativeFn(pos) => {
                         let pos: usize = pos.into();
+                        if self.mask.is_set(pos) {
+                            continue;
+                        }
                         self.mask.set(pos, &MemDescriptor::other(pos, pos+1, "NativeFn"));
                     },
                     ShimValue::Native(pos) => {
                         let pos: usize = pos.into();
+                        if self.mask.is_set(pos) {
+                            continue;
+                        }
                         assert!(std::mem::size_of::<Box<dyn ShimNative>>() == 16);
                         self.mask.set(pos, &MemDescriptor::other(pos, pos+2, "Native"));
                         self.mask.set(pos+1, &MemDescriptor::other(pos, pos+2, "Native"));
@@ -778,15 +807,25 @@ impl<'a> GC<'a> {
 
                         vals.extend(ptr.gc_vals());
                     },
-                    ShimValue::BoundMethod(pos, fn_pos) => {
-                        // Mark the bound struct
-                        let val = ShimValue::Struct(pos);
-                        vals.push(val);
-                        // Mark the function
-                        vals.push(ShimValue::Fn(fn_pos));
+                    ShimValue::BoundMethod(pos) => {
+                        let pos: usize = pos.into();
+                        if self.mask.is_set(pos) {
+                            continue;
+                        }
+                        // Mark the 2 words used to store the BoundMethod
+                        self.mask.set(pos, &MemDescriptor::other(pos, pos+1, "Bound Method Obj"));
+                        self.mask.set(pos+1, &MemDescriptor::other(pos+1, pos+2, "Bound Method fn"));
+
+                        let obj = ShimValue::from_u64(self.mem.mem[pos]);
+                        // Set up the
+                        vals.push(obj);
+                        vals.push(ShimValue::Fn((pos+1).into()));
                     },
                     ShimValue::BoundNativeMethod(pos) => {
                         let pos: usize = pos.into();
+                        if self.mask.is_set(pos) {
+                            continue;
+                        }
                         // Native ShimValue
                         self.mask.set(pos, &MemDescriptor::other(pos, pos+2, "BoundNativeMethod"));
                         // Pointer to the fn
@@ -798,10 +837,13 @@ impl<'a> GC<'a> {
                         vals.push(ShimValue::Native(pos.into()));
                     },
                     ShimValue::Environment(pos) => {
+                        let pos: usize = pos.into();
+                        if self.mask.is_set(pos) {
+                            continue;
+                        }
                         let scope: &EnvScope = self.mem.get(pos);
 
                         // Chunk of memory that store the EnvScope metadata
-                        let pos: usize = pos.into();
                         let desc = MemDescriptor::env_header(
                             pos,
                             (pos + std::mem::size_of::<EnvScope>().div_ceil(8)),

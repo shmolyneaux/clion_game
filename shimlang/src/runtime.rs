@@ -405,9 +405,7 @@ pub enum ShimValue {
     // Memory position pointing to ShimFn structure
     Fn(u24),
     BoundMethod(
-        // Object
-        u24,
-        // Fn memory position pointing to ShimFn structure
+        // ShimValue followed by ShimFn struct in memory
         u24,
     ),
     BoundNativeMethod(
@@ -730,10 +728,14 @@ impl ShimValue {
                 let shim_fn: &ShimFn = unsafe { interpreter.mem.get(*fn_pos) };
                 Ok(CallResult::PC(shim_fn.pc, shim_fn.captured_scope))
             }
-            ShimValue::BoundMethod(pos, fn_pos) => {
+            ShimValue::BoundMethod(pos) => {
+                let pos: usize = (*pos).into();
+                let obj = unsafe { ShimValue::from_u64(interpreter.mem.mem[pos]) };
+                let fn_pos_u64: u64 = interpreter.mem.mem[pos+1];
+                let fn_pos: u24 = u24::from(fn_pos_u64);
                 // push struct pos to start of arg list then return the pc of the method
-                args.args.insert(0, ShimValue::Struct(*pos));
-                let shim_fn: &ShimFn = unsafe { interpreter.mem.get(*fn_pos) };
+                args.args.insert(0, obj);
+                let shim_fn: &ShimFn = unsafe { interpreter.mem.get(fn_pos) };
                 Ok(CallResult::PC(shim_fn.pc, shim_fn.captured_scope))
             }
             ShimValue::BoundNativeMethod(pos) => {
@@ -1314,8 +1316,7 @@ impl ShimValue {
                                     Ok(*interpreter.mem.get(*pos + *offset as u32 + 1))
                                 }
                                 StructAttribute::MethodDef(fn_pos) => {
-                                    // Return the bound method with the pre-allocated function
-                                    Ok(ShimValue::BoundMethod(*pos, *fn_pos))
+                                    Ok(interpreter.mem.alloc_bound_method(self, *fn_pos))
                                 }
                             };
                         }

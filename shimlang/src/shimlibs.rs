@@ -241,6 +241,10 @@ impl ShimNative for RangeNative {
         format!("Range({}, {})", self.start.to_string(interpreter), self.end.to_string(interpreter))
     }
 
+    fn to_string_mem(&self, mem: &MMU) -> String {
+        format!("Range({}, {})", self.start.to_string_mem(mem), self.end.to_string_mem(mem))
+    }
+
     fn get_attr(&self, self_as_val: &ShimValue, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
         if ident == b"step" {
             fn shim_range_step(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
@@ -1814,7 +1818,7 @@ pub(crate) fn get_type_name(value: &ShimValue) -> &'static str {
         ShimValue::Float(_) => "float",
         ShimValue::Bool(_) => "bool",
         ShimValue::Fn(_) => "function",
-        ShimValue::BoundMethod(_, _) => "bound method",
+        ShimValue::BoundMethod(..) => "bound method",
         ShimValue::BoundNativeMethod(_) => "bound native method",
         ShimValue::NativeFn(_) => "native function",
         ShimValue::String(..) => "string",
