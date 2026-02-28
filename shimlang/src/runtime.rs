@@ -625,14 +625,14 @@ macro_rules! numeric_op {
                     result
                 } else {
                     Err(format!(
-                        "Operation '{}' not supported between {:?} and {:?}",
-                        stringify!($op), $lhs, $rhs
+                        "Operation '{}' not supported between {} and {}",
+                        stringify!($op), $lhs.to_string_mem(&$interpreter.mem), $rhs.to_string_mem(&$interpreter.mem)
                     ))
                 }
             },
             (a, b) => Err(format!(
-                "Operation '{}' not supported between {:?} and {:?}",
-                stringify!($op), a, b
+                "Operation '{}' not supported between {} and {}",
+                stringify!($op), a.to_string_mem(&$interpreter.mem), b.to_string_mem(&$interpreter.mem)
             )),
         }
     };
@@ -695,7 +695,7 @@ impl ShimValue {
             ShimValue::None => fnv1a_hash(&[0x00]),
             ShimValue::Bool(false) => fnv1a_hash(&[0x00]),
             ShimValue::Bool(true) => fnv1a_hash(&[0x01]),
-            _ => return Err(format!("Can't hash {:?}", self))
+            _ => return Err(format!("Can't hash {}", self.to_string_mem(&interpreter.mem)))
         };
 
         Ok(hashcode as u32)
@@ -714,7 +714,7 @@ impl ShimValue {
                     _ => Err(format!("Can't get {} as {}", name, type_name::<T>()))
                 }
             },
-            _ => Err(format!("Can't try_into non-native {:?}", self))
+            _ => Err(format!("Can't try_into non-native {}", self.to_string_mem(&interpreter.mem)))
         }
     }
 
@@ -780,7 +780,7 @@ impl ShimValue {
                 Ok(CallResult::ReturnValue(native_fn(interpreter, args)?))
             }
             other => Err(format!(
-                "Can't call value {:?} as a function",
+                "Can't call value {} as a function",
                 other.to_string(interpreter)
             )),
         }
@@ -951,7 +951,7 @@ impl ShimValue {
 
                 dict.get(interpreter, *some_key)
             }
-            (a, b) => Err(format!("Can't index {:?} with {:?}", a, b)),
+            (a, b) => Err(format!("Can't index {} with {}", a.to_string_mem(&interpreter.mem), b.to_string_mem(&interpreter.mem))),
         }
     }
 
@@ -977,7 +977,7 @@ impl ShimValue {
 
                 dict.set(interpreter, *index, *value)
             }
-            (a, b) => Err(format!("Can't set index {:?} with {:?}", a, b)),
+            (a, b) => Err(format!("Can't set index {} with {}", a.to_string_mem(&interpreter.mem), b.to_string_mem(&interpreter.mem))),
         }
     }
 
@@ -1103,8 +1103,8 @@ impl ShimValue {
                 self.get_attr(interpreter, b"add")?.call(interpreter, pending_args)
             },
             (a, b) => Err(format!(
-                "Operation '+' not supported between {:?} and {:?}",
-                a, b
+                "Operation '+' not supported between {} and {}",
+                a.to_string_mem(&interpreter.mem), b.to_string_mem(&interpreter.mem)
             )),
         }
     }
@@ -1264,9 +1264,9 @@ impl ShimValue {
                 if let Some(result) = self.try_struct_override(interpreter, b"contains", some_key) {
                     return result;
                 }
-                Err(format!("Can't `in` {:?} and {:?}", self, some_key))
+                Err(format!("Can't `in` {} and {}", self.to_string_mem(&interpreter.mem), some_key.to_string_mem(&interpreter.mem)))
             }
-            _ => Err(format!("Can't `in` {:?} and {:?}", self, some_key)),
+            _ => Err(format!("Can't `in` {} and {}", self.to_string_mem(&interpreter.mem), some_key.to_string_mem(&interpreter.mem))),
         }
     }
 
@@ -1281,11 +1281,11 @@ impl ShimValue {
         }
     }
 
-    fn neg(&self, _interpreter: &mut Interpreter) -> Result<ShimValue, String> {
+    fn neg(&self, interpreter: &mut Interpreter) -> Result<ShimValue, String> {
         match self {
             ShimValue::Float(a) => Ok(ShimValue::Float(-a)),
             ShimValue::Integer(a) => Ok(ShimValue::Integer(-a)),
-            _ => Err(format!("Can't Negate {:?}", self)),
+            _ => Err(format!("Can't Negate {}", self.to_string_mem(&interpreter.mem))),
         }
     }
 
@@ -1314,7 +1314,7 @@ impl ShimValue {
                         }
                     }
                 }
-                Err(format!("Ident {:?} not found for {:?}", debug_u8s(ident), self))
+                Err(format!("Ident {:?} not found for {}", debug_u8s(ident), self.to_string_mem(&interpreter.mem)))
             }
             ShimValue::StructDef(def_pos) => {
                 // Handle __name__ special attribute
@@ -1332,8 +1332,8 @@ impl ShimValue {
                         if ident == attr {
                             return match loc {
                                 StructAttribute::MemberInstanceOffset(_) => Err(format!(
-                                    "Can't access member {:?} on StructDef {:?}",
-                                    ident, self
+                                    "Can't access member {:?} on StructDef {}",
+                                    ident, self.to_string_mem(&interpreter.mem)
                                 )),
                                 StructAttribute::MethodDef(fn_pos) => {
                                     // Return the pre-allocated method function
@@ -1343,7 +1343,7 @@ impl ShimValue {
                         }
                     }
                 }
-                Err(format!("Ident {:?} not found for {:?}", debug_u8s(ident), self))
+                Err(format!("Ident {:?} not found for {}", debug_u8s(ident), self.to_string_mem(&interpreter.mem)))
             }
             ShimValue::String(..) => {
                 let func = match ident {
@@ -1391,7 +1391,7 @@ impl ShimValue {
             ShimValue::Native(_) => {
                 self.native(interpreter).unwrap().get_attr(self, interpreter, ident)
             }
-            val => Err(format!("Ident {:?} not available on {:?}", debug_u8s(ident), val)),
+            val => Err(format!("Ident {:?} not available on {}", debug_u8s(ident), val.to_string_mem(&interpreter.mem))),
         }
     }
 
@@ -1415,19 +1415,19 @@ impl ShimValue {
                                     Ok(())
                                 }
                                 StructAttribute::MethodDef(_) => Err(format!(
-                                    "Can't assign to struct method {:?} for {:?}",
-                                    ident, self
+                                    "Can't assign to struct method {:?} for {}",
+                                    ident, self.to_string_mem(&interpreter.mem)
                                 )),
                             };
                         }
                     }
                 }
-                Err(format!("Ident {:?} not found for {:?}", ident, self))
+                Err(format!("Ident {:?} not found for {}", debug_u8s(ident), self.to_string_mem(&interpreter.mem)))
             }
             ShimValue::Native(_) => {
                 self.native(interpreter).unwrap().set_attr(interpreter, ident, val)
             }
-            val => Err(format!("Ident {:?} not available on {:?}", ident, val)),
+            val => Err(format!("Ident {:?} not available on {}", debug_u8s(ident), val.to_string_mem(&interpreter.mem))),
         }
     }
 

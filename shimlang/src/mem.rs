@@ -24,9 +24,15 @@ impl Default for Config {
 }
 
 #[allow(non_camel_case_types)]
-#[derive(Hash, Eq, PartialOrd, Ord, Copy, Clone, Debug, PartialEq)]
+#[derive(Hash, Eq, PartialOrd, Ord, Copy, Clone, PartialEq)]
 #[repr(packed)]
 pub struct u24(pub(crate) [u8; 3]);
+
+impl std::fmt::Debug for u24 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "u24({})", u32::from(*self))
+    }
+}
 pub(crate) const MAX_U24: u32 = 0xFFFFFF;
 
 impl From<usize> for u24 {
