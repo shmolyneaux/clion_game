@@ -1339,7 +1339,7 @@ pub(crate) fn compare_values(interpreter: &mut Interpreter, a: &ShimValue, b: &S
             }
             Ok(lst_a.len().cmp(&lst_b.len()))
         },
-        (ShimValue::Struct(_), _) => {
+        (ShimValue::Struct(..), _) => {
             // Try struct method overrides for comparison operators
             if let Some(gt_result) = a.try_struct_override(interpreter, b"gt", b) {
                 let gt_val: ShimValue = gt_result?;
@@ -1825,7 +1825,7 @@ pub(crate) fn get_type_name(value: &ShimValue) -> &'static str {
         ShimValue::List(_) => "list",
         ShimValue::Dict(_) => "dict",
         ShimValue::StructDef(_) => "struct definition",
-        ShimValue::Struct(_) => "struct",
+        ShimValue::Struct(..) => "struct",
         ShimValue::Native(_) => "native object",
         ShimValue::Environment(_) => "environment",
     }

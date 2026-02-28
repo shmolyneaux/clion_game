@@ -428,7 +428,8 @@ pub enum ShimValue {
     List(u24),
     Dict(u24),
     StructDef(u24),
-    Struct(u24),
+    // Struct type followed by struct data
+    Struct(u24, u24),
     Native(u24),
     // For now this is really only used for GC purposes
     Environment(u24),
@@ -619,7 +620,7 @@ macro_rules! numeric_op {
             (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Float(*a $op *b)),
             (ShimValue::Integer(a), ShimValue::Float(b)) => Ok(ShimValue::Float((*a as f32) $op *b)),
             (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(ShimValue::Float(*a $op (*b as f32))),
-            (ShimValue::Struct(_), _) => {
+            (ShimValue::Struct(..), _) => {
                 if let Some(result) = $lhs.try_struct_override($interpreter, $method, $rhs) {
                     result
                 } else {
@@ -641,7 +642,7 @@ impl ShimValue {
     /// Try to call a named method on a struct as an operator override.
     /// Returns None if self is not a Struct or the method doesn't exist.
     pub(crate) fn try_struct_override(&self, interpreter: &mut Interpreter, method: &[u8], other: &ShimValue) -> Option<Result<ShimValue, String>> {
-        if let ShimValue::Struct(_) = self {
+        if let ShimValue::Struct(..) = self {
             match self.get_attr(interpreter, method) {
                 Ok(method_fn) => {
                     let mut args = ArgBundle::new();
@@ -759,23 +760,20 @@ impl ShimValue {
                     }
                 }
 
-                // Allocate space for each member, plus the header
-                let word_count: u24 = (struct_def.member_count as u32 + 1).into();
+                // Allocate space for each member
+                let word_count: u24 = (struct_def.member_count as u32).into();
                 let new_pos = alloc!(
                     interpreter.mem,
                     word_count,
                     "Struct instantiation"
                 );
 
-                // The first word points to the StructDef
-                interpreter.mem.mem[usize::from(new_pos)] = u64::from(*struct_def_pos);
-
                 // The remaining words get copies of the arguments to the initializer
                 for (idx, arg) in args.args.iter().enumerate() {
-                    interpreter.mem.mem[usize::from(new_pos) + 1 + idx] = arg.to_u64();
+                    interpreter.mem.mem[usize::from(new_pos) + idx] = arg.to_u64();
                 }
 
-                Ok(CallResult::ReturnValue(ShimValue::Struct(new_pos)))
+                Ok(CallResult::ReturnValue(ShimValue::Struct(*struct_def_pos, new_pos)))
             }
             ShimValue::NativeFn(pos) => {
                 let native_fn: &NativeFn = unsafe { interpreter.mem.get(*pos) };
@@ -1018,30 +1016,28 @@ impl ShimValue {
             ShimValue::Native(_) => {
                 self.native_from_mem(mem).unwrap().to_string_mem(mem)
             }
-            ShimValue::Struct(pos) => {
+            ShimValue::Struct(def_pos, pos) => {
                 unsafe {
-                    let def_pos: u64 = *mem.get(*pos);
-                    let def_pos: u24 = u24::from(def_pos as u32);
-                    let def: &StructDef = mem.get(def_pos);
-                    
+                    let def: &StructDef = mem.get(*def_pos);
+
                     // Get the struct name
                     let struct_name = debug_u8s(&def.name).to_string();
-                    
+
                     // Collect member names and values first to avoid borrowing issues
                     let mut members: Vec<(String, ShimValue)> = Vec::new();
                     for (attr, loc) in def.lookup.iter() {
                         // Only collect member variables, not methods
                         if let StructAttribute::MemberInstanceOffset(offset) = loc {
                             let attr_name = debug_u8s(attr).to_string();
-                            let val: ShimValue = *mem.get(*pos + *offset as u32 + 1);
+                            let val: ShimValue = *mem.get(*pos + *offset as u32);
                             members.push((attr_name, val));
                         }
                     }
-                    
+
                     // Build output like "Point(x=2.0, y=3.0)"
                     let mut out = struct_name;
                     out.push('(');
-                    
+
                     for (idx, (attr_name, val)) in members.iter().enumerate() {
                         if idx != 0 {
                             out.push_str(", ");
@@ -1050,7 +1046,7 @@ impl ShimValue {
                         out.push('=');
                         out.push_str(&&val.to_string_mem(mem));
                     }
-                    
+
                     out.push(')');
                     out
                 }
@@ -1099,7 +1095,7 @@ impl ShimValue {
 
                 Ok(CallResult::ReturnValue(c))
             }
-            (ShimValue::Struct(_), b) => {
+            (ShimValue::Struct(..), b) => {
                 // TODO: why do we need to take in `pending_args` when we could
                 // construct a new ArgBundle?
                 pending_args.args.clear();
@@ -1145,7 +1141,7 @@ impl ShimValue {
                 }
                 Ok(true)
             },
-            (ShimValue::Struct(_), ShimValue::Struct(_)) => {
+            (ShimValue::Struct(..), ShimValue::Struct(..)) => {
                 match self.get_attr(interpreter, b"eq") {
                     Ok(eq_fn) => {
                         let mut args = ArgBundle::new();
@@ -1264,7 +1260,7 @@ impl ShimValue {
                 let substring_str = unsafe { std::str::from_utf8_unchecked(substring) };
                 Ok(ShimValue::Bool(text_str.contains(substring_str)))
             }
-            ShimValue::Struct(_) => {
+            ShimValue::Struct(..) => {
                 if let Some(result) = self.try_struct_override(interpreter, b"contains", some_key) {
                     return result;
                 }
@@ -1295,25 +1291,21 @@ impl ShimValue {
 
     pub(crate) fn get_attr(&self, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
         match self {
-            ShimValue::Struct(pos) => {
+            ShimValue::Struct(def_pos, pos) => {
                 // Handle __type__ special attribute
                 if ident == b"__type__" {
                     unsafe {
-                        let def_pos: u64 = *interpreter.mem.get(*pos);
-                        let def_pos: u24 = u24::from(def_pos as u32);
-                        return Ok(ShimValue::StructDef(def_pos));
+                        return Ok(ShimValue::StructDef(*def_pos));
                     }
                 }
                 
                 unsafe {
-                    let def_pos: u64 = *interpreter.mem.get(*pos);
-                    let def_pos: u24 = u24::from(def_pos as u32);
-                    let def: &StructDef = interpreter.mem.get(def_pos);
+                    let def: &StructDef = interpreter.mem.get(*def_pos);
                     for (attr, loc) in def.lookup.iter() {
                         if ident == attr {
                             return match loc {
                                 StructAttribute::MemberInstanceOffset(offset) => {
-                                    Ok(*interpreter.mem.get(*pos + *offset as u32 + 1))
+                                    Ok(*interpreter.mem.get(*pos + *offset as u32))
                                 }
                                 StructAttribute::MethodDef(fn_pos) => {
                                     Ok(interpreter.mem.alloc_bound_method(self, *fn_pos))
@@ -1410,17 +1402,15 @@ impl ShimValue {
         val: ShimValue,
     ) -> Result<(), String> {
         match self {
-            ShimValue::Struct(pos) => {
+            ShimValue::Struct(def_pos, pos) => {
                 unsafe {
-                    let def_pos: u64 = *interpreter.mem.get(*pos);
-                    let def_pos: u24 = u24::from(def_pos as u32);
-                    let def: &StructDef = interpreter.mem.get(def_pos);
+                    let def: &StructDef = interpreter.mem.get(*def_pos);
                     for (attr, loc) in def.lookup.iter() {
                         if ident == attr {
                             return match loc {
                                 StructAttribute::MemberInstanceOffset(offset) => {
                                     let slot: &mut ShimValue =
-                                        interpreter.mem.get_mut(*pos + *offset as u32 + 1);
+                                        interpreter.mem.get_mut(*pos + *offset as u32);
                                     *slot = val;
                                     Ok(())
                                 }
@@ -1531,10 +1521,8 @@ impl Interpreter {
                 };
                 println!("{:>12}: {:?}", debug_u8s(key_bytes), val);
                 match val {
-                    ShimValue::Struct(pos) => {
+                    ShimValue::Struct(def_pos, pos) => {
                         unsafe {
-                            let def_pos: u64 = *self.mem.get(pos);
-                            let def_pos: u24 = u24::from(def_pos as u32);
                             let def: &StructDef = self.mem.get(def_pos);
                             for (attr, loc) in def.lookup.iter() {
                                 match loc {

@@ -754,36 +754,31 @@ impl<'a> GC<'a> {
                             self.mask.set(idx, &desc);
                         }
                     },
-                    ShimValue::Struct(pos) => {
+                    ShimValue::Struct(def_pos, pos) => {
                         let pos: usize = pos.into();
                         if self.mask.is_set(pos) {
                             continue;
                         }
-                        let def_pos: usize = self.mem.mem[pos] as usize;
                         let def: &StructDef = self.mem.get(def_pos.into());
 
                         let mut members = Vec::new();
-                        for idx in pos..(pos + def.member_count as usize + 1) {
-                            if idx != pos {
-                                members.push(
-                                    ShimValue::from_u64(self.mem.mem[idx])
-                                );
-                            }
+                        for idx in pos..(pos + def.member_count as usize) {
+                            members.push(
+                                ShimValue::from_u64(self.mem.mem[idx])
+                            );
                         }
                         let desc = MemDescriptor::struct_desc(
                             pos,
-                            (pos + def.member_count as usize + 1),
+                            (pos + def.member_count as usize),
                             "TODO struct typename".to_string(),
                             members
                         );
-                        for idx in pos..(pos + def.member_count as usize + 1) {
+                        for idx in pos..(pos + def.member_count as usize) {
                             self.mask.set(idx, &desc);
                             // Push the members
-                            if idx != pos {
-                                vals.push(
-                                    ShimValue::from_u64(self.mem.mem[idx])
-                                );
-                            }
+                            vals.push(
+                                ShimValue::from_u64(self.mem.mem[idx])
+                            );
                         }
                         vals.push(ShimValue::StructDef(def_pos.into()));
                     },
@@ -837,11 +832,12 @@ impl<'a> GC<'a> {
                         vals.push(ShimValue::Native(pos.into()));
                     },
                     ShimValue::Environment(pos) => {
+                        let og_pos = pos;
                         let pos: usize = pos.into();
                         if self.mask.is_set(pos) {
                             continue;
                         }
-                        let scope: &EnvScope = self.mem.get(pos);
+                        let scope: &EnvScope = self.mem.get(og_pos);
 
                         // Chunk of memory that store the EnvScope metadata
                         let desc = MemDescriptor::env_header(
