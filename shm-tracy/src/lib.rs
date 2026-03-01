@@ -25,7 +25,7 @@ pub struct TracyZone {
 
 impl Drop for TracyZone {
     fn drop(&mut self) {
-        tracy_zone_end(self.ctx);
+        unsafe { tracy_zone_end(self.ctx) };
     }
 }
 
@@ -61,12 +61,12 @@ unsafe extern "C" {
 #[cfg(not(feature = "tracy-enable"))]
 mod stubs {
     use crate::*;
-    pub fn tracy_zone_begin_n(_name: *const c_char, _active: c_int) -> TracyCZoneCtx { TracyCZoneCtx {id: 0, active: 0} }
-    pub fn tracy_zone_begin_ns(_name: *const c_char, _depth: c_int, _active: c_int) -> TracyCZoneCtx { TracyCZoneCtx {id: 0, active: 0} }
-    pub fn tracy_zone_end(_ctx: TracyCZoneCtx) {}
-    pub fn tracy_zone_text(_ctx: TracyCZoneCtx, _txt: *const c_char, _len: c_uint) {}
-    pub fn tracy_zone_name(_ctx: TracyCZoneCtx, _txt: *const c_char, _len: c_uint) {}
-    pub fn tracy_zone_color(_ctx: TracyCZoneCtx, _color: c_uint) {}
+    pub unsafe fn tracy_zone_begin_n(_name: *const c_char, _active: c_int) -> TracyCZoneCtx { TracyCZoneCtx {id: 0, active: 0} }
+    pub unsafe fn tracy_zone_begin_ns(_name: *const c_char, _depth: c_int, _active: c_int) -> TracyCZoneCtx { TracyCZoneCtx {id: 0, active: 0} }
+    pub unsafe fn tracy_zone_end(_ctx: TracyCZoneCtx) {}
+    pub unsafe fn tracy_zone_text(_ctx: TracyCZoneCtx, _txt: *const c_char, _len: c_uint) {}
+    pub unsafe fn tracy_zone_name(_ctx: TracyCZoneCtx, _txt: *const c_char, _len: c_uint) {}
+    pub unsafe fn tracy_zone_color(_ctx: TracyCZoneCtx, _color: c_uint) {}
 
     pub unsafe fn ___tracy_emit_zone_begin(_loc: *const ___tracy_source_location_data, _active: i32) -> TracyCZoneCtx { TracyCZoneCtx {id: 0, active: 0} }
     pub unsafe fn ___tracy_emit_zone_end(_ctx: TracyCZoneCtx) {}

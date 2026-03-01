@@ -73,6 +73,63 @@ fn idx_in_free_block(idx: u24, free_list: &[FreeBlock]) -> bool {
     false
 }
 
+pub fn i32_to_rgb(i: i32) -> [u8; 3] {
+    // 1. Convert to u32 to handle negative IDs and treat as a continuous scale
+    let val = i as u32;
+
+    // 2. Use the Golden Ratio conjugate (0.6180339887...) 
+    // This spreads the "Hue" evenly around the 360-degree wheel.
+    let golden_ratio_conjugate = 0.618033988749895_f64;
+    let hue = (val as f64 * golden_ratio_conjugate).fract(); 
+
+    // 3. Set constant Saturation (0.8) and Lightness (0.6) for a "clean" UI look
+    hsl_to_rgb(hue, 0.8, 0.6)
+}
+
+fn hsl_to_rgb(h: f64, s: f64, l: f64) -> [u8; 3] {
+    let q = if l < 0.5 { l * (1.0 + s) } else { l + s - l * s };
+    let p = 2.0 * l - q;
+
+    let mut rgb = [0u8; 3];
+    let transitions = [h + 1.0/3.0, h, h - 1.0/3.0];
+
+    for (i, &t) in transitions.iter().enumerate() {
+        let mut tc = t;
+        if tc < 0.0 { tc += 1.0; }
+        if tc > 1.0 { tc -= 1.0; }
+
+        let color_val = if tc < 1.0/6.0 { p + (q - p) * 6.0 * tc }
+            else if tc < 1.0/2.0 { q }
+            else if tc < 2.0/3.0 { p + (q - p) * (2.0/3.0 - tc) * 6.0 }
+            else { p };
+        
+        rgb[i] = (color_val * 255.0).round() as u8;
+    }
+    rgb
+}
+
+pub fn f32_to_rgb(f: f32) -> [u8; 3] {
+    // 1. Normalize 0.0 and -0.0 so they produce the same color
+    let normalized = if f == 0.0 { 0.0 } else { f };
+    
+    // 2. Bit-cast to u32 (this is a no-op in assembly, just a type change)
+    let bits = normalized.to_bits();
+    
+    // 3. Use your existing vibrant function
+    i32_to_rgb(bits as i32)
+}
+
+pub fn f64_to_rgb(f: f64) -> [u8; 3] {
+    let normalized = if f == 0.0 { 0.0 } else { f };
+    let bits = normalized.to_bits();
+    
+    // Fold the 64 bits into 32 bits using XOR
+    // This ensures both the exponent and mantissa contribute to the color
+    let folded = (bits ^ (bits >> 32)) as u32;
+    
+    i32_to_rgb(folded as i32)
+}
+
 impl Navigation {
     pub fn debug_window(&mut self, interpreter: &mut shimlang::Interpreter, env: &shimlang::Environment) {
         let _zone = zone_scoped!("Navigation::debug_window");
@@ -152,7 +209,7 @@ impl Navigation {
                         shimlang::MemDescriptorType::EnvHeader(_) => im_col32(0, 255, 0, 255),
                         shimlang::MemDescriptorType::EnvData(_) => im_col32(0, 200, 0, 255),
                         shimlang::MemDescriptorType::Struct(..) => im_col32(0, 0, 220, 255),
-                        _ => im_col32(255, 0, 255, 255),
+                        _ => im_col32(200, 100, 200, 255),
                     };
                     igDrawRectFilled(cell_min, cell_max, color);
 
@@ -176,18 +233,20 @@ impl Navigation {
                         let member_idx = idx - s.start;
                         let val = members[member_idx];
                         let color = if let shimlang::ShimValue::Integer(i) = val {
+                            let rgb = i32_to_rgb(i);
                             im_col32(
-                                128, 
-                                128, 
-                                fnv1a_hash(&i.to_be_bytes()) as u32,
+                                rgb[0].into(),
+                                rgb[1].into(),
+                                rgb[2].into(),
                                 255
                             )
                         } else if let shimlang::ShimValue::Float(f) = val {
+                            let rgb = f32_to_rgb(f);
                             im_col32(
-                                fnv1a_hash(&i.to_be_bytes()) as u32, 
-                                128,
-                                128,
-                                255
+                                rgb[0].into(),
+                                rgb[1].into(),
+                                rgb[2].into(),
+                                255,
                             )
                         } else {
                             im_col32(0, 0, 0, 255)
