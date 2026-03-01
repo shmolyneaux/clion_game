@@ -726,7 +726,7 @@ impl<'a> GC<'a> {
                         #[cfg(feature = "gc_debug")]
                         let desc = {
                             let contents = s.string_from_mem(&self.mem).unwrap();
-                            MemDescriptor::other(pos, (offset + len).div_ceil(8), &format!("String: {} <- anon?", debug_u8s(contents)))
+                            MemDescriptor::other(pos, (offset + len).div_ceil(8), &format!("String: {}", debug_u8s(contents)))
                         };
                         #[cfg(not(feature = "gc_debug"))]
                         let _ = s; // suppress unused binding warning
@@ -780,8 +780,8 @@ impl<'a> GC<'a> {
                         // Mark the entries array
                         let entries_pos: usize = dict.entries.into();
                         #[cfg(feature = "gc_debug")]
-                        let entries_desc = MemDescriptor::other(entries_pos, entries_pos + size*3, "dict index");
-                        for idx in entries_pos..(entries_pos + size*3) {
+                        let entries_desc = MemDescriptor::other(entries_pos, entries_pos + dict.capacity()*3, "dict entries");
+                        for idx in entries_pos..(entries_pos + dict.capacity()*3) {
                             mark_bit!(self.mask, idx, entries_desc);
                         }
                     },

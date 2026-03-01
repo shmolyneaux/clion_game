@@ -119,7 +119,9 @@ for command in (
         if command == "execute" or command == "errors":
             proc = subprocess.run(f"{exe_path} {script}", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         elif command == "gc":
-            proc = subprocess.run(f"{exe_path} --gc {script}", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            env = os.environ.copy()
+            env["RUST_BACKTRACE"] = "1"
+            proc = subprocess.run(f"{exe_path} --gc {script}", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
         elif command == "spans":
             proc = subprocess.run(f"{exe_path} --spans {script}", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         elif command == "parse":

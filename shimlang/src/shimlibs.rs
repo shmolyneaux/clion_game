@@ -741,7 +741,7 @@ impl ShimDict {
         }
     }
 
-    fn capacity(&self) -> usize {
+    pub fn capacity(&self) -> usize {
         Self::capacity_for_size_pow(self.size_pow)
     }
 

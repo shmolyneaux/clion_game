@@ -169,19 +169,32 @@ impl Navigation {
 
             igSameLine();
 
-            if igButton(
-                CString::new(format!("Next")).unwrap().as_ptr()
-            ) {
-                // TODO: logic for disabling on last page
-                self.memory_page += 1;
+            let page_size: usize = 128;
+
+            let mem_end: usize = if let Some(block) = interpreter.mem.free_list.last() {
+                block.pos.into()
+            } else {
+                interpreter.mem.mem.len()
+            };
+
+            if (self.memory_page + 1) * (page_size as u32) < mem_end as u32 {
+                if igButton(
+                    CString::new(format!("Next")).unwrap().as_ptr()
+                ) {
+                    self.memory_page += 1;
+                }
+            } else {
+                igBeginDisabled();
+                igButton(CString::new(format!("Next")).unwrap().as_ptr());
+                igEndDisabled();
             }
 
             igSameLine();
 
+
             // TODO: disable "Next" button if it goes past the free_list last position
             igText(CString::new(format!("Last block: {:?}", interpreter.mem.free_list.last())).unwrap().as_ptr());
 
-            let page_size: usize = 128;
             let item_offset: usize = page_size * self.memory_page as usize;
             let index_description = interpreter.describe_memory(env);
             let mut origin = ImVec2 { x: 0.0, y: 0.0 };
@@ -287,6 +300,9 @@ impl Navigation {
                         igDrawRectFilled(inner_cell_border_min, inner_cell_border_max, border_color);
                         igDrawRectFilled(inner_cell_min, inner_cell_max, inner_color);
                     }
+                } else if mem_end <= idx {
+                    let color = im_col32(10, 10, 10, 255);
+                    igDrawRectFilled(cell_min, cell_max, color);
                 } else {
                     let color = im_col32(100, 100, 100, 255);
                     igDrawRectFilled(cell_min, cell_max, color);
