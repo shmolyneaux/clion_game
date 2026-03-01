@@ -176,6 +176,11 @@ impl Navigation {
                 self.memory_page += 1;
             }
 
+            igSameLine();
+
+            // TODO: disable "Next" button if it goes past the free_list last position
+            igText(CString::new(format!("Last block: {:?}", interpreter.mem.free_list.last())).unwrap().as_ptr());
+
             let page_size: usize = 128;
             let item_offset: usize = page_size * self.memory_page as usize;
             let index_description = interpreter.describe_memory(env);
@@ -229,29 +234,58 @@ impl Navigation {
                         y: cell_max.y - 4.0,
                     };
 
+                    let inner_cell_border_min = ImVec2 {
+                        x: cell_min.x + 2.0,
+                        y: cell_min.y + 2.0,
+                    };
+                    let inner_cell_border_max = ImVec2 {
+                        x: cell_max.x - 2.0,
+                        y: cell_max.y - 2.0,
+                    };
+
                     if let shimlang::MemDescriptorType::Struct(_, members) = &s.t {
                         let member_idx = idx - s.start;
                         let val = members[member_idx];
-                        let color = if let shimlang::ShimValue::Integer(i) = val {
+                        let (inner_color, border_color) = if let shimlang::ShimValue::Integer(i) = val {
                             let rgb = i32_to_rgb(i);
-                            im_col32(
-                                rgb[0].into(),
-                                rgb[1].into(),
-                                rgb[2].into(),
-                                255
+                            (
+                                im_col32(
+                                    rgb[0].into(),
+                                    rgb[1].into(),
+                                    rgb[2].into(),
+                                    255
+                                ),
+                                im_col32(
+                                    128,
+                                    128,
+                                    128,
+                                    255
+                                ),
                             )
                         } else if let shimlang::ShimValue::Float(f) = val {
                             let rgb = f32_to_rgb(f);
-                            im_col32(
-                                rgb[0].into(),
-                                rgb[1].into(),
-                                rgb[2].into(),
-                                255,
+                            (
+                                im_col32(
+                                    rgb[0].into(),
+                                    rgb[1].into(),
+                                    rgb[2].into(),
+                                    255,
+                                ),
+                                im_col32(
+                                    100,
+                                    200,
+                                    100,
+                                    255,
+                                ),
                             )
                         } else {
-                            im_col32(0, 0, 0, 255)
+                            (
+                                im_col32(0, 0, 0, 255),
+                                im_col32(0, 0, 0, 255),
+                            )
                         };
-                        igDrawRectFilled(inner_cell_min, inner_cell_max, color);
+                        igDrawRectFilled(inner_cell_border_min, inner_cell_border_max, border_color);
+                        igDrawRectFilled(inner_cell_min, inner_cell_max, inner_color);
                     }
                 } else {
                     let color = im_col32(100, 100, 100, 255);
