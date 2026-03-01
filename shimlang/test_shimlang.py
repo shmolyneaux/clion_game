@@ -63,6 +63,7 @@ for command in (
     "execute",
     "errors",
     "decompile",
+    "gc",
 ):
     if command == "execute":
         scripts = []
@@ -82,6 +83,9 @@ for command in (
     elif command == "decompile":
         scripts = []
         scripts.extend(Path("test_scripts/decompile").glob("*.shm"))
+    elif command == "gc":
+        scripts = []
+        scripts.extend(Path("test_scripts/07_gc").glob("*.shm"))
     else:
         raise Exception("Unknown command")
 
@@ -114,6 +118,8 @@ for command in (
 
         if command == "execute" or command == "errors":
             proc = subprocess.run(f"{exe_path} {script}", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        elif command == "gc":
+            proc = subprocess.run(f"{exe_path} --gc {script}", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         elif command == "spans":
             proc = subprocess.run(f"{exe_path} --spans {script}", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         elif command == "parse":

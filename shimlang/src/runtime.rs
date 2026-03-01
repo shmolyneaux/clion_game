@@ -2262,7 +2262,10 @@ impl Interpreter {
         };
         gc.mark(roots);
         
-        gc.mask.description
+        #[cfg(feature = "gc_debug")]
+        { gc.mask.description }
+        #[cfg(not(feature = "gc_debug"))]
+        { HashMap::new() }
     }
 }
 
