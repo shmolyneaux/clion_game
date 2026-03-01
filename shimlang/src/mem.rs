@@ -4,8 +4,10 @@ use shm_tracy::*;
 use shm_tracy::zone_scoped;
 use crate::runtime::*;
 use crate::shimlibs::*;
+#[cfg(feature = "gc_debug")]
 use std::collections::HashMap;
 
+#[cfg(feature = "gc_debug")]
 use crate::lex::debug_u8s;
 
 #[derive(Debug)]
@@ -554,8 +556,18 @@ pub enum MemDescriptorType {
 
 #[derive(Debug)]
 pub struct Bitmask {
+    #[cfg(feature = "gc_debug")]
     pub description: HashMap<usize, MemDescriptor>,
     data: Vec<u64>,
+}
+
+macro_rules! mark_bit {
+    ($mask:expr, $index:expr, $desc:expr) => {{
+        #[cfg(feature = "gc_debug")]
+        { $mask.set($index, &$desc); }
+        #[cfg(not(feature = "gc_debug"))]
+        { $mask.set($index); }
+    }};
 }
 
 impl Bitmask {
@@ -564,15 +576,23 @@ impl Bitmask {
         let blocks = num_bits.div_ceil(64);
 
         Bitmask {
+            #[cfg(feature = "gc_debug")]
             description: HashMap::new(),
             data: vec![0; blocks],
         }
     }
 
+    #[cfg(feature = "gc_debug")]
     pub fn set(&mut self, index: usize, description: &MemDescriptor) {
         let (block_idx, bit_offset) = self.pos(index);
         self.data[block_idx] |= 1 << bit_offset;
         self.description.insert(index, description.clone());
+    }
+
+    #[cfg(not(feature = "gc_debug"))]
+    pub fn set(&mut self, index: usize) {
+        let (block_idx, bit_offset) = self.pos(index);
+        self.data[block_idx] |= 1 << bit_offset;
     }
 
     pub fn is_set(&self, index: usize) -> bool {
@@ -653,7 +673,7 @@ impl<'a> GC<'a> {
         let last_block_start = mem.free_list[mem.free_list.len()-1].pos;
         let mut mask = Bitmask::new(last_block_start.into());
         // Mark word 0 so the GC never frees the sentinel reserved by MMU::with_capacity
-        mask.set(0, &MemDescriptor::other(0, 1, "null"));
+        mark_bit!(mask, 0, MemDescriptor::other(0, 1, "null"));
         Self {
             mem,
             mask,
@@ -673,7 +693,7 @@ impl<'a> GC<'a> {
                             continue;
                         }
                         // Mark the ShimFn struct (8 bytes = 1 word: u32 pc + u24 name)
-                        self.mask.set(pos, &MemDescriptor::other(pos, pos+1, "ShimFn"));
+                        mark_bit!(self.mask, pos, MemDescriptor::other(pos, pos+1, "ShimFn"));
                         
                         // Mark the function name string
                         let shim_fn: &ShimFn = self.mem.get(fn_pos);
@@ -690,9 +710,10 @@ impl<'a> GC<'a> {
                         }
 
                         let contents_pos = usize::from(lst.data);
+                        #[cfg(feature = "gc_debug")]
                         let desc = MemDescriptor::other(contents_pos, contents_pos + lst.capacity(), "List item");
                         for idx in contents_pos..(contents_pos + lst.capacity()) {
-                            self.mask.set(idx,&desc);
+                            mark_bit!(self.mask, idx, desc);
                         }
                     },
                     s @ ShimValue::String(len, offset, pos) => {
@@ -700,13 +721,18 @@ impl<'a> GC<'a> {
                         if self.mask.is_set(pos) {
                             continue;
                         }
-                        let contents = s.string_from_mem(&self.mem).unwrap();
                         let len = len as usize;
                         let offset = offset as usize;
-                        let desc = MemDescriptor::other(pos, (offset + len).div_ceil(8), &format!("String: {} <- anon?", debug_u8s(contents)));
+                        #[cfg(feature = "gc_debug")]
+                        let desc = {
+                            let contents = s.string_from_mem(&self.mem).unwrap();
+                            MemDescriptor::other(pos, (offset + len).div_ceil(8), &format!("String: {} <- anon?", debug_u8s(contents)))
+                        };
+                        #[cfg(not(feature = "gc_debug"))]
+                        let _ = s; // suppress unused binding warning
                         // TODO: check this...
                         for idx in pos..(pos + (offset + len).div_ceil(8)) {
-                            self.mask.set(idx, &desc);
+                            mark_bit!(self.mask, idx, desc);
                         }
                     },
                     ShimValue::Dict(pos) => {
@@ -734,26 +760,29 @@ impl<'a> GC<'a> {
                         }
 
                         // Mark the space for the dict struct
-                        let header_desc = MemDescriptor::other(pos, (pos + std::mem::size_of::<ShimDict>().div_ceil(8)), "dict header");
+                        #[cfg(feature = "gc_debug")]
+                        let header_desc = MemDescriptor::other(pos, pos + std::mem::size_of::<ShimDict>().div_ceil(8), "dict header");
                         for idx in pos..(pos + std::mem::size_of::<ShimDict>().div_ceil(8)) {
-                            self.mask.set(idx, &header_desc);
+                            mark_bit!(self.mask, idx, header_desc);
                         }
 
                         let size = 1 << dict.size_pow;
 
                         // Mark the indices array
                         let indices_pos: usize = dict.indices.into();
-                        let indices_desc = MemDescriptor::other(indices_pos, (indices_pos + size), "dict index");
+                        #[cfg(feature = "gc_debug")]
+                        let indices_desc = MemDescriptor::other(indices_pos, indices_pos + size, "dict index");
                         // TODO: I'm pretty sure this is wrong? The stride of the indices is 1 byte for dicts with less than 256 entries
                         for idx in indices_pos..(indices_pos + size) {
-                            self.mask.set(idx, &indices_desc);
+                            mark_bit!(self.mask, idx, indices_desc);
                         }
 
                         // Mark the entries array
                         let entries_pos: usize = dict.entries.into();
-                        let entries_desc = MemDescriptor::other(entries_pos, (entries_pos + size*3), "dict index");
+                        #[cfg(feature = "gc_debug")]
+                        let entries_desc = MemDescriptor::other(entries_pos, entries_pos + size*3, "dict index");
                         for idx in entries_pos..(entries_pos + size*3) {
-                            self.mask.set(idx, &entries_desc);
+                            mark_bit!(self.mask, idx, entries_desc);
                         }
                     },
                     ShimValue::StructDef(pos) => {
@@ -762,13 +791,14 @@ impl<'a> GC<'a> {
                             continue;
                         }
                         let def: &StructDef = self.mem.get(pos.into());
+                        #[cfg(feature = "gc_debug")]
                         let desc = MemDescriptor::other(
                             pos,
-                            (pos + def.mem_size()),
+                            pos + def.mem_size(),
                             &format!("struct {}", debug_u8s(&def.name)),
                         );
                         for idx in pos..(pos + def.mem_size()) {
-                            self.mask.set(idx, &desc);
+                            mark_bit!(self.mask, idx, desc);
                         }
                     },
                     ShimValue::Struct(def_pos, pos) => {
@@ -778,20 +808,23 @@ impl<'a> GC<'a> {
                         }
                         let def: &StructDef = self.mem.get(def_pos.into());
 
-                        let mut members = Vec::new();
+                        #[cfg(feature = "gc_debug")]
+                        let desc = {
+                            let mut members = Vec::new();
+                            for idx in pos..(pos + def.member_count as usize) {
+                                members.push(
+                                    ShimValue::from_u64(self.mem.mem[idx])
+                                );
+                            }
+                            MemDescriptor::struct_desc(
+                                pos,
+                                pos + def.member_count as usize,
+                                format!("struct {}", debug_u8s(&def.name)),
+                                members
+                            )
+                        };
                         for idx in pos..(pos + def.member_count as usize) {
-                            members.push(
-                                ShimValue::from_u64(self.mem.mem[idx])
-                            );
-                        }
-                        let desc = MemDescriptor::struct_desc(
-                            pos,
-                            pos + def.member_count as usize,
-                            format!("struct {}", debug_u8s(&def.name)),
-                            members
-                        );
-                        for idx in pos..(pos + def.member_count as usize) {
-                            self.mask.set(idx, &desc);
+                            mark_bit!(self.mask, idx, desc);
                             // Push the members
                             vals.push(
                                 ShimValue::from_u64(self.mem.mem[idx])
@@ -804,7 +837,7 @@ impl<'a> GC<'a> {
                         if self.mask.is_set(pos) {
                             continue;
                         }
-                        self.mask.set(pos, &MemDescriptor::other(pos, pos+1, "NativeFn"));
+                        mark_bit!(self.mask, pos, MemDescriptor::other(pos, pos+1, "NativeFn"));
                     },
                     ShimValue::Native(pos) => {
                         let pos: usize = pos.into();
@@ -812,8 +845,8 @@ impl<'a> GC<'a> {
                             continue;
                         }
                         assert!(std::mem::size_of::<Box<dyn ShimNative>>() == 16);
-                        self.mask.set(pos, &MemDescriptor::other(pos, pos+2, "Native"));
-                        self.mask.set(pos+1, &MemDescriptor::other(pos, pos+2, "Native"));
+                        mark_bit!(self.mask, pos, MemDescriptor::other(pos, pos+2, "Native"));
+                        mark_bit!(self.mask, pos+1, MemDescriptor::other(pos, pos+2, "Native"));
 
                         let ptr: &Box<dyn ShimNative> = std::mem::transmute(&self.mem.mem[pos]);
 
@@ -825,8 +858,8 @@ impl<'a> GC<'a> {
                             continue;
                         }
                         // Mark the 2 words used to store the BoundMethod
-                        self.mask.set(pos, &MemDescriptor::other(pos, pos+1, "Bound Method Obj"));
-                        self.mask.set(pos+1, &MemDescriptor::other(pos+1, pos+2, "Bound Method fn"));
+                        mark_bit!(self.mask, pos, MemDescriptor::other(pos, pos+1, "Bound Method Obj"));
+                        mark_bit!(self.mask, pos+1, MemDescriptor::other(pos+1, pos+2, "Bound Method fn"));
 
                         let obj = ShimValue::from_u64(self.mem.mem[pos]);
                         // Set up the
@@ -839,9 +872,9 @@ impl<'a> GC<'a> {
                             continue;
                         }
                         // Native ShimValue
-                        self.mask.set(pos, &MemDescriptor::other(pos, pos+2, "BoundNativeMethod"));
+                        mark_bit!(self.mask, pos, MemDescriptor::other(pos, pos+2, "BoundNativeMethod"));
                         // Pointer to the fn
-                        self.mask.set(pos+1, &MemDescriptor::other(pos, pos+2, "BoundNativeMethod"));
+                        mark_bit!(self.mask, pos+1, MemDescriptor::other(pos, pos+2, "BoundNativeMethod"));
 
                         // Any values that the obj holds
                         let ptr: &Box<dyn ShimNative> = std::mem::transmute(&self.mem.mem[pos]);
@@ -857,26 +890,28 @@ impl<'a> GC<'a> {
                         let scope: &EnvScope = self.mem.get(og_pos);
 
                         // Chunk of memory that store the EnvScope metadata
+                        #[cfg(feature = "gc_debug")]
                         let desc = MemDescriptor::env_header(
                             pos,
-                            (pos + std::mem::size_of::<EnvScope>().div_ceil(8)),
+                            pos + std::mem::size_of::<EnvScope>().div_ceil(8),
                             "Envscope header",
                         );
                         for bit in pos..(pos + std::mem::size_of::<EnvScope>().div_ceil(8)) {
-                            self.mask.set(bit, &desc);
+                            mark_bit!(self.mask, bit, desc);
                         }
 
 
                         // Data block
                         let start = usize::from(scope.data);
                         let end = start + scope.capacity as usize;
+                        #[cfg(feature = "gc_debug")]
                         let scope_description = MemDescriptor::env_data(
                             start,
                             end,
                             &scope.to_string(&self.mem),
                         );
                         for bit in start..end {
-                            self.mask.set(bit, &scope_description);
+                            mark_bit!(self.mask, bit, scope_description);
                         }
                         
                         // Walk the contiguous data block and collect values

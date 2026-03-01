@@ -1294,9 +1294,7 @@ impl ShimValue {
             ShimValue::Struct(def_pos, pos) => {
                 // Handle __type__ special attribute
                 if ident == b"__type__" {
-                    unsafe {
-                        return Ok(ShimValue::StructDef(*def_pos));
-                    }
+                    return Ok(ShimValue::StructDef(*def_pos));
                 }
                 
                 unsafe {
@@ -2264,7 +2262,10 @@ impl Interpreter {
         };
         gc.mark(roots);
         
-        gc.mask.description
+        #[cfg(feature = "gc_debug")]
+        { gc.mask.description }
+        #[cfg(not(feature = "gc_debug"))]
+        { HashMap::new() }
     }
 }
 
