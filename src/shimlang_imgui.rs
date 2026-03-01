@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use crate::*;
-use ::shimlang::{Word, FreeBlock, Interpreter};
+use ::shimlang::{u24, FreeBlock, Interpreter, fnv1a_hash};
 
 #[derive(Facet, Default)]
 pub struct Repl {
@@ -64,7 +64,7 @@ pub struct Navigation {
     memory_page: u32,
 }
 
-fn idx_in_free_block(idx: Word, free_list: &[FreeBlock]) -> bool {
+fn idx_in_free_block(idx: u24, free_list: &[FreeBlock]) -> bool {
     for block in free_list {
         if block.pos <= idx && idx < block.pos + block.size {
             return true;
@@ -124,7 +124,7 @@ impl Navigation {
             let index_description = interpreter.describe_memory(env);
             let mut origin = ImVec2 { x: 0.0, y: 0.0 };
             igGetCursorScreenPos(&mut origin);
-            let cell_size = 8.0;
+            let cell_size = 16.0;
             for (relative_idx, x) in interpreter.mem.mem.iter().skip(item_offset).take(page_size).enumerate() {
                 let idx = relative_idx + item_offset;
 
@@ -159,8 +159,40 @@ impl Navigation {
                     // Tooltip logic
                     if igIsMouseHoveringRect(cell_min, cell_max, true) {
                         igBeginTooltip();
-                        igText(CString::new(format!("{}", s.to_string())).unwrap().as_ptr());
+                        igText(CString::new(format!("{}", s.to_string(&interpreter.mem))).unwrap().as_ptr());
                         igEndTooltip();
+                    }
+
+                    let inner_cell_min = ImVec2 {
+                        x: cell_min.x + 4.0,
+                        y: cell_min.y + 4.0,
+                    };
+                    let inner_cell_max = ImVec2 {
+                        x: cell_max.x - 4.0,
+                        y: cell_max.y - 4.0,
+                    };
+
+                    if let shimlang::MemDescriptorType::Struct(_, members) = &s.t {
+                        let member_idx = idx - s.start;
+                        let val = members[member_idx];
+                        let color = if let shimlang::ShimValue::Integer(i) = val {
+                            im_col32(
+                                128, 
+                                128, 
+                                fnv1a_hash(&i.to_be_bytes()) as u32,
+                                255
+                            )
+                        } else if let shimlang::ShimValue::Float(f) = val {
+                            im_col32(
+                                fnv1a_hash(&i.to_be_bytes()) as u32, 
+                                128,
+                                128,
+                                255
+                            )
+                        } else {
+                            im_col32(0, 0, 0, 255)
+                        };
+                        igDrawRectFilled(inner_cell_min, inner_cell_max, color);
                     }
                 } else {
                     let color = im_col32(100, 100, 100, 255);

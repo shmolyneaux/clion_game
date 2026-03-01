@@ -956,9 +956,11 @@ fn init_state() -> State {
     }
 
     let some_p0 = Point(0, 1);
-    let some_p1 = Point(0, 1);
-    let some_p2 = Point(0, 1);
-    let some_p3 = Point(0, 1);
+    let some_p1 = Point(2, 3);
+    let some_p2 = Point(4, 5);
+    let some_p3 = Point(6, 7);
+    let s = "testing a longer string";
+    let i = -1;
 
     fn rounds() {
         let d = dict();

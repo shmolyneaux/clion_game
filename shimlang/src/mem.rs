@@ -523,12 +523,23 @@ impl MemDescriptor {
         }
     }
 
-    pub fn to_string(&self) -> String {
+    pub fn to_string(&self, mem: &MMU) -> String {
         match &self.t {
             MemDescriptorType::Other(s) => s.clone(),
             MemDescriptorType::EnvHeader(s) => s.clone(),
             MemDescriptorType::EnvData(s) => s.clone(),
-            MemDescriptorType::Struct(type_name, members) => format!("{}({:?})", type_name, members),
+            MemDescriptorType::Struct(type_name, members) => {
+                let mut s = String::new();
+                s.push_str(&format!("{type_name}("));
+                for (idx, val) in members.iter().enumerate() {
+                    if idx != 0 {
+                        s.push_str(", ");
+                    }
+                    s.push_str(&val.to_string_mem(mem));
+                }
+                s.push_str(")");
+                s
+            }
         }
     }
 }
@@ -775,8 +786,8 @@ impl<'a> GC<'a> {
                         }
                         let desc = MemDescriptor::struct_desc(
                             pos,
-                            (pos + def.member_count as usize),
-                            "TODO struct typename".to_string(),
+                            pos + def.member_count as usize,
+                            format!("struct {}", debug_u8s(&def.name)),
                             members
                         );
                         for idx in pos..(pos + def.member_count as usize) {
