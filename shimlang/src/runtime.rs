@@ -1673,7 +1673,8 @@ impl Interpreter {
         }
     }
 
-    pub fn gc(&mut self, env: &Environment) {
+    /// Run the garbage collector and return `(words_before_gc, words_after_gc)`.
+    pub fn gc(&mut self, env: &Environment) -> (usize, usize) {
         let _zone = zone_scoped!("GC");
         //self.print_mem();
         //self.print_env(env);
@@ -1681,6 +1682,8 @@ impl Interpreter {
         unsafe {
             let _scope: &EnvScope = self.mem.get(u24::from(env.current_scope));
         }
+
+        let before = self.mem.used_words();
 
         let mut roots: Vec<ShimValue> = Vec::new();
         roots.push(ShimValue::Environment(u24::from(env.current_scope)));
@@ -1692,6 +1695,9 @@ impl Interpreter {
         };
         gc.mark(roots);
         self.mem.free_list = gc.sweep();
+
+        let after = self.mem.used_words();
+        (before, after)
     }
 
     pub fn create(config: &Config, program: Program) -> Self {
