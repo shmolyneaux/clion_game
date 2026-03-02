@@ -786,6 +786,119 @@ impl ShimValue {
         }
     }
 
+    pub(crate) fn attr_call(
+        &self,
+        ident: &[u8],
+        interpreter: &mut Interpreter,
+        args: &mut ArgBundle,
+    ) -> Result<CallResult, String> {
+        match self {
+            ShimValue::Struct(def_pos, pos) => {
+                // Handle __type__ special attribute
+                if ident == b"__type__" {
+                    return ShimValue::StructDef(*def_pos).call(interpreter, args);
+                }
+                
+                unsafe {
+                    let def: &StructDef = interpreter.mem.get(*def_pos);
+                    for (attr, loc) in def.lookup.iter() {
+                        if ident == attr {
+                            return match loc {
+                                StructAttribute::MemberInstanceOffset(offset) => {
+                                    let val: ShimValue = *interpreter.mem.get(*pos + *offset as u32);
+                                    val.call(interpreter, args)
+                                }
+                                StructAttribute::MethodDef(fn_pos) => {
+                                    // push struct pos to start of arg list then return the pc of the method
+                                    args.args.insert(0, *self);
+                                    let shim_fn: &ShimFn = interpreter.mem.get(*fn_pos);
+                                    Ok(CallResult::PC(shim_fn.pc, shim_fn.captured_scope))
+                                }
+                            };
+                        }
+                    }
+                }
+                Err(format!("Ident {:?} not found for {}", debug_u8s(ident), self.to_string_mem(&interpreter.mem)))
+            }
+            ShimValue::StructDef(def_pos) => {
+                // Handle __name__ special attribute
+                if ident == b"__name__" {
+                    return Err("__name__ is not callable".to_string());
+                }
+                
+                unsafe {
+                    let def: &StructDef = interpreter.mem.get(*def_pos);
+                    for (attr, loc) in def.lookup.iter() {
+                        if ident == attr {
+                            return match loc {
+                                StructAttribute::MemberInstanceOffset(_) => Err(format!(
+                                    "Can't access member {:?} on StructDef {}",
+                                    ident, self.to_string_mem(&interpreter.mem)
+                                )),
+                                StructAttribute::MethodDef(fn_pos) => {
+                                    ShimValue::Fn(*fn_pos).call(interpreter, args)
+                                }
+                            };
+                        }
+                    }
+                }
+                Err(format!("Ident {:?} not found for {}", debug_u8s(ident), self.to_string_mem(&interpreter.mem)))
+            }
+            ShimValue::String(..) => {
+                args.args.insert(0, *self);
+                let func = match ident {
+                    b"len" => shim_str_len,
+                    _ => return Err(format!("No ident {:?} on str", debug_u8s(ident))),
+                };
+                func(interpreter, args).map(|v| CallResult::ReturnValue(v))
+            }
+            ShimValue::List(_) => {
+                args.args.insert(0, *self);
+                let func = match ident {
+                    b"map" => shim_list_map,
+                    b"filter" => shim_list_filter,
+                    b"len" => shim_list_len,
+                    b"iter" => shim_list_iter,
+                    b"sort" => shim_list_sort,
+                    b"append" => shim_list_append,
+                    b"clear" => shim_list_clear,
+                    b"extend" => shim_list_extend,
+                    b"index" => shim_list_index,
+                    b"insert" => shim_list_insert,
+                    b"pop" => shim_list_pop,
+                    b"sorted" => shim_list_sorted,
+                    b"reverse" => shim_list_reverse,
+                    b"reversed" => shim_list_reversed,
+                    _ => return Err(format!("No ident {:?} on list", debug_u8s(ident))),
+                };
+                func(interpreter, args).map(|v| CallResult::ReturnValue(v))
+            }
+            ShimValue::Dict(_) => {
+                args.args.insert(0, *self);
+                let func = match ident {
+                    b"set" => shim_dict_index_set,
+                    b"get" => shim_dict_index_get,
+                    b"has" => shim_dict_index_has,
+                    b"len" => shim_dict_len,
+                    b"pop" => shim_dict_pop,
+                    b"iter" => shim_dict_iter,
+                    b"keys" => shim_dict_keys,
+                    b"values" => shim_dict_values,
+                    b"items" => shim_dict_items,
+                    b"shrink_to_fit" => shim_dict_shrink_to_fit,
+                    _ => return Err(format!("No ident {:?} on dict", debug_u8s(ident))),
+                };
+                func(interpreter, args).map(|v| CallResult::ReturnValue(v))
+            }
+            ShimValue::Native(_) => {
+                let func = self.native(interpreter).unwrap().get_attr(self, interpreter, ident)?;
+                // TODO: add attr_call to ShimNative
+                func.call(interpreter, args)
+            }
+            val => Err(format!("Ident {:?} not available on {}", debug_u8s(ident), val.to_string_mem(&interpreter.mem))),
+        }
+    }
+
     pub(crate) fn dict_mut(&self, interpreter: &mut Interpreter) -> Result<&mut ShimDict, String> {
         match self {
             ShimValue::Dict(position) => {
@@ -2065,6 +2178,56 @@ impl Interpreter {
                         }
                     }
                     pc += 2;
+                }
+                val if val == ByteCode::AttrCall as u8 => {
+                    let arg_count = bytes[pc + 1];
+                    let kwarg_count = bytes[pc + 2];
+                    let ident_len = bytes[pc + 3];
+                    let ident = &bytes[pc + 4..pc + 4 + ident_len as usize];
+
+                    pending_args.clear();
+
+                    for _ in 0..kwarg_count {
+                        let val = stack.pop().unwrap();
+                        let ident = match stack.pop().unwrap() {
+                            val @ ShimValue::String(..) => {
+                                val.string(self)?.to_vec()
+                            },
+                            other => return Err(format!("Invalid kwarg ident {:?}", other)),
+                        };
+                        pending_args.kwargs.push((ident, val));
+                    }
+
+                    for _ in 0..arg_count {
+                        pending_args.args.push(stack.pop().unwrap());
+                    }
+                    pending_args.args.reverse();
+                    pending_args.kwargs.reverse();
+
+                    let obj = stack.pop().expect("obj not on stack");
+
+                    match obj.attr_call(ident, self, &mut pending_args).map_err(|err_str| {
+                        format_script_err(self.program.spans[pc], &self.program.script, &err_str)
+                    })? {
+                        CallResult::ReturnValue(res) => stack.push(res),
+                        CallResult::PC(new_pc, captured_scope) => {
+                            stack_frame.push((
+                                pc + 4 + ident_len as usize,
+                                loop_info.clone(),
+                                env.scope_depth(&self.mem),
+                                env.current_scope,
+                                fn_optional_param_names.clone(),
+                                fn_optional_param_name_idx,
+                            ));
+                            loop_info = Vec::new();
+                            // Restore the captured environment and push a new scope for function locals
+                            env.current_scope = captured_scope;
+                            env.push_scope(&mut self.mem);
+                            pc = new_pc as usize;
+                            continue;
+                        }
+                    }
+                    pc += 3 + ident_len as usize;
                 }
                 val if val == ByteCode::StartScope as u8 => {
                     env.push_scope(&mut self.mem);

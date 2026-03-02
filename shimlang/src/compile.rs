@@ -58,6 +58,7 @@ pub(crate) enum ByteCode {
     Break,
     Continue,
     Call,
+    AttrCall,
     Index,
     SetIndex,
     Return,
@@ -819,31 +820,83 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
             Ok(asm)
         }
         Expression::Call(expr, args, kwargs) => {
-            // First we evaluate the thing that needs to be called
-            let mut res = compile_expression(&expr)?;
+            if let Expression::Attribute(obj_expr, attr_ident) = &expr.data {
+                // Method calling optimization.
+                // Normally, accessing a method on an instance of an object would allocate a 2-word object
+                // in memory that's immediately discarded after the call. That's pretty rough from a
+                // fragmentation and memory-use perspective to need to allocate for every single method
+                // call.
 
-            // Then we evaluate each argument
-            for arg_expr in args.iter() {
-                res.extend(compile_expression(arg_expr)?);
-            }
+                // This optimzation uses a fused op-code whenever a `Call` is done on an accessed attribute.
+                // Instead of allocating for a BoundMethod, it executes ShimValue::call_attr
 
-            for (ident, kwarg_expr) in kwargs.iter() {
-                res.push((ByteCode::LiteralString as u8, kwarg_expr.span));
-                res.push((
-                    ident.len().try_into().expect("Ident should into u8"),
-                    kwarg_expr.span,
-                ));
-                for b in ident.into_iter() {
-                    res.push((*b, kwarg_expr.span));
+                // Get the object
+                let mut res = compile_expression(&obj_expr)?;
+
+                // Get the args
+                for arg_expr in args.iter() {
+                    res.extend(compile_expression(arg_expr)?);
                 }
 
-                res.extend(compile_expression(kwarg_expr)?);
-            }
+                // Get the kwargs
+                for (ident, kwarg_expr) in kwargs.iter() {
+                    res.push((ByteCode::LiteralString as u8, kwarg_expr.span));
+                    res.push((
+                        ident.len().try_into().expect("Ident should into u8"),
+                        kwarg_expr.span,
+                    ));
+                    for b in ident.into_iter() {
+                        res.push((*b, kwarg_expr.span));
+                    }
 
-            res.push((ByteCode::Call as u8, span));
-            res.push((args.len() as u8, span));
-            res.push((kwargs.len() as u8, span));
-            Ok(res)
+                    res.extend(compile_expression(kwarg_expr)?);
+                }
+
+                // Then call a particular attribute with the arguments.
+                // The ident is last since it's a variable length and that feels right.
+                // This attribute access it technically out-of-order for this optimization,
+                // (arguments are evaluated before the attribute is accessed). People will
+                // just need to deal with that since this is too important of an optimzation
+                // to ignore.
+                res.push((ByteCode::AttrCall as u8, span));
+                res.push((args.len() as u8, span));
+                res.push((kwargs.len() as u8, span));
+                res.push((
+                    attr_ident.len().try_into().expect("Ident len should into u8"),
+                    span,
+                ));
+                for b in attr_ident.into_iter() {
+                    res.push((*b, span));
+                }
+                Ok(res)
+            } else {
+                // First we evaluate the thing that needs to be called
+                let mut res = compile_expression(&expr)?;
+                let (bytecode, _spans): (Vec<u8>, Vec<Span>) = res.clone().into_iter().unzip();
+
+                // Then we evaluate each argument
+                for arg_expr in args.iter() {
+                    res.extend(compile_expression(arg_expr)?);
+                }
+
+                for (ident, kwarg_expr) in kwargs.iter() {
+                    res.push((ByteCode::LiteralString as u8, kwarg_expr.span));
+                    res.push((
+                        ident.len().try_into().expect("Ident should into u8"),
+                        kwarg_expr.span,
+                    ));
+                    for b in ident.into_iter() {
+                        res.push((*b, kwarg_expr.span));
+                    }
+
+                    res.extend(compile_expression(kwarg_expr)?);
+                }
+
+                res.push((ByteCode::Call as u8, span));
+                res.push((args.len() as u8, span));
+                res.push((kwargs.len() as u8, span));
+                Ok(res)
+            }
         }
         Expression::Attribute(expr, ident) => {
             let mut res = compile_expression(&expr)?;
@@ -870,6 +923,10 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
             )
         },
     }
+}
+
+pub fn eprint_asm(bytes: &[u8]) {
+    eprintln!("{}", format_asm(bytes));
 }
 
 pub fn print_asm(bytes: &[u8]) {
@@ -910,6 +967,13 @@ pub fn format_asm(bytes: &[u8]) -> String {
             let kwarg_count = bytes[idx+2] as usize;
             out.push_str(&format!("call args={}  kwargs={}", arg_count, kwarg_count));
             idx += 2;
+        } else if *b == ByteCode::AttrCall as u8 {
+            let arg_count = bytes[idx+1] as usize;
+            let kwarg_count = bytes[idx+2] as usize;
+            let len = bytes[idx + 3] as usize;
+            let slice = &bytes[idx + 4..idx + 4 + len];
+            out.push_str(&format!("attr_call .{} args={}  kwargs={}", debug_u8s(slice), arg_count, kwarg_count));
+            idx += 3 + len;
         } else if *b == ByteCode::Not as u8 {
             out.push_str("Not");
         } else if *b == ByteCode::GT as u8 {

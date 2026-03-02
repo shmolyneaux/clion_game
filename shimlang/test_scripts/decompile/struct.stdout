@@ -26,9 +26,8 @@
  144:  let "p"
  147:  load "print"
  154:  load "p"
- 157:  get .distance
- 167:  call args=0  kwargs=0
- 170:  call args=1  kwargs=0
- 173:  pop
- 174:  None
+ 157:  attr_call .distance args=0  kwargs=0
+ 169:  call args=1  kwargs=0
+ 172:  pop
+ 173:  None
 
