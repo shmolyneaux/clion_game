@@ -627,9 +627,47 @@ pub fn compile_block_inner(block: &Block, is_expr: bool, block_span: Span, asm: 
 pub fn compile_block(block: &Block, is_expr: bool, block_span: Span) -> Result<Vec<(u8, Span)>, String> {
     let mut asm = Vec::new();
 
-    asm.push((ByteCode::StartScope as u8, block_span));
+    // If we don't define any new variables we don't need the overhead of creating a new scope
+    // `let` directly defines a new variable
+    // `for` implicitly defines an iteration variable. That will be rough for nested for loops, so we'll
+    // likely want to be able to hoist that into a new parent scope
+    /*
+    for y in rows {
+      for x in cols { // <--- This `x` is a new variable that would
+                      //      make the outer loop require StartScope/EndScope,
+                      //      but x could be defined before the outer loop in
+                      //      the bytcode to avoid this inefficiency.
+        foo(x, y);
+      }
+    }
+    */
+
+    // We can go further than this by creating a separate HeapScope and StackScope.
+    // We only need the HeapScope if the scope is captured by a function definition,
+    // closure, or struct definition. The vast majority of scopes should be StackScopes.
+    // Even further, the HeapScope might only include captured variables
+    
+    let mut needs_new_scope = false;
+    for stmt in &block.stmts {
+        let stmt = &stmt.data;
+        match stmt {
+            Statement::Let(..) | Statement::For(..) | Statement::Fn(..) | Statement::Struct(..) => {
+                needs_new_scope = true;
+                break;
+            }
+            _ => (),
+        }
+    }
+
+    if needs_new_scope {
+        asm.push((ByteCode::StartScope as u8, block_span));
+    }
+
     compile_block_inner(block, is_expr, block_span, &mut asm)?;
-    asm.push((ByteCode::EndScope as u8, block_span));
+
+    if needs_new_scope {
+        asm.push((ByteCode::EndScope as u8, block_span));
+    }
 
     Ok(asm)
 }
@@ -872,7 +910,6 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
             } else {
                 // First we evaluate the thing that needs to be called
                 let mut res = compile_expression(&expr)?;
-                let (bytecode, _spans): (Vec<u8>, Vec<Span>) = res.clone().into_iter().unzip();
 
                 // Then we evaluate each argument
                 for arg_expr in args.iter() {

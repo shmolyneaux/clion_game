@@ -1,21 +1,16 @@
    0:  ShimValue 0
-   9:  JMPZ -> 41
-  12:  start_scope
-  13:  load "print"
-  20:  String "not taken"
-  31:  call args=1  kwargs=0
-  34:  pop
-  35:  None
-  36:  pop
-  37:  end_scope
-  38:  JMP -> 63
-  41:  start_scope
-  42:  load "print"
-  49:  String "taken"
-  56:  call args=1  kwargs=0
-  59:  pop
-  60:  None
-  61:  pop
-  62:  end_scope
-  63:  None
-
+   9:  JMPZ -> 39
+  12:  load "print"
+  19:  String "not taken"
+  30:  call args=1  kwargs=0
+  33:  pop
+  34:  None
+  35:  pop
+  36:  JMP -> 59
+  39:  load "print"
+  46:  String "taken"
+  53:  call args=1  kwargs=0
+  56:  pop
+  57:  None
+  58:  pop
+  59:  None

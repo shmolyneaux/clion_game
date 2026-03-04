@@ -698,6 +698,8 @@ impl<'a> GC<'a> {
                         // Mark the function name string
                         let shim_fn: &ShimFn = self.mem.get(fn_pos);
                         vals.push(ShimValue::String(shim_fn.name_len, 0, shim_fn.name));
+
+                        // TODO: shouldn't this also include the captured scope...?
                     },
                     ShimValue::List(pos) => {
                         let pos: usize = pos.into();
@@ -771,6 +773,7 @@ impl<'a> GC<'a> {
                         // Mark the indices array
                         let indices_pos: usize = dict.indices.into();
                         #[cfg(feature = "gc_debug")]
+                        // TODO: the dict index size is wrong
                         let indices_desc = MemDescriptor::other(indices_pos, indices_pos + size, "dict index");
                         // TODO: I'm pretty sure this is wrong? The stride of the indices is 1 byte for dicts with less than 256 entries
                         for idx in indices_pos..(indices_pos + size) {
@@ -800,6 +803,9 @@ impl<'a> GC<'a> {
                         for idx in pos..(pos + def.mem_size()) {
                             mark_bit!(self.mask, idx, desc);
                         }
+
+                        // TODO: Don't the methods potentially need to reference the scope the
+                        // struct was defined in?
                     },
                     ShimValue::Struct(def_pos, pos) => {
                         let pos: usize = pos.into();
@@ -894,7 +900,7 @@ impl<'a> GC<'a> {
                         let desc = MemDescriptor::env_header(
                             pos,
                             pos + std::mem::size_of::<EnvScope>().div_ceil(8),
-                            "Envscope header",
+                            &format!("Envscope header\nparent: {:?}", scope.parent),
                         );
                         for bit in pos..(pos + std::mem::size_of::<EnvScope>().div_ceil(8)) {
                             mark_bit!(self.mask, bit, desc);

@@ -234,7 +234,7 @@ impl Navigation {
                     // Tooltip logic
                     if igIsMouseHoveringRect(cell_min, cell_max, true) {
                         igBeginTooltip();
-                        igText(CString::new(format!("{}", s.to_string(&interpreter.mem))).unwrap().as_ptr());
+                        igText(CString::new(format!("{}: {}", s.start, s.to_string(&interpreter.mem))).unwrap().as_ptr());
                         igEndTooltip();
                     }
 

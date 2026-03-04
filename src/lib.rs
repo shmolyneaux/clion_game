@@ -265,6 +265,7 @@ pub struct DebugState {
 /// -180.0 180.0
 pub struct State {
     interpreter: shimlang::Interpreter,
+    interpreter_error: Option<String>,
     env: shimlang::Environment,
 
     frame_num: u64,
@@ -949,10 +950,14 @@ fn init_state() -> State {
     println!("Creating interpreter");
     let interpreter_config = shimlang::Config::default();
     let ast = shimlang::ast_from_text(br#"
-
     struct Point {
         x,
         y
+    }
+
+    let d = dict();
+    for i in 0..100 {
+        d[i] = str(i);
     }
 
     let some_p0 = Point(0, 1);
@@ -1235,6 +1240,7 @@ fn init_state() -> State {
         keys,
         meshes,
         debug_state,
+        interpreter_error: None,
     };
 
     state
@@ -1290,9 +1296,16 @@ fn frame(state: &mut State, delta: f32) {
                 Ok(_) => {},
                 Err(msg) => {
                     eprintln!("{msg}");
+                    state.interpreter_error = Some(msg);
                 }
             };
             state.interpreter.gc(&state.env);
+        }
+
+        if let Some(err) = &state.interpreter_error {
+            igTextColoredBC(0.7, 0.0, 0.0, 1.0, 0.5, 0.5, 0.5, 0.5,
+            CString::new(format!("{}", err)).unwrap().as_ptr()
+            );
         }
 
         igTextColoredBC(1.0, 1.0, 1.0, 1.0, 0.5, 0.5, 0.5, 0.5,
