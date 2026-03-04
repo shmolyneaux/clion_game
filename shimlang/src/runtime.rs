@@ -848,6 +848,7 @@ impl ShimValue {
                 args.args.insert(0, *self);
                 let func = match ident {
                     b"len" => shim_str_len,
+                    b"split" => shim_str_split,
                     _ => return Err(format!("No ident {:?} on str", debug_u8s(ident))),
                 };
                 func(interpreter, args).map(|v| CallResult::ReturnValue(v))
@@ -1459,6 +1460,7 @@ impl ShimValue {
             ShimValue::String(..) => {
                 let func = match ident {
                     b"len" => shim_str_len,
+                    b"split" => shim_str_split,
                     _ => return Err(format!("No ident {:?} on str", debug_u8s(ident))),
                 };
                 Ok(interpreter.mem.alloc_bound_native_fn(self, func))

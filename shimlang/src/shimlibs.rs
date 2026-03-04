@@ -1809,6 +1809,190 @@ pub(crate) fn shim_str_len(interpreter: &mut Interpreter, args: &ArgBundle) -> R
     Ok(ShimValue::Integer(s.len() as i32))
 }
 
+pub(crate) fn shim_str_split(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let binding = unpacker.required(b"obj")?;
+    let s = binding.string(interpreter)?;
+    // TODO: Support a string seperator or list of string seperators
+    // let sep = unpacker.optional(b"sep");
+    // TODO: Return only upto a specified of fields
+    // let max_split = unpacker.optional(b"maxsplit");
+    unpacker.end()?;
+
+    let pos = match binding {
+        ShimValue::String(_, _, pos) => pos,
+        _ => panic!("unreachable"),
+    };
+
+    let len = s.len();
+
+    let mut out_val = interpreter.mem.alloc_list();
+    let mut out = out_val.list_mut(interpreter)?;
+    let mut start_range = 0;
+    let mut idx: usize = 0;
+    while idx < len {
+        while idx < len && !matches!(s[idx], b'\n' | b' ' | b'\t' | b'\r') {
+            idx += 1;
+        }
+        let val = ShimValue::String(
+            (idx - start_range) as u16, // len
+            (start_range % 8) as u8, // byte offset within the 8-byte aligned word
+            (usize::from(pos) + start_range / 8).into(),
+        );
+        out.push(
+            &mut interpreter.mem,
+            val,
+        );
+
+        while idx < len && matches!(s[idx], b'\n' | b' ' | b'\t' | b'\r') {
+            idx += 1;
+        }
+        start_range = idx;
+    }
+
+    Ok(out_val)
+}
+
+pub(crate) fn shim_str_join(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let binding = unpacker.required(b"obj")?;
+    let s = binding.string(interpreter)?;
+    // Fill in here
+    unpacker.end()?;
+
+    todo!();
+}
+
+pub(crate) fn shim_str_upper(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let binding = unpacker.required(b"obj")?;
+    let s = binding.string(interpreter)?;
+    // Fill in here
+    unpacker.end()?;
+
+    todo!();
+}
+
+pub(crate) fn shim_str_lower(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let binding = unpacker.required(b"obj")?;
+    let s = binding.string(interpreter)?;
+    // Fill in here
+    unpacker.end()?;
+
+    todo!();
+}
+
+pub(crate) fn shim_str_strip(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let binding = unpacker.required(b"obj")?;
+    let s = binding.string(interpreter)?;
+    // Fill in here
+    unpacker.end()?;
+
+    todo!();
+}
+
+pub(crate) fn shim_str_remove_prefix(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let binding = unpacker.required(b"obj")?;
+    let s = binding.string(interpreter)?;
+    // Fill in here
+    unpacker.end()?;
+
+    todo!();
+}
+
+pub(crate) fn shim_str_remove_suffix(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let binding = unpacker.required(b"obj")?;
+    let s = binding.string(interpreter)?;
+    // Fill in here
+    unpacker.end()?;
+
+    todo!();
+}
+
+pub(crate) fn shim_str_split_lines(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let binding = unpacker.required(b"obj")?;
+    let s = binding.string(interpreter)?;
+    // Fill in here
+    unpacker.end()?;
+
+    todo!();
+}
+
+pub(crate) fn shim_str_contains(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let binding = unpacker.required(b"obj")?;
+    let s = binding.string(interpreter)?;
+    // Fill in here
+    unpacker.end()?;
+
+    todo!();
+}
+
+pub(crate) fn shim_str_ends_with(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let binding = unpacker.required(b"obj")?;
+    let s = binding.string(interpreter)?;
+    // Fill in here
+    unpacker.end()?;
+
+    todo!();
+}
+
+pub(crate) fn shim_str_starts_with(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let binding = unpacker.required(b"obj")?;
+    let s = binding.string(interpreter)?;
+    // Fill in here
+    unpacker.end()?;
+
+    todo!();
+}
+
+pub(crate) fn shim_str_find(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let binding = unpacker.required(b"obj")?;
+    let s = binding.string(interpreter)?;
+    // Fill in here
+    unpacker.end()?;
+
+    todo!();
+}
+
+pub(crate) fn shim_str_lstrip(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let binding = unpacker.required(b"obj")?;
+    let s = binding.string(interpreter)?;
+    // Fill in here
+    unpacker.end()?;
+
+    todo!();
+}
+
+pub(crate) fn shim_str_rstrip(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let binding = unpacker.required(b"obj")?;
+    let s = binding.string(interpreter)?;
+    // Fill in here
+    unpacker.end()?;
+
+    todo!();
+}
+
+pub(crate) fn shim_str_replace(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let binding = unpacker.required(b"obj")?;
+    let s = binding.string(interpreter)?;
+    // Fill in here
+    unpacker.end()?;
+
+    todo!();
+}
+
 pub(crate) fn get_type_name(value: &ShimValue) -> &'static str {
     match value {
         ShimValue::Uninitialized => "uninitialized",

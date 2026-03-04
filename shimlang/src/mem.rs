@@ -423,7 +423,7 @@ impl MMU {
         ShimValue::Dict(self.alloc_dict_raw())
     }
 
-    pub(crate) fn alloc_list(&mut self) -> ShimValue {
+    pub(crate) fn alloc_list_raw(&mut self) -> u24 {
         let word_count: u24 = (std::mem::size_of::<ShimList>() as u32).div_ceil(8).into();
         let position = alloc!(self, word_count, "List");
         unsafe {
@@ -431,7 +431,11 @@ impl MMU {
                 std::mem::transmute(&mut self.mem[usize::from(position)]);
             ptr.write(ShimList::new());
         }
-        ShimValue::List(position)
+        position
+    }
+
+    pub(crate) fn alloc_list(&mut self) -> ShimValue {
+        ShimValue::List(self.alloc_list_raw())
     }
 
     pub(crate) fn alloc_fn(&mut self, pc: u32, name: &[u8], captured_scope: u32) -> ShimValue {

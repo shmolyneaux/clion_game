@@ -15,7 +15,17 @@ MAGENTA = "\033[35m"
 CYAN = "\033[36m"
 RESET = "\033[0m"
 
-cli_scripts = [Path(p).resolve() for p in sys.argv[1:]]
+cli_paths = [Path(p).resolve() for p in sys.argv[1:]]
+cli_scripts = []
+for p in cli_paths:
+    if p.is_dir():
+        # If this is a dir, get the .shm files in the directory
+        cli_scripts.extend(
+            p for p in p.iterdir() if p.suffix == ".shm"
+        )
+    else:
+        # Otherwise assume it's a direct path to a script
+        cli_script.append(p)
 
 start_time = time()
 result = subprocess.run("cargo build --bin shm", shell=True)
