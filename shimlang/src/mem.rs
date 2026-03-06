@@ -772,15 +772,18 @@ impl<'a> GC<'a> {
                             mark_bit!(self.mask, idx, header_desc);
                         }
 
-                        let size = 1 << dict.size_pow;
+                        let size: usize = 1 << dict.size_pow;
 
                         // Mark the indices array
                         let indices_pos: usize = dict.indices.into();
+                        let indices_word_count = if dict.size_pow == 0 {
+                            0
+                        } else {
+                            size.div_ceil(8 / dict.indices_stride_bytes(size))
+                        };
                         #[cfg(feature = "gc_debug")]
-                        // TODO: the dict index size is wrong
-                        let indices_desc = MemDescriptor::other(indices_pos, indices_pos + size, "dict index");
-                        // TODO: I'm pretty sure this is wrong? The stride of the indices is 1 byte for dicts with less than 256 entries
-                        for idx in indices_pos..(indices_pos + size) {
+                        let indices_desc = MemDescriptor::other(indices_pos, indices_pos + indices_word_count, "dict index");
+                        for idx in indices_pos..(indices_pos + indices_word_count) {
                             mark_bit!(self.mask, idx, indices_desc);
                         }
 
