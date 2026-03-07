@@ -32,12 +32,14 @@ mod gpu;
 mod mesh_gen;
 mod debug_draw;
 mod sdf;
+mod script_bridge;
 
 mod shimlang_imgui;
 
 use crate::sdf::*;
 use crate::gpu::*;
 use crate::debug_draw::*;
+use crate::script_bridge::*;
 use crate::mesh_gen::{box_mesh, quad_mesh};
 
 use shm_tracy::*;
@@ -264,9 +266,7 @@ pub struct DebugState {
 //#[derive(Facet)]
 /// -180.0 180.0
 pub struct State {
-    interpreter: shimlang::Interpreter,
-    interpreter_error: Option<String>,
-    env: shimlang::Environment,
+    script_bridge: ScriptBridge,
 
     frame_num: u64,
     view: Mat4,
@@ -948,39 +948,7 @@ fn init_state() -> State {
     println!("Starting Rust state initialization");
 
     println!("Creating interpreter");
-    let interpreter_config = shimlang::Config::default();
-    let ast = shimlang::ast_from_text(br#"
-    struct Point {
-        x,
-        y
-    }
-
-    let d = dict();
-    for i in 0..100 {
-        d[i] = str(i);
-    }
-
-    let some_p0 = Point(0, 1);
-    let some_p1 = Point(2, 3);
-    let some_p2 = Point(4, 5);
-    let some_p3 = Point(6, 7);
-    let s = "testing a longer string";
-    let i = -1;
-
-    fn rounds() {
-        let d = dict();
-        for i in 0..1000 {
-            d[i] = Point(i*2, i*3);
-        }
-    }
-
-    rounds();
-    
-    print("done");
-    "#).unwrap();
-    let program = shimlang::compile_ast(&ast).unwrap();
-    let mut interpreter = shimlang::Interpreter::create(&shimlang::Config::default(), program);
-    let env = shimlang::Environment::new_with_builtins(&mut interpreter);
+    let script_bridge = ScriptBridge::new();
 
     println!("Generating arrays/buffers");
     let debug_vao = VertexArray::create();
@@ -1216,8 +1184,7 @@ fn init_state() -> State {
 
     println!("State initialized!");
     let mut state = State {
-        interpreter,
-        env,
+        script_bridge,
         frame_num,
         debug_vao,
         debug_vbo,
@@ -1240,7 +1207,6 @@ fn init_state() -> State {
         keys,
         meshes,
         debug_state,
-        interpreter_error: None,
     };
 
     state
@@ -1291,18 +1257,10 @@ fn frame(state: &mut State, delta: f32) {
 
         if igButton(CString::new(format!("Execute One Frame")).unwrap().as_ptr()) {
             let _zone = zone_scoped!("Run interpreter");
-            let mut pc = 0;
-            match state.interpreter.execute_bytecode_extended(&mut pc, shimlang::ArgBundle::new(), &mut state.env) {
-                Ok(_) => {},
-                Err(msg) => {
-                    eprintln!("{msg}");
-                    state.interpreter_error = Some(msg);
-                }
-            };
-            state.interpreter.gc(&state.env);
+            state.script_bridge.step();
         }
 
-        if let Some(err) = &state.interpreter_error {
+        for err in state.script_bridge.errors() {
             igTextColoredBC(0.7, 0.0, 0.0, 1.0, 0.5, 0.5, 0.5, 0.5,
             CString::new(format!("{}", err)).unwrap().as_ptr()
             );
@@ -1426,9 +1384,7 @@ fn frame(state: &mut State, delta: f32) {
             let zone = zone_scoped!("IMGUI Debug Windows");
             {
                 let _zone = zone_scoped!("ShimLang Debug");
-
-                state.debug_state.shimlang_debug_window.debug_window(&mut state.interpreter, &state.env);
-                state.debug_state.shimlang_repl.window(&mut state.interpreter);
+                state.script_bridge.debug_window(&mut state.debug_state.shimlang_debug_window, &mut state.debug_state.shimlang_repl);
 
                 draw_log_window();
             }
