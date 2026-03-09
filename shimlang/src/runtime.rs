@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::any::{Any, type_name, type_name_of_val};
 use std::mem::size_of;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use shm_tracy::*;
 use shm_tracy::zone_scoped;
@@ -1582,7 +1582,7 @@ impl ShimValue {
 pub struct Interpreter {
     pub mem: MMU,
     pub source: HashMap<String, String>,
-    pub program: Rc<Program>,
+    pub program: Arc<Program>,
 }
 
 impl Interpreter {
@@ -1702,20 +1702,20 @@ impl Interpreter {
         Self {
             mem: mmu,
             source: HashMap::new(),
-            program: Rc::new(program),
+            program: Arc::new(program),
         }
     }
 
     pub fn append_program(&mut self, program: Program) -> Result<(), String> {
         let span_offset = self.program.script.len() as u32;
-        Rc::<Program>::get_mut(&mut self.program).unwrap().bytecode.extend(program.bytecode);
-        Rc::<Program>::get_mut(&mut self.program).unwrap().spans.extend(
+        Arc::<Program>::get_mut(&mut self.program).unwrap().bytecode.extend(program.bytecode);
+        Arc::<Program>::get_mut(&mut self.program).unwrap().spans.extend(
             program.spans.into_iter().map(|span| Span {
                 start: span.start + span_offset,
                 end: span.end + span_offset,
             })
         );
-        Rc::<Program>::get_mut(&mut self.program).unwrap().script.extend(program.script);
+        Arc::<Program>::get_mut(&mut self.program).unwrap().script.extend(program.script);
 
         Ok(())
     }
