@@ -24,7 +24,7 @@ enum BridgeState {
 
 pub struct ScriptBridge {
     state: BridgeState,
-    interpreter_errors: Vec<String>,
+    pub interpreter_errors: Vec<String>,
     tx: Sender<ScriptRequest>,
     rx: Receiver<ScriptResponse>,
 }
@@ -104,7 +104,7 @@ impl ScriptBridge {
     }
 
     pub fn errors(&self) -> &[String] {
-        &[]
+        &self.interpreter_errors
     }
 
     pub fn debug_window(
