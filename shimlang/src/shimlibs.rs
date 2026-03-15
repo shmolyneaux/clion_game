@@ -697,6 +697,9 @@ impl ShimDict {
             _ => TypedIndices::U32(
                 self.indicies_mut::<u32>(interpreter)
             ),
+            // On wasm32 (32-bit usize), all values fit in u32 so the catch-all above covers everything.
+            // On 64-bit, the memory system is bounded by MAX_U24 * 8 bytes, so index_size() can never
+            // exceed u32::MAX + 1 in practice.
         }
     }
 
