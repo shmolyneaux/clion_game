@@ -694,10 +694,9 @@ impl ShimDict {
             x if x <= (u16::MAX as usize) + 1 => TypedIndices::U16(
                 self.indicies_mut::<u16>(interpreter)
             ),
-            x if x <= (u32::MAX as usize) + 1 => TypedIndices::U32(
+            _ => TypedIndices::U32(
                 self.indicies_mut::<u32>(interpreter)
             ),
-            _ => panic!("Size over u64"),
         }
     }
 

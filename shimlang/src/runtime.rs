@@ -466,7 +466,7 @@ pub(crate) trait ShimNative: Any {
 
 pub(crate) type NativeFn = fn(&mut Interpreter, &ArgBundle) -> Result<ShimValue, String>;
 const _: () = {
-    assert!(std::mem::size_of::<NativeFn>() == 8);
+    assert!(std::mem::size_of::<NativeFn>() <= 8);
 };
 
 pub(crate) fn format_float(val: f32) -> String {
@@ -520,10 +520,7 @@ impl StructDef {
     pub(crate) fn mem_size(&self) -> usize {
         // TODO: if the StructDef changes it might be effectively non const sized
         // in interpreter memory
-        const _: () = {
-            assert!(std::mem::size_of::<StructDef>() == 56);
-        };
-        std::mem::size_of::<StructDef>() / 8
+        std::mem::size_of::<StructDef>().div_ceil(8)
     }
 }
 
@@ -2375,12 +2372,10 @@ impl Interpreter {
                         ));
                         idx = idx + 1 + ident_len as usize;
                     }
-                    const _: () = {
-                        assert!(std::mem::size_of::<StructDef>() == 56);
-                    };
+                    let struct_def_words: u32 = std::mem::size_of::<StructDef>().div_ceil(8) as u32;
                     let pos = alloc!(
                         self.mem,
-                        7u32.into(),
+                        struct_def_words.into(),
                         &format!("ByteCode::CreateStruct def PC {pc}")
                     );
 
