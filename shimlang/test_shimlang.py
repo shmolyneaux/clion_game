@@ -15,7 +15,8 @@ MAGENTA = "\033[35m"
 CYAN = "\033[36m"
 RESET = "\033[0m"
 
-cli_paths = [Path(p).resolve() for p in sys.argv[1:]]
+wasm = "--wasm" in sys.argv
+cli_paths = [Path(p).resolve() for p in sys.argv[1:] if p != "--wasm"]
 cli_scripts = []
 for p in cli_paths:
     if p.is_dir():
@@ -28,7 +29,10 @@ for p in cli_paths:
         cli_script.append(p)
 
 start_time = time()
-result = subprocess.run("cargo build --bin shm", shell=True)
+if wasm:
+    result = subprocess.run("cargo build --bin shm --target wasm32-wasip1", shell=True)
+else:
+    result = subprocess.run("cargo build --bin shm", shell=True)
 end_time = time()
 duration = end_time - start_time
 
@@ -117,7 +121,9 @@ for command in (
         if stderr_file.exists():
             expected_stderr = stderr_file.read_text()
 
-        if sys.platform == "win32":
+        if wasm:
+            exe_path = "wasmtime --dir=. target/wasm32-wasip1/debug/shm.wasm"
+        elif sys.platform == "win32":
             exe_path = "target\\debug\\shm.exe"
         elif sys.platform == "linux" or sys.platform == "linux2":
             exe_path = "target/debug/shm"
