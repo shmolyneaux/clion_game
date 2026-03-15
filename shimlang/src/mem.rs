@@ -454,8 +454,7 @@ impl MMU {
     }
 
     pub(crate) fn alloc_native<T: ShimNative>(&mut self, val: T) -> ShimValue {
-        assert!(std::mem::size_of::<Box<dyn ShimNative>>() == 16);
-        let word_count: u24 = 2.into();
+        let word_count: u24 = (std::mem::size_of::<Box<dyn ShimNative>>() as u32).div_ceil(8).into();
         let position = alloc!(self, word_count, "Native");
         unsafe {
             let ptr: *mut Box<dyn ShimNative> =
@@ -857,9 +856,12 @@ impl<'a> GC<'a> {
                         if self.mask.is_set(pos) {
                             continue;
                         }
-                        assert!(std::mem::size_of::<Box<dyn ShimNative>>() == 16);
-                        mark_bit!(self.mask, pos, MemDescriptor::other(pos, pos+2, "Native"));
-                        mark_bit!(self.mask, pos+1, MemDescriptor::other(pos, pos+2, "Native"));
+                        let native_word_count = std::mem::size_of::<Box<dyn ShimNative>>().div_ceil(8);
+                        #[cfg(feature = "gc_debug")]
+                        let desc = MemDescriptor::other(pos, pos + native_word_count, "Native");
+                        for idx in pos..(pos + native_word_count) {
+                            mark_bit!(self.mask, idx, desc);
+                        }
 
                         let ptr: &Box<dyn ShimNative> = std::mem::transmute(&self.mem.mem[pos]);
 
