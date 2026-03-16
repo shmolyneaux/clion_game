@@ -252,7 +252,7 @@ impl MMU {
         }
     }
 
-    pub(crate) fn alloc_and_set<T>(&mut self, value: T, _debug_name: &str) -> u24 {
+    pub fn alloc_and_set<T>(&mut self, value: T, _debug_name: &str) -> u24 {
         let word_count: u24 = (std::mem::size_of::<T>() as u32).div_ceil(8).into();
         let position = alloc!(self, word_count, _debug_name);
         unsafe {

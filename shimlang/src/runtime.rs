@@ -219,7 +219,7 @@ impl Environment {
         env
     }
 
-    fn insert_new(&mut self, interpreter: &mut Interpreter, key: Vec<u8>, val: ShimValue) {
+    pub fn insert_new(&mut self, interpreter: &mut Interpreter, key: Vec<u8>, val: ShimValue) {
         assert!(key.len() <= u8::MAX as usize, "Key length {} exceeds maximum {}", key.len(), u8::MAX);
 
         // Check if key already exists in the current scope — update in place (upsert)
@@ -464,7 +464,7 @@ pub(crate) trait ShimNative: Any {
     fn gc_vals(&self) -> Vec<ShimValue>;
 }
 
-pub(crate) type NativeFn = fn(&mut Interpreter, &ArgBundle) -> Result<ShimValue, String>;
+pub type NativeFn = fn(&mut Interpreter, &ArgBundle) -> Result<ShimValue, String>;
 const _: () = {
     assert!(std::mem::size_of::<NativeFn>() <= 8);
 };
@@ -554,22 +554,22 @@ impl ArgBundle {
     }
 }
 
-pub(crate) struct ArgUnpacker<'a> {
+pub struct ArgUnpacker<'a> {
     bundle: &'a ArgBundle,
     pos: usize,
     kwargs_consumed: usize,
 }
 
 impl<'a> ArgUnpacker<'a> {
-    pub(crate) fn new(bundle: &'a ArgBundle) -> Self {
+    pub fn new(bundle: &'a ArgBundle) -> Self {
         Self { bundle, pos: 0, kwargs_consumed: 0 }
     }
 
-    pub(crate) fn required(&mut self, name: &[u8]) -> Result<ShimValue, String> {
+    pub fn required(&mut self, name: &[u8]) -> Result<ShimValue, String> {
         self.optional(name).ok_or_else(|| format!("Missing required argument: '{}'", debug_u8s(name)))
     }
 
-    pub(crate) fn optional(&mut self, name: &[u8]) -> Option<ShimValue> {
+    pub fn optional(&mut self, name: &[u8]) -> Option<ShimValue> {
         for (ident, arg) in self.bundle.kwargs.iter() {
             if ident == name {
                 self.kwargs_consumed += 1;
@@ -586,7 +586,7 @@ impl<'a> ArgUnpacker<'a> {
         }
     }
 
-    pub(crate) fn end(&self) -> Result<(), String> {
+    pub fn end(&self) -> Result<(), String> {
         let consumed = self.pos + self.kwargs_consumed;
         if self.bundle.len() != consumed {
             Err(format!("Got {} arguments, but only used {}", self.bundle.len(), consumed))

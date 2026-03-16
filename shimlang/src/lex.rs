@@ -103,7 +103,7 @@ fn script_lines(script: &[u8]) -> Vec<LineInfo> {
     line_info
 }
 
-pub(crate) fn debug_u8s(data: &[u8]) -> &str {
+pub fn debug_u8s(data: &[u8]) -> &str {
     unsafe { std::str::from_utf8_unchecked(data) }
 }
 
