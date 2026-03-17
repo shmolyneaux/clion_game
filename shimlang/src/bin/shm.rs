@@ -131,7 +131,8 @@ fn run() -> Result<(), String> {
                 match interpreter.execute_bytecode_extended(&mut pc, shimlang::ArgBundle::new(), &mut env) {
                     Ok(_) => {
                         if args.gc {
-                            interpreter.gc(&env);
+                            let (before, after) = interpreter.gc(&env);
+                            eprintln!("[gc_stats] used_before={} used_after={} freed={}", before, after, before.saturating_sub(after));
                         }
                     },
                     Err(msg) => {

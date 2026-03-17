@@ -232,6 +232,13 @@ impl MMU {
         }
     }
 
+    /// Returns the number of words currently in use (total capacity minus free words).
+    pub fn used_words(&self) -> usize {
+        let total = self.mem.len();
+        let free: usize = self.free_list.iter().map(|b| usize::from(b.size)).sum();
+        total - free
+    }
+
     /*
     fn compact_free_list() {
         todo!("compact_free_list not implemented");

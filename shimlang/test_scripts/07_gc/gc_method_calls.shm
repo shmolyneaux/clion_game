@@ -1,0 +1,24 @@
+struct Point {
+    x,
+    y,
+    fn add(self, other) {
+        return Point(self.x + other.x, self.y + other.y);
+    }
+    fn scale(self, factor) {
+        return Point(self.x * factor, self.y * factor);
+    }
+    fn dot(self, other) {
+        return self.x * other.x + self.y * other.y;
+    }
+}
+
+let p = Point(0, 0);
+let i = 0;
+while i < 100 {
+    p = p.add(Point(1, 2));
+    p = p.scale(1);
+    i = i + 1;
+}
+print(p.x);
+print(p.y);
+print(p.dot(Point(1, 0)));
