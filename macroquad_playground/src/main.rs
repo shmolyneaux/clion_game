@@ -10,54 +10,98 @@ use shimlang::lex::debug_u8s;
 
 fn shim_draw_circle(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
-
-    // TODO: unpacker should support type checking right here
-    let x = unpacker.required(b"x")?;
-    let y = unpacker.required(b"y")?;
-    let radius = unpacker.required(b"radius")?;
-    let r = unpacker.required(b"r")?;
-    let g = unpacker.required(b"g")?;
-    let b = unpacker.required(b"b")?;
-    let a = unpacker.required(b"a")?;
+    draw_circle(
+        unpacker.required_number(b"x")?,
+        unpacker.required_number(b"y")?,
+        unpacker.required_number(b"radius")?,
+        Color::new(
+            unpacker.required_number(b"r")?,
+            unpacker.required_number(b"g")?,
+            unpacker.required_number(b"b")?,
+            unpacker.required_number(b"a")?,
+        ),
+    );
     unpacker.end()?;
+    Ok(ShimValue::None)
+}
 
-    match (x, y, radius, r, g, b, a) {
-        (ShimValue::Float(x), ShimValue::Float(y), ShimValue::Float(radius), ShimValue::Float(r), ShimValue::Float(g), ShimValue::Float(b), ShimValue::Float(a), ) => {
-            draw_circle(
-                x,
-                y,
-                radius,
-                Color::new(r, g, b, a),
-            );
-            Ok(ShimValue::None)
-        },
-        _ => Err(format!("Bad type for draw_circle {:?} {:?} {:?} {:?} {:?} {:?} {:?}", x, y, radius, r, g, b, a))
-    }
+fn shim_clear_background(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    clear_background(
+        Color::new(
+            unpacker.required_number(b"r")?,
+            unpacker.required_number(b"g")?,
+            unpacker.required_number(b"b")?,
+            unpacker.required_number(b"a")?,
+        ),
+    );
+    unpacker.end()?;
+    Ok(ShimValue::None)
+}
 
+fn shim_draw_line(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    draw_line(
+        unpacker.required_number(b"x0")?,
+        unpacker.required_number(b"y0")?,
+        unpacker.required_number(b"x1")?,
+        unpacker.required_number(b"y1")?,
+        unpacker.required_number(b"thickness")?,
+        Color::new(
+            unpacker.required_number(b"r")?,
+            unpacker.required_number(b"g")?,
+            unpacker.required_number(b"b")?,
+            unpacker.required_number(b"a")?,
+        ),
+    );
+    unpacker.end()?;
+    Ok(ShimValue::None)
+}
+
+fn shim_draw_rectangle(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    draw_rectangle(
+        unpacker.required_number(b"x")?,
+        unpacker.required_number(b"y")?,
+        unpacker.required_number(b"w")?,
+        unpacker.required_number(b"h")?,
+        Color::new(
+            unpacker.required_number(b"r")?,
+            unpacker.required_number(b"g")?,
+            unpacker.required_number(b"b")?,
+            unpacker.required_number(b"a")?,
+        ),
+    );
+    unpacker.end()?;
+    Ok(ShimValue::None)
 }
 
 #[macroquad::main("BasicShapes")]
 async fn main() {
     let interpreter_config = shimlang::Config::default();
     let ast = shimlang::ast_from_text(br#"
-        draw_circle(
-            120.0,
-            120.0,
-            50.0,
-            0.7,
-            0.4,
-            0.2,
-            1.0,
-        );
+        fn loop() {
+            draw_circle(
+                120.0,
+                120.0,
+                50.0,
+                0.7,
+                0.4,
+                0.2,
+                1.0,
+            );
+        }
     "#).unwrap();
 
     let program = shimlang::compile_ast(&ast).unwrap();
     let mut interpreter = shimlang::Interpreter::create(&shimlang::Config::default(), program);
     let mut env = shimlang::Environment::new_with_builtins(&mut interpreter);
 
-
     let builtins: &[(&[u8], Box<NativeFn>)] = &[
         (b"draw_circle", Box::new(shim_draw_circle)),
+        (b"draw_rectangle", Box::new(shim_draw_rectangle)),
+        (b"draw_line", Box::new(shim_draw_line)),
+        (b"clear_background", Box::new(shim_clear_background)),
     ];
 
     for (name, func) in builtins {
@@ -67,22 +111,45 @@ async fn main() {
 
     let mut script_errors = Vec::new();
 
-    loop {
-        //clear_background(RED);
-        let mut pc = 0;
+    let mut pc = 0;
+    match interpreter.execute_bytecode_extended(&mut pc, shimlang::ArgBundle::new(), &mut env) {
+        Ok(_) => {
+            interpreter.gc(&env);
+        },
+        Err(msg) => {
+            script_errors.push(msg);
+        }
+    }
 
-        match interpreter.execute_bytecode_extended(&mut pc, shimlang::ArgBundle::new(), &mut env) {
-            Ok(_) => {
-                interpreter.gc(&env);
+    // Technically this is an external reference that should be passed to the
+    // gc as a root, but since it's in the `env` it should already be marked.
+    let loop_fn = match env.get(&mut interpreter, b"loop") {
+        Some(func @ ShimValue::Fn(_)) => {
+            func
+        },
+        None => {
+            error_loop("No loop function found").await;
+        },
+        _ => {
+            error_loop("Identifier 'loop' is not a function").await;
+        },
+    };
+
+    loop {
+        match loop_fn.call(interpreter, &mut args) {
+            Ok(CallResult::ReturnValue(val)) => val,
+            Ok(CallResult::PC(pc, captured_scope)) => {
+                let mut new_env = Environment::with_scope(captured_scope);
+                interpreter.execute_bytecode_extended(
+                    &mut (pc as usize),
+                    args,
+                    &mut new_env,
+                )?
             },
             Err(msg) => {
                 script_errors.push(msg);
             }
         }
-
-        //draw_line(40.0, 40.0, 100.0, 200.0, 15.0, BLUE);
-        //draw_rectangle(screen_width() / 2.0 - 60.0, 100.0, 120.0, 60.0, GREEN);
-        //draw_circle(screen_width() - 30.0, screen_height() - 30.0, 15.0, YELLOW);
 
         if let Some(msg) = script_errors.last() {
             for (lineno, line) in msg.split("\n").enumerate() {
@@ -90,6 +157,15 @@ async fn main() {
             }
         }
 
+        next_frame().await
+    }
+}
+
+async fn error_loop(msg: &str) -> ! {
+    loop {
+        for (lineno, line) in msg.split("\n").enumerate() {
+            draw_text(line, 20.0, 20.0*(lineno as f32+1.0), 30.0, WHITE);
+        }
         next_frame().await
     }
 }

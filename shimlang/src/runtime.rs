@@ -569,6 +569,15 @@ impl<'a> ArgUnpacker<'a> {
         self.optional(name).ok_or_else(|| format!("Missing required argument: '{}'", debug_u8s(name)))
     }
 
+    pub fn required_number(&mut self, name: &[u8]) -> Result<f32, String> {
+        match self.optional(name).ok_or_else(|| format!("Missing required argument: '{}'", debug_u8s(name))) {
+            Ok(ShimValue::Float(f)) => Ok(f),
+            Ok(ShimValue::Integer(i)) => Ok(i as f32),
+            Ok(_) => Err(format!("Required argument non-numeric: '{}'", debug_u8s(name))),
+            Err(e) => Err(e),
+        }
+    }
+
     pub fn optional(&mut self, name: &[u8]) -> Option<ShimValue> {
         for (ident, arg) in self.bundle.kwargs.iter() {
             if ident == name {
