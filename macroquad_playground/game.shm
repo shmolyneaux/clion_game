@@ -59,9 +59,7 @@ number_font[9] = "###" +
                  "  #" +
                  "###";
 
-let font_size = 20;
-
-fn draw_number(x, y, num) {
+fn draw_number(x, y, num, font_size=20, pixel_spacing=3) {
     num = num % 10;
     let data = number_font[num];
     let space = " ";
@@ -69,8 +67,8 @@ fn draw_number(x, y, num) {
         for column in 0..3 {
             if data[row*3 + column] != space {
                 draw_rectangle(
-                    x+(font_size+5)*column,
-                    y+(font_size+5)*row,
+                    x+(font_size+pixel_spacing)*column,
+                    y+(font_size+pixel_spacing)*row,
                     font_size,
                     font_size,
                     1.0,
@@ -85,6 +83,45 @@ fn draw_number(x, y, num) {
 
 let frame = 0;
 
+fn draw_paddle(y, is_left) {
+    if is_left {
+        draw_rectangle(
+            paddle_margin,
+            y,
+            paddle_width,
+            paddle_height,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+        );
+    } else {
+        draw_rectangle(
+            screen_width - paddle_width - paddle_margin,
+            y,
+            paddle_width,
+            paddle_height,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+        );
+    }
+}
+
+fn draw_ball(x, y) {
+    draw_rectangle(
+        x,
+        y,
+        ball_size,
+        ball_size,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+    );
+}
+
 fn loop() {
     frame = frame + 1;
     draw_rectangle(
@@ -97,38 +134,25 @@ fn loop() {
         0.2,
         1.0,
     );
-    draw_rectangle(
-        paddle_margin,
-        100,
-        paddle_width,
-        paddle_height,
-        1.0,
-        1.0,
-        1.0,
-        1.0,
-    );
 
-    draw_rectangle(
+    draw_paddle(100, true);
+    draw_paddle(120, false);
+    draw_ball(
         screen_width / 2,
         screen_height / 2,
-        ball_size,
-        ball_size,
-        1.0,
-        1.0,
-        1.0,
-        1.0,
     );
 
-    draw_rectangle(
-        screen_width - paddle_width - paddle_margin,
-        120,
-        paddle_width,
-        paddle_height,
-        1.0,
-        1.0,
-        1.0,
-        1.0,
+    draw_number(
+        0,
+        10,
+        int(frame / 60),
+        font_size=10,
     );
 
-    draw_number(100, 10, int(frame / 60));
+    draw_number(
+        screen_width-36,
+        10,
+        int(frame / 60),
+        font_size=10,
+    );
 }
