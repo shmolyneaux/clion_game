@@ -1,0 +1,134 @@
+let screen_width = 640;
+let screen_height = 480;
+
+let paddle_width = 30;
+let paddle_height = 100;
+let paddle_margin = 25;
+
+let ball_size = 10;
+
+let number_font = dict();
+number_font[0] = "###" +
+                 "# #" +
+                 "# #" +
+                 "# #" +
+                 "###";
+number_font[1] = "  #" +
+                 "  #" +
+                 "  #" +
+                 "  #" +
+                 "  #";
+number_font[2] = "###" +
+                 "  #" +
+                 "###" +
+                 "#  " +
+                 "###";
+number_font[3] = "###" +
+                 "  #" +
+                 "###" +
+                 "  #" +
+                 "###";
+number_font[4] = "# #" +
+                 "# #" +
+                 "###" +
+                 "  #" +
+                 "  #";
+number_font[5] = "###" +
+                 "#  " +
+                 "###" +
+                 "  #" +
+                 "###";
+number_font[6] = "###" +
+                 "#  " +
+                 "###" +
+                 "# #" +
+                 "###";
+number_font[7] = "###" +
+                 "  #" +
+                 "  #" +
+                 "  #" +
+                 "  #";
+number_font[8] = "###" +
+                 "# #" +
+                 "###" +
+                 "# #" +
+                 "###";
+number_font[9] = "###" +
+                 "# #" +
+                 "###" +
+                 "  #" +
+                 "###";
+
+let font_size = 20;
+
+fn draw_number(x, y, num) {
+    num = num % 10;
+    let data = number_font[num];
+    let space = " ";
+    for row in 0..5 {
+        for column in 0..3 {
+            if data[row*3 + column] != space {
+                draw_rectangle(
+                    x+(font_size+5)*column,
+                    y+(font_size+5)*row,
+                    font_size,
+                    font_size,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                );
+            }
+        }
+    }
+}
+
+let frame = 0;
+
+fn loop() {
+    frame = frame + 1;
+    draw_rectangle(
+        0,
+        0,
+        screen_width,
+        screen_height,
+        0.2,
+        0.2,
+        0.2,
+        1.0,
+    );
+    draw_rectangle(
+        paddle_margin,
+        100,
+        paddle_width,
+        paddle_height,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+    );
+
+    draw_rectangle(
+        screen_width / 2,
+        screen_height / 2,
+        ball_size,
+        ball_size,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+    );
+
+    draw_rectangle(
+        screen_width - paddle_width - paddle_margin,
+        120,
+        paddle_width,
+        paddle_height,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+    );
+
+    draw_number(100, 10, int(frame / 60));
+}

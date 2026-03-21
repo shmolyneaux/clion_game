@@ -303,7 +303,7 @@ impl Environment {
         Err(format!("Key {:?} not found in environment", key))
     }
 
-    fn get(&self, interpreter: &mut Interpreter, key: &[u8]) -> Option<ShimValue> {
+    pub fn get(&self, interpreter: &mut Interpreter, key: &[u8]) -> Option<ShimValue> {
         let mut current_scope_pos = self.current_scope;
 
         loop {
@@ -525,7 +525,7 @@ impl StructDef {
 }
 
 #[derive(Debug)]
-pub(crate) enum CallResult {
+pub enum CallResult {
     ReturnValue(ShimValue),
     PC(u32, u32), // PC and captured_scope
 }
@@ -724,7 +724,7 @@ impl ShimValue {
         }
     }
 
-    pub(crate) fn call(
+    pub fn call(
         &self,
         interpreter: &mut Interpreter,
         args: &mut ArgBundle,
@@ -1290,14 +1290,8 @@ impl ShimValue {
         Ok(ShimValue::Bool(self.equal_inner(interpreter, other)?))
     }
 
-    fn not_equal(&self, _interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
-        match (self, other) {
-            (ShimValue::Bool(a), ShimValue::Bool(b)) => Ok(ShimValue::Bool(a != b)),
-            (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Bool(a != b)),
-            (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Bool(a != b)),
-            (ShimValue::None, ShimValue::None) => Ok(ShimValue::Bool(true)),
-            _ => Ok(ShimValue::Bool(true)),
-        }
+    fn not_equal(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
+        Ok(ShimValue::Bool(!self.equal_inner(interpreter, other)?))
     }
 
     fn mul(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {

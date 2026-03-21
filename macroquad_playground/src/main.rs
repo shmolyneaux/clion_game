@@ -1,14 +1,15 @@
 use macroquad::prelude::*;
 use std::mem;
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::thread;
+use std::fs;
+use std::time::SystemTime;
 
 use shimlang::{ShimValue, Environment, Interpreter};
-use shimlang::runtime::{ArgUnpacker, NativeFn};
+use shimlang::runtime::{ArgUnpacker, NativeFn, CallResult};
 use shimlang::ArgBundle;
 use shimlang::lex::debug_u8s;
 
-fn shim_draw_circle(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+fn shim_draw_circle(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     draw_circle(
         unpacker.required_number(b"x")?,
@@ -25,7 +26,7 @@ fn shim_draw_circle(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<S
     Ok(ShimValue::None)
 }
 
-fn shim_clear_background(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+fn shim_clear_background(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     clear_background(
         Color::new(
@@ -39,7 +40,7 @@ fn shim_clear_background(interpreter: &mut Interpreter, args: &ArgBundle) -> Res
     Ok(ShimValue::None)
 }
 
-fn shim_draw_line(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+fn shim_draw_line(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     draw_line(
         unpacker.required_number(b"x0")?,
@@ -58,7 +59,7 @@ fn shim_draw_line(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shi
     Ok(ShimValue::None)
 }
 
-fn shim_draw_rectangle(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+fn shim_draw_rectangle(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     draw_rectangle(
         unpacker.required_number(b"x")?,
@@ -76,22 +77,9 @@ fn shim_draw_rectangle(interpreter: &mut Interpreter, args: &ArgBundle) -> Resul
     Ok(ShimValue::None)
 }
 
-#[macroquad::main("BasicShapes")]
-async fn main() {
+fn load_script(text: &[u8]) -> Result<(Interpreter, Environment, ShimValue), String> {
     let interpreter_config = shimlang::Config::default();
-    let ast = shimlang::ast_from_text(br#"
-        fn loop() {
-            draw_circle(
-                120.0,
-                120.0,
-                50.0,
-                0.7,
-                0.4,
-                0.2,
-                1.0,
-            );
-        }
-    "#).unwrap();
+    let ast = shimlang::ast_from_text(text).unwrap();
 
     let program = shimlang::compile_ast(&ast).unwrap();
     let mut interpreter = shimlang::Interpreter::create(&shimlang::Config::default(), program);
@@ -109,17 +97,9 @@ async fn main() {
         env.insert_new(&mut interpreter, name.to_vec(), ShimValue::NativeFn(position));
     }
 
-    let mut script_errors = Vec::new();
-
     let mut pc = 0;
-    match interpreter.execute_bytecode_extended(&mut pc, shimlang::ArgBundle::new(), &mut env) {
-        Ok(_) => {
-            interpreter.gc(&env);
-        },
-        Err(msg) => {
-            script_errors.push(msg);
-        }
-    }
+    interpreter.execute_bytecode_extended(&mut pc, shimlang::ArgBundle::new(), &mut env)?;
+    interpreter.gc(&env);
 
     // Technically this is an external reference that should be passed to the
     // gc as a root, but since it's in the `env` it should already be marked.
@@ -128,23 +108,68 @@ async fn main() {
             func
         },
         None => {
-            error_loop("No loop function found").await;
+            return Err("No loop function found".to_string());
         },
         _ => {
-            error_loop("Identifier 'loop' is not a function").await;
+            return Err("Identifier 'loop' is not a function".to_string());
         },
     };
 
+    Ok((interpreter, env, loop_fn))
+}
+
+#[macroquad::main("BasicShapes")]
+async fn main() {
+    let (mut interpreter, mut env, mut loop_fn) = load_script(b"fn loop() {}").expect("Should be able to load hardcoded script");
+    let mut script_errors = Vec::new();
+
+    let mut mtime = SystemTime::now();
+    let script_path = "game.shm";
     loop {
-        match loop_fn.call(interpreter, &mut args) {
-            Ok(CallResult::ReturnValue(val)) => val,
+        match fs::metadata(script_path) {
+            Ok(metadata) => match metadata.modified() {
+                Ok(time) => {
+                    if mtime != time {
+                        mtime = time;
+                        match fs::read(script_path) {
+                            Ok(bytes) => {
+                                match load_script(&bytes) {
+                                    Ok(res) => {
+                                        (interpreter, env, loop_fn) = res;
+                                        script_errors = Vec::new();
+                                    },
+                                    Err(msg) => {
+                                        script_errors.push(msg);
+                                    }
+                                };
+                            },
+                            Err(msg) => {
+                                script_errors.push(format!("Could not read {script_path}"));
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    script_errors.push(format!("Could not get modification time for {script_path}: {}", e));
+                }
+            },
+            Err(e) => {
+                script_errors.push(format!("Could not get modification time for {script_path}: {}", e));
+            }
+        }
+
+        match loop_fn.call(&mut interpreter, &mut shimlang::ArgBundle::new()) {
+            Ok(CallResult::ReturnValue(val)) => (),
             Ok(CallResult::PC(pc, captured_scope)) => {
                 let mut new_env = Environment::with_scope(captured_scope);
-                interpreter.execute_bytecode_extended(
+                match interpreter.execute_bytecode_extended(
                     &mut (pc as usize),
-                    args,
+                    shimlang::ArgBundle::new(),
                     &mut new_env,
-                )?
+                ) {
+                    Err(msg) => script_errors.push(msg),
+                    Ok(_) => (),
+                }
             },
             Err(msg) => {
                 script_errors.push(msg);
