@@ -1,0 +1,36 @@
+// SYNTAX TEST "source.shim"
+
+"hello world";
+// <- string.quoted.double.shim
+
+"escape \n newline";
+//      ^^ constant.character.escape.shim
+
+"escape \t tab";
+//      ^^ constant.character.escape.shim
+
+"escape \\ backslash";
+//      ^^ constant.character.escape.shim
+
+"escape \" quote";
+//      ^^ constant.character.escape.shim
+
+"interpolation \(name) end";
+//             ^^ punctuation.section.interpolation.begin.shim
+//               ^^^^ variable.other.shim
+//                   ^ punctuation.section.interpolation.end.shim
+
+"value is \(1 + 2) done";
+//        ^^ punctuation.section.interpolation.begin.shim
+//          ^ constant.numeric.integer.shim
+//            ^ keyword.operator.arithmetic.shim
+//              ^ constant.numeric.integer.shim
+//               ^ punctuation.section.interpolation.end.shim
+
+"nested \("inner \(42) text") outer";
+//      ^^ punctuation.section.interpolation.begin.shim
+//        ^ string.quoted.double.shim
+//               ^^ punctuation.section.interpolation.begin.shim
+//                 ^^ constant.numeric.integer.shim
+//                   ^ punctuation.section.interpolation.end.shim
+//                          ^ punctuation.section.interpolation.end.shim

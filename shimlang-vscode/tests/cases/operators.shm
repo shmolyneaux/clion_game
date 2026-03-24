@@ -1,0 +1,46 @@
+// SYNTAX TEST "source.shim"
+
+a + b;
+//^ keyword.operator.arithmetic.shim
+
+a - b;
+//^ keyword.operator.arithmetic.shim
+
+a * b;
+//^ keyword.operator.arithmetic.shim
+
+a / b;
+//^ keyword.operator.arithmetic.shim
+
+a % b;
+//^ keyword.operator.arithmetic.shim
+
+a == b;
+//^^ keyword.operator.comparison.shim
+
+a != b;
+//^^ keyword.operator.comparison.shim
+
+a >= b;
+//^^ keyword.operator.comparison.shim
+
+a <= b;
+//^^ keyword.operator.comparison.shim
+
+a > b;
+//^ keyword.operator.comparison.shim
+
+a < b;
+//^ keyword.operator.comparison.shim
+
+x = 42;
+//^ keyword.operator.assignment.shim
+
+let r = 1..10;
+//       ^^ keyword.operator.range.shim
+
+!true;
+// <- keyword.operator.logical.not.shim
+
+obj.field;
+// ^ keyword.operator.accessor.shim
