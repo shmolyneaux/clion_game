@@ -1,0 +1,47 @@
+// SYNTAX TEST "source.shim"
+
+fn hello(name) {
+// <- storage.type.function.shim
+// ^^^^^ entity.name.function.shim
+//      ^ punctuation.section.parens.begin.shim
+
+    print("Hello " + name);
+//  ^^^^^ entity.name.function.call.shim
+}
+
+fn add(a, b) {
+// <- storage.type.function.shim
+// ^^^ entity.name.function.shim
+    return a + b;
+//  ^^^^^^ keyword.control.shim
+}
+
+fn greet(name="World") {
+// <- storage.type.function.shim
+// ^^^^^ entity.name.function.shim
+}
+
+let f = fn(x) { x + 1 };
+//      ^^ storage.type.function.shim
+
+struct Point {
+// <- storage.type.struct.shim
+//     ^^^^^ entity.name.type.shim
+    x,
+    y
+}
+
+struct Person {
+// <- storage.type.struct.shim
+//     ^^^^^^ entity.name.type.shim
+    name,
+    age
+}
+
+let p = Point(1.0, 2.0);
+//      ^^^^^ entity.name.function.call.shim
+//            ^^^ constant.numeric.float.shim
+
+self.x;
+// <- variable.language.self.shim
+//   ^ variable.other.shim

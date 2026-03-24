@@ -1,0 +1,70 @@
+// SYNTAX TEST "source.shim"
+
+// === Nested String Interpolation ===
+
+// Basic interpolation - code inside \() should be highlighted as code
+"Hello \(name)!";
+//     ^^ punctuation.section.interpolation.begin.shim
+//       ^^^^ variable.other.shim
+//           ^ punctuation.section.interpolation.end.shim
+
+// Expression inside interpolation is code, not string
+"Result: \(1 + 2)";
+//       ^^ punctuation.section.interpolation.begin.shim
+//         ^ constant.numeric.integer.shim
+//           ^ keyword.operator.arithmetic.shim
+//             ^ constant.numeric.integer.shim
+//              ^ punctuation.section.interpolation.end.shim
+
+// Function call inside interpolation with nested parens
+"val: \(compute(x))";
+//    ^^ punctuation.section.interpolation.begin.shim
+//      ^^^^^^^ entity.name.function.call.shim
+//               ^ punctuation.section.parens.end.shim
+//                ^ punctuation.section.interpolation.end.shim
+
+// Nested interpolation: string inside interpolation containing another interpolation
+"Foo \("biz \(13 + 2) baz") bar";
+//   ^^ punctuation.section.interpolation.begin.shim
+//     ^ string.quoted.double.shim
+//          ^^ punctuation.section.interpolation.begin.shim
+//            ^^ constant.numeric.integer.shim
+//               ^ keyword.operator.arithmetic.shim
+//                 ^ constant.numeric.integer.shim
+//                  ^ punctuation.section.interpolation.end.shim
+//                       ^ string.quoted.double.shim
+//                        ^ punctuation.section.interpolation.end.shim
+//                          ^^^ string.quoted.double.shim
+
+// Boolean inside interpolation
+"Is valid: \(true)";
+//         ^^ punctuation.section.interpolation.begin.shim
+//           ^^^^ constant.language.boolean.true.shim
+//               ^ punctuation.section.interpolation.end.shim
+
+// Keyword inside interpolation - if/else are highlighted as keywords
+let val = "V: \(if x { 1 } else { 2 })";
+//            ^^ punctuation.section.interpolation.begin.shim
+//              ^^ keyword.control.shim
+//                         ^^^^ keyword.control.shim
+
+// === Nested Block Comments ===
+
+/* simple comment */
+// <- comment.block.shim
+
+/* outer /* inner */ outer */
+// <- comment.block.shim
+//       ^^ punctuation.definition.comment.begin.shim
+//                ^^ punctuation.definition.comment.end.shim
+//                   ^^^^^ comment.block.shim
+
+/* level 1 /* level 2 /* level 3 */ level 2 */ level 1 */
+// <- comment.block.shim
+//                                             ^^^^^^^ comment.block.shim
+
+// Inline nested comment
+let a = /* outer /* inner */ outer */ 42;
+//      ^^ punctuation.definition.comment.begin.shim
+//                                 ^^ punctuation.definition.comment.end.shim
+//                                    ^^ constant.numeric.integer.shim

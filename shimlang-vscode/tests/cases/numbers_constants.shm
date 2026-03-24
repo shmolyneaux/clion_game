@@ -1,0 +1,28 @@
+// SYNTAX TEST "source.shim"
+
+42;
+// <- constant.numeric.integer.shim
+
+0;
+// <- constant.numeric.integer.shim
+
+123456;
+// <- constant.numeric.integer.shim
+
+3.14;
+// <- constant.numeric.float.shim
+
+0.5;
+// <- constant.numeric.float.shim
+
+100.0;
+// <- constant.numeric.float.shim
+
+true;
+// <- constant.language.boolean.true.shim
+
+false;
+// <- constant.language.boolean.false.shim
+
+None;
+// <- constant.language.none.shim
