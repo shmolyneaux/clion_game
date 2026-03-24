@@ -49,6 +49,8 @@
   - Code breakpoint
   - Conditional breakpoint
   - Memory breakpoint 
+- Time-travel
+  - Look a things frame-by-frame to debug animation/collision
 - Memory viewer
   - Colour-coded data types
   - Links for u24's to other sections of menory

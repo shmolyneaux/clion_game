@@ -3,7 +3,7 @@ let screen_height = 480;
 
 let paddle_width = 30;
 let paddle_height = 100;
-let paddle_margin = 25;
+let paddle_margin = 15;
 
 let ball_size = 10;
 
@@ -59,9 +59,10 @@ number_font[9] = "###" +
                  "  #" +
                  "###";
 
-let font_size = 20;
+let white = [1.0, 1.0, 1.0, 1.0];
+let light_gray = [0.8, 0.8, 0.8, 1.0];
 
-fn draw_number(x, y, num) {
+fn draw_number(x, y, num, font_size=20, pixel_spacing=3, color=white) {
     num = num % 10;
     let data = number_font[num];
     let space = " ";
@@ -69,14 +70,14 @@ fn draw_number(x, y, num) {
         for column in 0..3 {
             if data[row*3 + column] != space {
                 draw_rectangle(
-                    x+(font_size+5)*column,
-                    y+(font_size+5)*row,
+                    x+(font_size+pixel_spacing)*column,
+                    y+(font_size+pixel_spacing)*row,
                     font_size,
                     font_size,
-                    1.0,
-                    1.0,
-                    1.0,
-                    1.0,
+                    color[0],
+                    color[1],
+                    color[2],
+                    color[3],
                 );
             }
         }
@@ -84,6 +85,68 @@ fn draw_number(x, y, num) {
 }
 
 let frame = 0;
+let score_padding = 130;
+
+fn draw_paddle(y, is_left) {
+    if is_left {
+        draw_rectangle(
+            paddle_margin,
+            y,
+            paddle_width,
+            paddle_height,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+        );
+    } else {
+        draw_rectangle(
+            screen_width - paddle_width - paddle_margin,
+            y,
+            paddle_width,
+            paddle_height,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+        );
+    }
+}
+
+fn draw_ball(x, y) {
+    draw_rectangle(
+        x-ball_size/2,
+        y-ball_size/2,
+        ball_size,
+        ball_size,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+    );
+}
+
+let paddle1_y = 100;
+let paddle2_y = 200;
+
+let ball_x = screen_width / 2;
+let ball_y = screen_height / 2;
+let xvel = 5.0;
+let yvel = 5.0;
+
+let player1_score = 0;
+let player2_score = 0;
+
+let paused_start_frame = None;
+let WINNING_SCORE = 3;
+
+fn max(a, b) {
+    if a >= b { a } else { b }
+}
+
+fn min(a, b) {
+    if a <= b { a } else { b }
+}
 
 fn loop() {
     frame = frame + 1;
@@ -97,38 +160,119 @@ fn loop() {
         0.2,
         1.0,
     );
-    draw_rectangle(
-        paddle_margin,
-        100,
-        paddle_width,
-        paddle_height,
-        1.0,
-        1.0,
-        1.0,
-        1.0,
-    );
 
-    draw_rectangle(
-        screen_width / 2,
-        screen_height / 2,
-        ball_size,
-        ball_size,
-        1.0,
-        1.0,
-        1.0,
-        1.0,
-    );
+    if paused_start_frame == None {
+        ball_x = ball_x + xvel;
+        ball_y = ball_y + yvel;
 
-    draw_rectangle(
-        screen_width - paddle_width - paddle_margin,
-        120,
-        paddle_width,
-        paddle_height,
-        1.0,
-        1.0,
-        1.0,
-        1.0,
-    );
+        if is_s_down() {
+            paddle1_y = min(paddle1_y + 5, screen_height-paddle_height);
+        }
 
-    draw_number(100, 10, int(frame / 60));
+        if is_w_down() {
+            paddle1_y = max(paddle1_y - 5, 0);
+        }
+
+        if is_up_arrow_down() {
+            paddle2_y = max(paddle2_y - 5, 0);
+        }
+
+        if is_down_arrow_down() {
+            paddle2_y = min(paddle2_y + 5, screen_height-paddle_height);
+
+        }
+
+        if ball_y < ball_size/2 or ball_y > screen_height - ball_size/2 {
+            // Hit top/bottom
+            yvel = -yvel;
+        }
+
+        if ball_x - ball_size/2 < paddle_margin + paddle_width
+            and paddle1_y < ball_y and ball_y < paddle1_y + paddle_height
+        {
+            if xvel < 0 {
+                // Velocity should be to the right
+                xvel = -xvel;
+            }
+        }
+
+        if ball_x + ball_size/2 > screen_width - paddle_margin - paddle_width
+            and paddle2_y < ball_y and ball_y < paddle2_y + paddle_height
+        {
+            if xvel > 0 {
+                // Velocity should be to the left
+                xvel = -xvel;
+            }
+        }
+
+        if ball_x < ball_size/2 {
+            // Score for player 2
+            player2_score = player2_score + 1;
+            ball_x = screen_width / 2;
+            ball_y = screen_height / 2;
+            xvel = -xvel;
+
+            if player2_score == WINNING_SCORE {
+                paused_start_frame = frame;
+            }
+        }
+
+        if ball_x > screen_width - ball_size/2 {
+            // Score for player 1
+            player1_score = player1_score + 1;
+            ball_x = screen_width / 2;
+            ball_y = screen_height / 2;
+            xvel = -xvel;
+
+            if player1_score == WINNING_SCORE {
+                paused_start_frame = frame;
+            }
+        }
+    }
+
+    if paused_start_frame != None and (frame - paused_start_frame) > 200 {
+        // Reset game
+        paused_start_frame = None;
+        player1_score = 0;
+        player2_score = 0;
+    }
+
+    /* Render */ {
+        draw_paddle(
+            paddle1_y,
+            true
+        );
+        draw_paddle(
+            paddle2_y,
+            false,
+        );
+        draw_ball(
+            ball_x,
+            ball_y,
+        );
+
+        let should_draw_numbers = if paused_start_frame == None {
+            true
+        } else {
+            ((frame) % 60) < 30
+        };
+
+        if should_draw_numbers {
+            draw_number(
+                score_padding,
+                10,
+                player1_score,
+                font_size=10,
+                color=light_gray,
+            );
+
+            draw_number(
+                screen_width-36-score_padding,
+                10,
+                player2_score,
+                font_size=10,
+                color=light_gray,
+            );
+        }
+    }
 }
