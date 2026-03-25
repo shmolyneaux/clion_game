@@ -1,0 +1,38 @@
+// SYNTAX TEST "source.shim"
+
+let x = 42;
+// <- keyword.other.let.shim
+
+if true { }
+// <- keyword.control.shim
+
+else { }
+// <- keyword.control.shim
+
+while true { }
+// <- keyword.control.shim
+
+for i in lst { }
+// <- keyword.control.shim
+//    ^^ keyword.control.shim
+
+break;
+// <- keyword.control.shim
+
+continue;
+// <- keyword.control.shim
+
+return 42;
+// <- keyword.control.shim
+
+x and y;
+//^^^ keyword.operator.logical.shim
+
+x or y;
+//^^ keyword.operator.logical.shim
+
+fn foo() { }
+// <- storage.type.function.shim
+
+struct Point { x, y }
+// <- storage.type.struct.shim

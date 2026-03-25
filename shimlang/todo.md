@@ -1,7 +1,6 @@
 - Tuple
 - Tuple unpacking
 - String methods
-  - split
   - join
   - upper
   - lower
@@ -18,13 +17,29 @@
   - replace
 - `*args`, and `**kwargs`
 - Numeric literals with underscores
-- Integer division
 - Type annotations
 - Runtime type checking
 - Static type checking
-- Add value type for strings less than 7 bytes
+- Add value type for strings 6 bytes or less
 - Remove use of Box for native values
-    - It can be the type id (which gives us the size), followed by that number of bytes
+  - It can be the type id (which gives us the size), followed by that number of bytes
+- How do we time-travel resources provided by external systems?
+  - Examples
+    - Models
+    - Textures
+    - Sound/Music
+  - Each resource is a handle
+  - A handle is an int
+  - Systems that provide handles need to be able to reproduce that resource for all time in dev mode
+  - In release mode, shimlang can keep track of references to resources and notify the external systems to free those resources when there are no more references
+- How do we resume from when we hit an error?
+  - We have a copy of memory from the start of the frame and we replay with the same inputs
+  - Those external systems also need a copy of their states to revert to (physics, audio)
+    - Maybe this also belongs in interpreter memory?
+    - Anything with a time dependence
+    - Audio needs special handling to avoid audio clipping
+- Update parser to produce nodes with node id's
+  - I'm hoping this makes it easier to optimize since spans won't be mixed in with data (less unpacking)
 - Debugger
   - Step through bytecode/code (in, over, out)
   - Show code for current span

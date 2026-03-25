@@ -1,0 +1,28 @@
+// SYNTAX TEST "source.shim"
+
+// Line comment
+// <- comment.line.double-slash.shim
+
+   // indented comment
+// ^^^^^^^^^^^^^^^^^^^ comment.line.double-slash.shim
+
+/* block comment */
+// <- comment.block.shim
+
+/* multi
+   line
+   comment */
+// <- comment.block.shim
+
+/* outer /* inner */ still comment */
+// <- comment.block.shim
+//                                ^^ comment.block.shim
+
+/* nested /* deeply /* nested */ comment */ outer */
+// <- comment.block.shim
+//                                                ^^ comment.block.shim
+
+let a = /* inline comment */ 13;
+//      ^^ punctuation.definition.comment.begin.shim
+//        ^^^^^^^^^^^^^^^^^ comment.block.shim
+//                        ^^ punctuation.definition.comment.end.shim
