@@ -59,6 +59,22 @@ fn shim_draw_line(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Sh
     Ok(ShimValue::None)
 }
 
+fn shim_is_up_arrow_down(_interpreter: &mut Interpreter, _args: &ArgBundle) -> Result<ShimValue, String> {
+    Ok(ShimValue::Bool(is_key_down(KeyCode::Up)))
+}
+
+fn shim_is_down_arrow_down(_interpreter: &mut Interpreter, _args: &ArgBundle) -> Result<ShimValue, String> {
+    Ok(ShimValue::Bool(is_key_down(KeyCode::Down)))
+}
+
+fn shim_is_w_down(_interpreter: &mut Interpreter, _args: &ArgBundle) -> Result<ShimValue, String> {
+    Ok(ShimValue::Bool(is_key_down(KeyCode::W)))
+}
+
+fn shim_is_s_down(_interpreter: &mut Interpreter, _args: &ArgBundle) -> Result<ShimValue, String> {
+    Ok(ShimValue::Bool(is_key_down(KeyCode::S)))
+}
+
 fn shim_draw_rectangle(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     draw_rectangle(
@@ -79,9 +95,9 @@ fn shim_draw_rectangle(_interpreter: &mut Interpreter, args: &ArgBundle) -> Resu
 
 fn load_script(text: &[u8]) -> Result<(Interpreter, Environment, ShimValue), String> {
     let interpreter_config = shimlang::Config::default();
-    let ast = shimlang::ast_from_text(text).unwrap();
+    let ast = shimlang::ast_from_text(text)?;
 
-    let program = shimlang::compile_ast(&ast).unwrap();
+    let program = shimlang::compile_ast(&ast)?;
     let mut interpreter = shimlang::Interpreter::create(&shimlang::Config::default(), program);
     let mut env = shimlang::Environment::new_with_builtins(&mut interpreter);
 
@@ -90,6 +106,10 @@ fn load_script(text: &[u8]) -> Result<(Interpreter, Environment, ShimValue), Str
         (b"draw_rectangle", Box::new(shim_draw_rectangle)),
         (b"draw_line", Box::new(shim_draw_line)),
         (b"clear_background", Box::new(shim_clear_background)),
+        (b"is_up_arrow_down", Box::new(shim_is_up_arrow_down)),
+        (b"is_down_arrow_down", Box::new(shim_is_down_arrow_down)),
+        (b"is_w_down", Box::new(shim_is_w_down)),
+        (b"is_s_down", Box::new(shim_is_s_down)),
     ];
 
     for (name, func) in builtins {
