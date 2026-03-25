@@ -522,6 +522,15 @@ impl StructDef {
         // in interpreter memory
         std::mem::size_of::<StructDef>().div_ceil(8)
     }
+
+    pub(crate) fn method_fn_positions(&self) -> impl Iterator<Item = u24> + '_ {
+        self.lookup.iter().filter_map(|(_, attr)| {
+            match attr {
+                StructAttribute::MethodDef(pos) => Some(*pos),
+                _ => None,
+            }
+        })
+    }
 }
 
 #[derive(Debug)]

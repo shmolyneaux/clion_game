@@ -695,14 +695,21 @@ impl<'a> GC<'a> {
                         if self.mask.is_set(pos) {
                             continue;
                         }
-                        // Mark the ShimFn struct (8 bytes = 1 word: u32 pc + u24 name)
-                        mark_bit!(self.mask, pos, MemDescriptor::other(pos, pos+1, "ShimFn"));
-                        
+                        let shim_fn_word_count = std::mem::size_of::<ShimFn>().div_ceil(8);
+                        #[cfg(feature = "gc_debug")]
+                        let desc = MemDescriptor::other(pos, pos + shim_fn_word_count, "ShimFn");
+                        for idx in pos..(pos + shim_fn_word_count) {
+                            mark_bit!(self.mask, idx, desc);
+                        }
+
                         // Mark the function name string
                         let shim_fn: &ShimFn = self.mem.get(fn_pos);
                         vals.push(ShimValue::String(shim_fn.name_len, 0, shim_fn.name));
 
-                        // TODO: shouldn't this also include the captured scope...?
+                        // Mark the captured scope if present
+                        if shim_fn.captured_scope != 0 {
+                            vals.push(ShimValue::Environment(shim_fn.captured_scope.into()));
+                        }
                     },
                     ShimValue::List(pos) => {
                         let pos: usize = pos.into();
@@ -810,8 +817,10 @@ impl<'a> GC<'a> {
                             mark_bit!(self.mask, idx, desc);
                         }
 
-                        // TODO: Don't the methods potentially need to reference the scope the
-                        // struct was defined in?
+                        // Mark method functions referenced by this struct def
+                        for fn_pos in def.method_fn_positions() {
+                            vals.push(ShimValue::Fn(fn_pos));
+                        }
                     },
                     ShimValue::Struct(def_pos, pos) => {
                         let pos: usize = pos.into();
@@ -877,9 +886,9 @@ impl<'a> GC<'a> {
                         mark_bit!(self.mask, pos+1, MemDescriptor::other(pos+1, pos+2, "Bound Method fn"));
 
                         let obj = ShimValue::from_u64(self.mem.mem[pos]);
-                        // Set up the
                         vals.push(obj);
-                        vals.push(ShimValue::Fn((pos+1).into()));
+                        let func_pos = u24::from(self.mem.mem[pos+1]);
+                        vals.push(ShimValue::Fn(func_pos));
                     },
                     ShimValue::BoundNativeMethod(pos) => {
                         let pos: usize = pos.into();
