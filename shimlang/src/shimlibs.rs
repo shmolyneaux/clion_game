@@ -1039,6 +1039,7 @@ impl ShimDict {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct ShimList {
     // The memory is limited to u24, so we know there can't be more than this
     // number of values

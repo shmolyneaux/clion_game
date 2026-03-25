@@ -178,27 +178,29 @@ async fn main() {
             }
         }
 
-        match loop_fn.call(&mut interpreter, &mut shimlang::ArgBundle::new()) {
-            Ok(CallResult::ReturnValue(val)) => (),
-            Ok(CallResult::PC(pc, captured_scope)) => {
-                let mut new_env = Environment::with_scope(captured_scope);
-                match interpreter.execute_bytecode_extended(
-                    &mut (pc as usize),
-                    shimlang::ArgBundle::new(),
-                    &mut new_env,
-                ) {
-                    Err(msg) => script_errors.push(msg),
-                    Ok(_) => (),
+        if script_errors.is_empty() {
+            match loop_fn.call(&mut interpreter, &mut shimlang::ArgBundle::new()) {
+                Ok(CallResult::ReturnValue(val)) => (),
+                Ok(CallResult::PC(pc, captured_scope)) => {
+                    let mut new_env = Environment::with_scope(captured_scope);
+                    match interpreter.execute_bytecode_extended(
+                        &mut (pc as usize),
+                        shimlang::ArgBundle::new(),
+                        &mut new_env,
+                    ) {
+                        Err(msg) => script_errors.push(msg),
+                        Ok(_) => (),
+                    }
+                },
+                Err(msg) => {
+                    script_errors.push(msg);
                 }
-            },
-            Err(msg) => {
-                script_errors.push(msg);
             }
         }
 
         if let Some(msg) = script_errors.last() {
             for (lineno, line) in msg.split("\n").enumerate() {
-                draw_text(line, 20.0, 20.0*(lineno as f32+1.0), 30.0, WHITE);
+                draw_text(line, 20.0, 20.0*(lineno as f32+1.0), 16.0, WHITE);
             }
         }
 

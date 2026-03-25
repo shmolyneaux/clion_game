@@ -716,6 +716,11 @@ impl<'a> GC<'a> {
                         if self.mask.is_set(pos) {
                             continue;
                         }
+
+                        #[cfg(feature = "gc_debug")]
+                        let desc = MemDescriptor::other(pos, pos+1, "List header");
+                        mark_bit!(self.mask, pos, desc);
+
                         let lst: &ShimList = self.mem.get(pos.into());
                         for idx in 0..lst.len() {
                             vals.push(lst.get(self.mem, idx as isize).unwrap());

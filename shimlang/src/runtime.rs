@@ -1291,6 +1291,17 @@ impl ShimValue {
                     Err(_) => Ok(false),
                 }
             },
+            (ShimValue::Fn(pos_a), ShimValue::Fn(pos_b)) => {
+                Ok(pos_a == pos_b)
+            },
+            (ShimValue::BoundMethod(pos_a), ShimValue::BoundMethod(pos_b)) => {
+                // The pos's might not match up but still have an equivalent obj/func
+                Err("Can't yet check equality between bound methods".to_string())
+            },
+            (ShimValue::BoundNativeMethod(pos_a), ShimValue::BoundNativeMethod(pos_b)) => {
+                // The pos's might not match up but still have an equivalent obj/func
+                Err("Can't yet check equality between bound native methods".to_string())
+            },
             _ => Ok(false),
         }
     }

@@ -195,6 +195,21 @@ struct Ball {
             self.x = screen_width / 2;
             self.y = screen_height / 2;
             self.xvel = -self.xvel;
+
+            if player1_score == WINNING_SCORE {
+                let count = 0;
+                fn pause() {
+                    count = count + 1;
+                    if count > 120 {
+                        frame_order.remove(pause);
+                        player1_score = 0;
+                        player2_score = 0;
+                        game_paused_score_flash = false;
+                    }
+                }
+                game_paused_score_flash = true;
+                frame_order.add(pause);
+            }
         }
     }
 
@@ -242,20 +257,18 @@ struct FrameOrder {
         self.callbacks.append(func);
     }
 
-    fn remove(func) {
+    fn remove(self, func) {
         for idx in 0..self.callbacks.len() {
             if self.callbacks[idx] == func {
-                self.callbacke.pop(idx);
+                self.callbacks.pop(idx);
                 return;
             }
         }
     }
 
     fn execute(self) {
-        print(self.callbacks.len());
         for idx in 0..self.callbacks.len() {
             let func = self.callbacks[idx];
-            print(func);
             func();
         }
     }
@@ -299,9 +312,7 @@ frame_order.add(paddle1.update);
 frame_order.add(paddle2.update);
 frame_order.add(ball.update);
 frame_order.add(draw_playable_area);
-frame_order.add(fn() {print("draw paddle 1")});
 frame_order.add(paddle1.draw);
-frame_order.add(fn() {print("draw paddle 2")});
 frame_order.add(paddle2.draw);
 frame_order.add(ball.draw);
 frame_order.add(draw_score);
