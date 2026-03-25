@@ -113,31 +113,108 @@ fn draw_paddle(y, is_left) {
     }
 }
 
-fn draw_ball(x, y) {
-    draw_rectangle(
-        x-ball_size/2,
-        y-ball_size/2,
-        ball_size,
-        ball_size,
-        1.0,
-        1.0,
-        1.0,
-        1.0,
-    );
+struct Paddle {
+    is_player_1,
+    y = (screen_height - paddle_height) / 2,
+
+    fn update(self) {
+        if game_paused_score_flash {
+            return;
+        }
+
+        let dir = if self.is_player_1 {
+            int(is_w_down()) - int(is_s_down())
+        } else {
+            int(is_down_arrow_down()) - int(is_up_arrow_down())
+        };
+        self.y = clamp(self.y + 5*dir, 0, screen_height-paddle_height);
+        // TODO?
+        // (self.y + 5*dir).clamp(0, screen_height-paddle_height)
+    }
+
+    fn draw(self) {
+        draw_paddle(
+            y=self.y,
+            is_left=self.is_player_1,
+        );
+    }
 }
 
-let paddle1_y = 100;
-let paddle2_y = 200;
+let paddle1 = Paddle(is_player_1=true);
+let paddle2 = Paddle(is_player_1=false);
 
-let ball_x = screen_width / 2;
-let ball_y = screen_height / 2;
-let xvel = 5.0;
-let yvel = 5.0;
+struct Ball {
+    x = screen_width/2,
+    y = screen_height/2,
+    xvel = 5.0,
+    yvel = 5.0,
+
+    fn update(self) {
+        if game_paused_score_flash {
+            return;
+        }
+
+        // TODO: implement +=
+        self.x = self.x + self.xvel;
+        self.y = self.y + self.yvel;
+
+        if self.y < ball_size/2 or self.y > screen_height - ball_size/2 {
+            // Hit top/bottom
+            self.yvel = -self.yvel;
+        }
+
+        if self.x - ball_size/2 < paddle_margin + paddle_width
+            and paddle1.y < self.y and self.y < paddle1.y + paddle_height
+        {
+            if self.xvel < 0 {
+                // Velocity should be to the right
+                self.xvel = -self.xvel;
+            }
+        }
+
+        if self.x + ball_size/2 > screen_width - paddle_margin - paddle_width
+            and paddle2.y < self.y and self.y < paddle2.y + paddle_height
+        {
+            if self.xvel > 0 {
+                // Velocity should be to the left
+                self.xvel = -self.xvel;
+            }
+        }
+
+        if self.x < ball_size/2 {
+            // Score for player 2
+            player2_score = player2_score + 1;
+            self.x = screen_width / 2;
+            self.y = screen_height / 2;
+            self.xvel = -self.xvel;
+        }
+
+        if self.x > screen_width - ball_size/2 {
+            // Score for player 1
+            player1_score = player1_score + 1;
+            self.x = screen_width / 2;
+            self.y = screen_height / 2;
+            self.xvel = -self.xvel;
+        }
+    }
+
+    fn draw(self) {
+        draw_rectangle(
+            self.x-ball_size/2,
+            self.y-ball_size/2,
+            ball_size,
+            ball_size,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+        );
+    }
+}
 
 let player1_score = 0;
 let player2_score = 0;
-
-let paused_start_frame = None;
+let game_paused_score_flash = false;
 let WINNING_SCORE = 3;
 
 fn max(a, b) {
@@ -148,8 +225,43 @@ fn min(a, b) {
     if a <= b { a } else { b }
 }
 
-fn loop() {
-    frame = frame + 1;
+fn clamp(val, min, max) {
+    if val < min{
+        min
+    } else if max < val {
+        max
+    } else {
+        val
+    }
+}
+
+struct FrameOrder {
+    callbacks = [],
+
+    fn add(self, func) {
+        self.callbacks.append(func);
+    }
+
+    fn remove(func) {
+        for idx in 0..self.callbacks.len() {
+            if self.callbacks[idx] == func {
+                self.callbacke.pop(idx);
+                return;
+            }
+        }
+    }
+
+    fn execute(self) {
+        print(self.callbacks.len());
+        for idx in 0..self.callbacks.len() {
+            let func = self.callbacks[idx];
+            print(func);
+            func();
+        }
+    }
+}
+
+fn draw_playable_area() {
     draw_rectangle(
         0,
         0,
@@ -160,119 +272,40 @@ fn loop() {
         0.2,
         1.0,
     );
+}
 
-    if paused_start_frame == None {
-        ball_x = ball_x + xvel;
-        ball_y = ball_y + yvel;
+fn draw_score() {
+    draw_number(
+        score_padding,
+        10,
+        player1_score,
+        font_size=10,
+        color=light_gray,
+    );
 
-        if is_s_down() {
-            paddle1_y = min(paddle1_y + 5, screen_height-paddle_height);
-        }
+    draw_number(
+        screen_width-36-score_padding,
+        10,
+        player2_score,
+        font_size=10,
+        color=light_gray,
+    );
+}
 
-        if is_w_down() {
-            paddle1_y = max(paddle1_y - 5, 0);
-        }
+let ball = Ball();
 
-        if is_up_arrow_down() {
-            paddle2_y = max(paddle2_y - 5, 0);
-        }
+let frame_order = FrameOrder();
+frame_order.add(paddle1.update);
+frame_order.add(paddle2.update);
+frame_order.add(ball.update);
+frame_order.add(draw_playable_area);
+frame_order.add(fn() {print("draw paddle 1")});
+frame_order.add(paddle1.draw);
+frame_order.add(fn() {print("draw paddle 2")});
+frame_order.add(paddle2.draw);
+frame_order.add(ball.draw);
+frame_order.add(draw_score);
 
-        if is_down_arrow_down() {
-            paddle2_y = min(paddle2_y + 5, screen_height-paddle_height);
-
-        }
-
-        if ball_y < ball_size/2 or ball_y > screen_height - ball_size/2 {
-            // Hit top/bottom
-            yvel = -yvel;
-        }
-
-        if ball_x - ball_size/2 < paddle_margin + paddle_width
-            and paddle1_y < ball_y and ball_y < paddle1_y + paddle_height
-        {
-            if xvel < 0 {
-                // Velocity should be to the right
-                xvel = -xvel;
-            }
-        }
-
-        if ball_x + ball_size/2 > screen_width - paddle_margin - paddle_width
-            and paddle2_y < ball_y and ball_y < paddle2_y + paddle_height
-        {
-            if xvel > 0 {
-                // Velocity should be to the left
-                xvel = -xvel;
-            }
-        }
-
-        if ball_x < ball_size/2 {
-            // Score for player 2
-            player2_score = player2_score + 1;
-            ball_x = screen_width / 2;
-            ball_y = screen_height / 2;
-            xvel = -xvel;
-
-            if player2_score == WINNING_SCORE {
-                paused_start_frame = frame;
-            }
-        }
-
-        if ball_x > screen_width - ball_size/2 {
-            // Score for player 1
-            player1_score = player1_score + 1;
-            ball_x = screen_width / 2;
-            ball_y = screen_height / 2;
-            xvel = -xvel;
-
-            if player1_score == WINNING_SCORE {
-                paused_start_frame = frame;
-            }
-        }
-    }
-
-    if paused_start_frame != None and (frame - paused_start_frame) > 200 {
-        // Reset game
-        paused_start_frame = None;
-        player1_score = 0;
-        player2_score = 0;
-    }
-
-    /* Render */ {
-        draw_paddle(
-            paddle1_y,
-            true
-        );
-        draw_paddle(
-            paddle2_y,
-            false,
-        );
-        draw_ball(
-            ball_x,
-            ball_y,
-        );
-
-        let should_draw_numbers = if paused_start_frame == None {
-            true
-        } else {
-            ((frame) % 60) < 30
-        };
-
-        if should_draw_numbers {
-            draw_number(
-                score_padding,
-                10,
-                player1_score,
-                font_size=10,
-                color=light_gray,
-            );
-
-            draw_number(
-                screen_width-36-score_padding,
-                10,
-                player2_score,
-                font_size=10,
-                color=light_gray,
-            );
-        }
-    }
+fn loop() {
+    frame_order.execute();
 }
