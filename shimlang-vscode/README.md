@@ -12,6 +12,13 @@ Syntax highlighting for the [Shimlang](../shimlang/) programming language (`.shm
 - Function and struct definitions
 - `self` keyword
 
+## Build .vsix File
+
+```
+npm install -g @vscode/vsce
+vsce package  # Creates a .vsix file
+```
+
 ## Usage
 
 1. Open VS Code and go to **Extensions** → **…** → **Install from VSIX…**, or
