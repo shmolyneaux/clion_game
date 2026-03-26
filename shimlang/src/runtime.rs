@@ -1754,7 +1754,7 @@ impl Interpreter {
 
 
         // This is the (PC, loop_info, scope_count, caller_scope, fn_optional_param_names,
-        // fn_optional_param_name_idx) call stack
+        // fn_optional_param_name_idx, stack_depth) call stack
         let mut stack_frame: Vec<(
             // PC
             usize,
@@ -1767,6 +1767,8 @@ impl Interpreter {
             // fn_optional_param_names
             Vec<Ident>,
             // fn_optional_param_name_idx
+            usize,
+            // stack_depth at call site (used to clean up on return)
             usize,
         )> = Vec::new();
 
@@ -1800,6 +1802,7 @@ impl Interpreter {
                                 env.current_scope,
                                 fn_optional_param_names.clone(),
                                 fn_optional_param_name_idx,
+                                stack.len(),
                             ));
                             loop_info = Vec::new();
                             // Restore the captured environment and push a new scope for function locals
@@ -2190,6 +2193,7 @@ impl Interpreter {
                                 env.current_scope,
                                 fn_optional_param_names.clone(),
                                 fn_optional_param_name_idx,
+                                stack.len(),
                             ));
                             loop_info = Vec::new();
                             // Restore the captured environment and push a new scope for function locals
@@ -2240,6 +2244,7 @@ impl Interpreter {
                                 env.current_scope,
                                 fn_optional_param_names.clone(),
                                 fn_optional_param_name_idx,
+                                stack.len(),
                             ));
                             loop_info = Vec::new();
                             // Restore the captured environment and push a new scope for function locals
@@ -2262,22 +2267,24 @@ impl Interpreter {
                         // We're assuming that we were called to run just a
                         // particular function
 
-                        // There should be a single value on that stack that we return
-                        if stack.len() != 1 {
-                            return Err(format!("Expected one element on stack: {stack:?}"));
-                        }
+                        // The return value is on top of the stack. Pop it,
+                        // discard any leftover values (e.g. for-loop iterators),
+                        // and return the value.
+                        let return_value = stack.pop().expect("return value on stack");
 
                         // TODO: we should supply `pc` as a `&mut usize`, but
                         // that requires changing far too much code here that
                         // works with `pc` as a value.
                         *mod_pc = pc;
-                        return Ok(stack[0]);
+                        return Ok(return_value);
                     }
 
                     // The value at the top of the stack is the return value of
                     // the function, so we just need to pop the PC
+                    let return_value = stack.pop().expect("return value on stack");
                     let scope_count;
                     let caller_scope;
+                    let stack_depth;
                     (
                         pc,
                         loop_info,
@@ -2285,7 +2292,12 @@ impl Interpreter {
                         caller_scope,
                         fn_optional_param_names,
                         fn_optional_param_name_idx,
+                        stack_depth,
                     ) = stack_frame.pop().expect("stack frame to return to");
+                    // Clean up any extra values left on the stack (e.g. for-loop
+                    // iterators that weren't popped due to early return)
+                    stack.truncate(stack_depth);
+                    stack.push(return_value);
                     while env.scope_depth(&self.mem) > scope_count {
                         env.pop_scope(&self.mem).unwrap();
                     }
