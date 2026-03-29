@@ -9,6 +9,25 @@ use shimlang::runtime::{ArgUnpacker, NativeFn, CallResult};
 use shimlang::ArgBundle;
 use shimlang::lex::debug_u8s;
 
+use macroquad::audio::{load_sound_from_bytes, play_sound_once};
+
+struct SoundResource {
+}
+
+impl ShimNative for SoundResource {
+    fn get_attr(&self, self_as_val: &ShimValue, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
+        Err("No attrs for SoundResource".to_string())
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any where Self: Sized {
+        self
+    }
+
+    fn gc_vals(&self) -> Vec<ShimValue> {
+        Vec::new()
+    }
+}
+
 fn shim_draw_circle(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     draw_circle(
@@ -138,8 +157,65 @@ fn load_script(text: &[u8]) -> Result<(Interpreter, Environment, ShimValue), Str
     Ok((interpreter, env, loop_fn))
 }
 
+fn generate_bloop_wav() -> Vec<u8> {
+    let sample_rate = 44100u32;
+    let duration_secs = 0.15;
+    let num_samples = (sample_rate as f32 * duration_secs) as usize;
+    let mut samples = Vec::with_capacity(num_samples);
+
+    for i in 0..num_samples {
+        let t = i as f32 / sample_rate as f32;
+        // Frequency slides from 880Hz down to 440Hz for that "bloop" feel
+        let freq = 880.0 * (1.0 - t * 5.0).max(0.5);
+        let sample = (t * freq * 2.0 * std::f32::consts::PI).sin();
+        
+        // Convert f32 sample to i16 (PCM 16-bit)
+        let amplitude = i16::MAX as f32 * 0.5; // 50% volume
+        let pcm_sample = (sample * amplitude) as i16;
+        samples.extend_from_slice(&pcm_sample.to_le_bytes());
+    }
+
+    create_wav_container(samples, sample_rate)
+}
+
+fn create_wav_container(data: Vec<u8>, sample_rate: u32) -> Vec<u8> {
+    let mut wav = Vec::new();
+    let data_len = data.len() as u32;
+
+    // RIFF Header
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&(36 + data_len).to_le_bytes()); // Total file size - 8
+    wav.extend_from_slice(b"WAVE");
+
+    // fmt chunk (Metadata)
+    wav.extend_from_slice(b"fmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes()); // Chunk size
+    wav.extend_from_slice(&1u16.to_le_bytes());  // Audio format (1 = PCM)
+    wav.extend_from_slice(&1u16.to_le_bytes());  // Num channels (1 = Mono)
+    wav.extend_from_slice(&sample_rate.to_le_bytes());
+    wav.extend_from_slice(&(sample_rate * 2).to_le_bytes()); // Byte rate
+    wav.extend_from_slice(&2u16.to_le_bytes());  // Block align
+    wav.extend_from_slice(&16u16.to_le_bytes()); // Bits per sample
+
+    // data chunk
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&data_len.to_le_bytes());
+    wav.extend(data);
+
+    wav
+}
+
 #[macroquad::main("BasicShapes")]
 async fn main() {
+    // 1. Generate the wav bytes
+    let bloop_bytes = generate_bloop_wav();
+
+    // 2. Load the sound from those bytes
+    let bloop_sound = load_sound_from_bytes(&bloop_bytes)
+        .await
+        .expect("Failed to load generated sound");
+
+
     let (mut interpreter, mut env, mut loop_fn) = load_script(b"fn loop() {}").expect("Should be able to load hardcoded script");
     let mut script_errors = Vec::new();
 
@@ -157,6 +233,7 @@ async fn main() {
                                     Ok(res) => {
                                         (interpreter, env, loop_fn) = res;
                                         script_errors = Vec::new();
+                                        play_sound_once(&bloop_sound);
                                     },
                                     Err(msg) => {
                                         script_errors.push(msg);
@@ -189,7 +266,7 @@ async fn main() {
                         &mut new_env,
                     ) {
                         Err(msg) => script_errors.push(msg),
-                        Ok(_) => (),
+                        Ok(_) => interpreter.gc(&env),
                     }
                 },
                 Err(msg) => {
