@@ -123,7 +123,7 @@ struct Paddle {
         }
 
         let dir = if self.is_player_1 {
-            int(is_w_down()) - int(is_s_down())
+            int(is_s_down()) - int(is_w_down())
         } else {
             int(is_down_arrow_down()) - int(is_up_arrow_down())
         };
@@ -167,6 +167,7 @@ struct Ball {
             and paddle1.y < self.y and self.y < paddle1.y + paddle_height
         {
             if self.xvel < 0 {
+                paddle_hit_sound.play();
                 // Velocity should be to the right
                 self.xvel = -self.xvel;
             }
@@ -176,6 +177,7 @@ struct Ball {
             and paddle2.y < self.y and self.y < paddle2.y + paddle_height
         {
             if self.xvel > 0 {
+                paddle_hit_sound.play();
                 // Velocity should be to the left
                 self.xvel = -self.xvel;
             }
@@ -183,14 +185,31 @@ struct Ball {
 
         if self.x < ball_size/2 {
             // Score for player 2
+            wall_hit_sound.play();
             player2_score = player2_score + 1;
             self.x = screen_width / 2;
             self.y = screen_height / 2;
             self.xvel = -self.xvel;
+
+            if player2_score == WINNING_SCORE {
+                let count = 0;
+                fn pause() {
+                    count = count + 1;
+                    if count > 120 {
+                        frame_order.remove(pause);
+                        player1_score = 0;
+                        player2_score = 0;
+                        game_paused_score_flash = false;
+                    }
+                }
+                game_paused_score_flash = true;
+                frame_order.add(pause);
+            }
         }
 
         if self.x > screen_width - ball_size/2 {
             // Score for player 1
+            wall_hit_sound.play();
             player1_score = player1_score + 1;
             self.x = screen_width / 2;
             self.y = screen_height / 2;
@@ -316,6 +335,9 @@ frame_order.add(paddle1.draw);
 frame_order.add(paddle2.draw);
 frame_order.add(ball.draw);
 frame_order.add(draw_score);
+
+let paddle_hit_sound = new_bloop(500, 600);
+let wall_hit_sound = new_bloop(800, 200);
 
 fn loop() {
     frame_order.execute();

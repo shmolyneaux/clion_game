@@ -337,7 +337,7 @@ impl MMU {
         self.alloc_debug(size, "Unspecified alloc")
     }
 
-    pub(crate) fn free(&mut self, pos: u24, size: u24) {
+    pub fn free(&mut self, pos: u24, size: u24) {
         if u32::from(size) == 0 || u32::from(size) == 0 {
             return;
         }
@@ -402,13 +402,13 @@ impl MMU {
 
     // MMU methods that depend on runtime types (ShimValue, ShimDict, ShimList, ShimFn, etc.)
 
-    pub(crate) fn alloc_str(&mut self, contents: &[u8]) -> ShimValue {
+    pub fn alloc_str(&mut self, contents: &[u8]) -> ShimValue {
         assert!(contents.len() <= u16::MAX as usize, "String length exceeds u16::MAX");
         let pos = self.alloc_str_raw(contents);
         ShimValue::String(contents.len() as u16, 0, pos)
     }
 
-    pub(crate) fn alloc_dict_raw(&mut self) -> u24 {
+    pub fn alloc_dict_raw(&mut self) -> u24 {
         let word_count: u24 = (std::mem::size_of::<ShimDict>() as u32).div_ceil(8).into();
         let position = alloc!(self, word_count, "Dict");
         unsafe {
@@ -419,11 +419,11 @@ impl MMU {
         position
     }
 
-    pub(crate) fn alloc_dict(&mut self) -> ShimValue {
+    pub fn alloc_dict(&mut self) -> ShimValue {
         ShimValue::Dict(self.alloc_dict_raw())
     }
 
-    pub(crate) fn alloc_list_raw(&mut self) -> u24 {
+    pub fn alloc_list_raw(&mut self) -> u24 {
         let word_count: u24 = (std::mem::size_of::<ShimList>() as u32).div_ceil(8).into();
         let position = alloc!(self, word_count, "List");
         unsafe {
@@ -434,11 +434,11 @@ impl MMU {
         position
     }
 
-    pub(crate) fn alloc_list(&mut self) -> ShimValue {
+    pub fn alloc_list(&mut self) -> ShimValue {
         ShimValue::List(self.alloc_list_raw())
     }
 
-    pub(crate) fn alloc_fn(&mut self, pc: u32, name: &[u8], captured_scope: u32) -> ShimValue {
+    pub fn alloc_fn(&mut self, pc: u32, name: &[u8], captured_scope: u32) -> ShimValue {
         let word_count: u24 = (std::mem::size_of::<ShimFn>() as u32).div_ceil(8).into();
         let position = alloc!(self, word_count, &format!("Fn `{}`", debug_u8s(name)));
 
@@ -453,7 +453,7 @@ impl MMU {
         ShimValue::Fn(position)
     }
 
-    pub(crate) fn alloc_native<T: ShimNative>(&mut self, val: T) -> ShimValue {
+    pub fn alloc_native<T: ShimNative>(&mut self, val: T) -> ShimValue {
         let word_count: u24 = (std::mem::size_of::<Box<dyn ShimNative>>() as u32).div_ceil(8).into();
         let position = alloc!(self, word_count, "Native");
         unsafe {
@@ -464,7 +464,7 @@ impl MMU {
         ShimValue::Native(position)
     }
 
-    pub(crate) fn alloc_bound_method(&mut self, obj: &ShimValue, func_pos: u24) -> ShimValue {
+    pub fn alloc_bound_method(&mut self, obj: &ShimValue, func_pos: u24) -> ShimValue {
         let position = alloc!(self, u24::from(2), "Bound Method");
         self.mem[usize::from(position)] = obj.to_u64();
         self.mem[usize::from(position)+1] = u64::from(func_pos);
@@ -472,7 +472,7 @@ impl MMU {
         ShimValue::BoundMethod(position)
     }
 
-    pub(crate) fn alloc_bound_native_fn(&mut self, obj: &ShimValue, func: NativeFn) -> ShimValue {
+    pub fn alloc_bound_native_fn(&mut self, obj: &ShimValue, func: NativeFn) -> ShimValue {
         let position = alloc!(self, 2u32.into(), "Bound Native Fn");
         unsafe {
             let obj_ptr: *mut ShimValue =

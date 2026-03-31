@@ -438,7 +438,7 @@ const _: () = {
     assert!(std::mem::size_of::<ShimValue>() == 8);
 };
 
-pub(crate) trait ShimNative: Any {
+pub trait ShimNative: Any {
     fn to_string(&self, _interpreter: &mut Interpreter) -> String {
         format!("{}", type_name::<Self>())
     }
@@ -541,8 +541,8 @@ pub enum CallResult {
 
 #[derive(Debug)]
 pub struct ArgBundle {
-    pub(crate) args: Vec<ShimValue>,
-    pub(crate) kwargs: Vec<(Ident, ShimValue)>,
+    pub args: Vec<ShimValue>,
+    pub kwargs: Vec<(Ident, ShimValue)>,
 }
 
 impl ArgBundle {
@@ -656,7 +656,7 @@ macro_rules! numeric_op {
 impl ShimValue {
     /// Try to call a named method on a struct as an operator override.
     /// Returns None if self is not a Struct or the method doesn't exist.
-    pub(crate) fn try_struct_override(&self, interpreter: &mut Interpreter, method: &[u8], other: &ShimValue) -> Option<Result<ShimValue, String>> {
+    pub fn try_struct_override(&self, interpreter: &mut Interpreter, method: &[u8], other: &ShimValue) -> Option<Result<ShimValue, String>> {
         if let ShimValue::Struct(..) = self {
             match self.get_attr(interpreter, method) {
                 Ok(method_fn) => {
@@ -685,7 +685,7 @@ impl ShimValue {
         }
     }
 
-    pub(crate) fn is_uninitialized(&self) -> bool {
+    pub fn is_uninitialized(&self) -> bool {
         if let ShimValue::Uninitialized = self {
             true
         } else {
@@ -693,11 +693,11 @@ impl ShimValue {
         }
     }
 
-    pub(crate) fn is_none(&self) -> bool {
+    pub fn is_none(&self) -> bool {
         matches!(self, ShimValue::None)
     }
 
-    pub(crate) fn hash(&self, interpreter: &mut Interpreter) -> Result<u32, String> {
+    pub fn hash(&self, interpreter: &mut Interpreter) -> Result<u32, String> {
         let hashcode: u64 = match self {
             ShimValue::Integer(i) => fnv1a_hash(&i.to_be_bytes()),
             ShimValue::Float(f) => fnv1a_hash(&f.to_be_bytes()),
@@ -716,7 +716,7 @@ impl ShimValue {
         Ok(hashcode as u32)
     }
 
-    pub(crate) fn as_native<T: ShimNative>(&self, interpreter: &mut Interpreter) -> Result<&mut T, String> {
+    pub fn as_native<T: ShimNative>(&self, interpreter: &mut Interpreter) -> Result<&mut T, String> {
         match self {
             ShimValue::Native(position) => unsafe {
                 let boxobj: &mut Box<dyn ShimNative> =

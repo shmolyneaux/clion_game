@@ -1,22 +1,103 @@
+#![allow(static_mut_refs)]
 use macroquad::prelude::*;
+use macroquad::audio::Sound;
 use std::mem;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::fs;
 use std::time::SystemTime;
+use std::any::Any;
 
-use shimlang::{ShimValue, Environment, Interpreter};
+use shimlang::{ShimValue, Environment, Interpreter, ShimNative};
 use shimlang::runtime::{ArgUnpacker, NativeFn, CallResult};
 use shimlang::ArgBundle;
 use shimlang::lex::debug_u8s;
 
 use macroquad::audio::{load_sound_from_bytes, play_sound_once};
 
-struct SoundResource {
+use std::collections::HashMap;
+use std::mem::MaybeUninit;
+use std::sync::Once;
+
+
+// "Manager" is a bad name...
+struct SoundManager {
+    next_id: u32,
+    map: HashMap<u32, Sound>,
+    queue: Vec<SoundManagerQueueItem>,
 }
 
-impl ShimNative for SoundResource {
+enum SoundManagerQueueItem {
+    NewBloop(u32, f32, f32),
+    Play(u32),
+}
+
+impl SoundManager {
+    fn new() -> Self {
+        Self {
+            next_id: 0,
+            map: HashMap::new(),
+            queue: Vec::new(),
+        }
+    }
+
+    fn play(&mut self, handle: &SoundHandle) {
+        if let Some(sound) = self.map.get(&handle.id) {
+            // We've already loaded the sound
+            play_sound_once(sound);
+            return;
+        } else {
+            // Check if the load is enqueued
+            for item in self.queue.iter() {
+                if let SoundManagerQueueItem::NewBloop(id, _start_freq, _end_freq) = item {
+                    // Only add the `Play` action if the id is in the process of being loaded
+                    self.queue.push(SoundManagerQueueItem::Play(handle.id));
+                    return;
+                }
+            }
+        }
+        eprintln!("No sound for handle {:?}", handle);
+    }
+
+    fn new_bloop(&mut self, start_freq: f32, end_freq: f32) -> SoundHandle {
+        let id = self.next_id;
+        self.next_id += 1;
+
+        self.queue.push(SoundManagerQueueItem::NewBloop(id, start_freq, end_freq));
+        SoundHandle { id }
+    }
+
+}
+
+#[inline(always)]
+fn sound_manager() -> &'static mut SoundManager {
+    unsafe {
+        SOUND_MANAGER.assume_init_mut()
+    }
+}
+
+static mut SOUND_MANAGER: MaybeUninit<SoundManager> = MaybeUninit::uninit();
+
+#[derive(Debug)]
+struct SoundHandle {
+    id: u32,
+}
+
+impl ShimNative for SoundHandle {
     fn get_attr(&self, self_as_val: &ShimValue, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
-        Err("No attrs for SoundResource".to_string())
+        if ident == b"play" {
+            fn shim_sound_handle_play(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+                if args.args.len() != 1 {
+                    return Err(format!("Can't provide positional args to SoundHandle.next()"));
+                }
+                let handle: &mut SoundHandle = args.args[0].as_native(interpreter)?;
+                sound_manager().play(handle);
+                Ok(ShimValue::None)
+            }
+
+            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_sound_handle_play))
+        } else {
+            Err("Can only play on a SoundHandle".to_string())
+        }
     }
 
     fn as_any_mut(&mut self) -> &mut dyn Any where Self: Sized {
@@ -26,6 +107,16 @@ impl ShimNative for SoundResource {
     fn gc_vals(&self) -> Vec<ShimValue> {
         Vec::new()
     }
+}
+
+fn shim_new_bloop(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    Ok(interpreter.mem.alloc_native(
+        sound_manager().new_bloop(
+            unpacker.required_number(b"start_freq")?,
+            unpacker.required_number(b"end_freq")?,
+        )
+    ))
 }
 
 fn shim_draw_circle(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
@@ -129,6 +220,7 @@ fn load_script(text: &[u8]) -> Result<(Interpreter, Environment, ShimValue), Str
         (b"is_down_arrow_down", Box::new(shim_is_down_arrow_down)),
         (b"is_w_down", Box::new(shim_is_w_down)),
         (b"is_s_down", Box::new(shim_is_s_down)),
+        (b"new_bloop", Box::new(shim_new_bloop)),
     ];
 
     for (name, func) in builtins {
@@ -157,16 +249,20 @@ fn load_script(text: &[u8]) -> Result<(Interpreter, Environment, ShimValue), Str
     Ok((interpreter, env, loop_fn))
 }
 
-fn generate_bloop_wav() -> Vec<u8> {
+fn generate_bloop_wav(start_freq: f32, end_freq: f32) -> Vec<u8> {
     let sample_rate = 44100u32;
     let duration_secs = 0.15;
+    let duration_secs_inv = (0.15_f32).recip();
     let num_samples = (sample_rate as f32 * duration_secs) as usize;
     let mut samples = Vec::with_capacity(num_samples);
 
     for i in 0..num_samples {
         let t = i as f32 / sample_rate as f32;
-        // Frequency slides from 880Hz down to 440Hz for that "bloop" feel
-        let freq = 880.0 * (1.0 - t * 5.0).max(0.5);
+        let freq = start_freq // Starts at start_frew
+            + ( // This bracket is equal to 0 at t=0
+                (end_freq - start_freq) *
+                t * duration_secs_inv // When t=duration_secs the bracket equals (end_freq - start_freq)
+            );
         let sample = (t * freq * 2.0 * std::f32::consts::PI).sin();
         
         // Convert f32 sample to i16 (PCM 16-bit)
@@ -207,14 +303,9 @@ fn create_wav_container(data: Vec<u8>, sample_rate: u32) -> Vec<u8> {
 
 #[macroquad::main("BasicShapes")]
 async fn main() {
-    // 1. Generate the wav bytes
-    let bloop_bytes = generate_bloop_wav();
-
-    // 2. Load the sound from those bytes
-    let bloop_sound = load_sound_from_bytes(&bloop_bytes)
-        .await
-        .expect("Failed to load generated sound");
-
+    unsafe {
+        SOUND_MANAGER.write(SoundManager::new());
+    }
 
     let (mut interpreter, mut env, mut loop_fn) = load_script(b"fn loop() {}").expect("Should be able to load hardcoded script");
     let mut script_errors = Vec::new();
@@ -233,7 +324,6 @@ async fn main() {
                                     Ok(res) => {
                                         (interpreter, env, loop_fn) = res;
                                         script_errors = Vec::new();
-                                        play_sound_once(&bloop_sound);
                                     },
                                     Err(msg) => {
                                         script_errors.push(msg);
@@ -278,6 +368,29 @@ async fn main() {
         if let Some(msg) = script_errors.last() {
             for (lineno, line) in msg.split("\n").enumerate() {
                 draw_text(line, 20.0, 20.0*(lineno as f32+1.0), 16.0, WHITE);
+            }
+        }
+
+        let mut s = sound_manager();
+        let queue = std::mem::take(&mut s.queue);
+        for item in queue {
+            match item {
+                SoundManagerQueueItem::NewBloop(id, start_freq, end_freq) => {
+                    let sound_bytes = generate_bloop_wav(start_freq, end_freq);
+                    match load_sound_from_bytes(&sound_bytes).await {
+                        Ok(sound) => {
+                            s.map.insert(id, sound);
+                        },
+                        Err(e) => {
+                            eprintln!("{e}");
+                        }
+                    }
+                }
+                SoundManagerQueueItem::Play(id) => {
+                    // Should already be in the map since we check that ::Play isn't
+                    // inserted into the queue unless the `NewBloop` is before it
+                    s.play(&SoundHandle { id: id });
+                }
             }
         }
 
