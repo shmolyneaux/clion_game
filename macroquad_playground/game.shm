@@ -123,9 +123,9 @@ struct Paddle {
         }
 
         let dir = if self.is_player_1 {
-            int(is_s_down()) - int(is_w_down())
+            int(key.S.is_down) - int(key.W.is_down)
         } else {
-            int(is_down_arrow_down()) - int(is_up_arrow_down())
+            int(key.Down.is_down) - int(key.Up.is_down)
         };
         self.y = clamp(self.y + 5*dir, 0, screen_height-paddle_height);
         // TODO?

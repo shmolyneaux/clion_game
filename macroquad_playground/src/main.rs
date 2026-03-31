@@ -169,20 +169,175 @@ fn shim_draw_line(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Sh
     Ok(ShimValue::None)
 }
 
-fn shim_is_up_arrow_down(_interpreter: &mut Interpreter, _args: &ArgBundle) -> Result<ShimValue, String> {
-    Ok(ShimValue::Bool(is_key_down(KeyCode::Up)))
+fn key_code_from_name(name: &[u8]) -> Option<KeyCode> {
+    match name {
+        b"Space" => Some(KeyCode::Space),
+        b"Apostrophe" => Some(KeyCode::Apostrophe),
+        b"Comma" => Some(KeyCode::Comma),
+        b"Minus" => Some(KeyCode::Minus),
+        b"Period" => Some(KeyCode::Period),
+        b"Slash" => Some(KeyCode::Slash),
+        b"Key0" => Some(KeyCode::Key0),
+        b"Key1" => Some(KeyCode::Key1),
+        b"Key2" => Some(KeyCode::Key2),
+        b"Key3" => Some(KeyCode::Key3),
+        b"Key4" => Some(KeyCode::Key4),
+        b"Key5" => Some(KeyCode::Key5),
+        b"Key6" => Some(KeyCode::Key6),
+        b"Key7" => Some(KeyCode::Key7),
+        b"Key8" => Some(KeyCode::Key8),
+        b"Key9" => Some(KeyCode::Key9),
+        b"Semicolon" => Some(KeyCode::Semicolon),
+        b"Equal" => Some(KeyCode::Equal),
+        b"A" => Some(KeyCode::A),
+        b"B" => Some(KeyCode::B),
+        b"C" => Some(KeyCode::C),
+        b"D" => Some(KeyCode::D),
+        b"E" => Some(KeyCode::E),
+        b"F" => Some(KeyCode::F),
+        b"G" => Some(KeyCode::G),
+        b"H" => Some(KeyCode::H),
+        b"I" => Some(KeyCode::I),
+        b"J" => Some(KeyCode::J),
+        b"K" => Some(KeyCode::K),
+        b"L" => Some(KeyCode::L),
+        b"M" => Some(KeyCode::M),
+        b"N" => Some(KeyCode::N),
+        b"O" => Some(KeyCode::O),
+        b"P" => Some(KeyCode::P),
+        b"Q" => Some(KeyCode::Q),
+        b"R" => Some(KeyCode::R),
+        b"S" => Some(KeyCode::S),
+        b"T" => Some(KeyCode::T),
+        b"U" => Some(KeyCode::U),
+        b"V" => Some(KeyCode::V),
+        b"W" => Some(KeyCode::W),
+        b"X" => Some(KeyCode::X),
+        b"Y" => Some(KeyCode::Y),
+        b"Z" => Some(KeyCode::Z),
+        b"LeftBracket" => Some(KeyCode::LeftBracket),
+        b"Backslash" => Some(KeyCode::Backslash),
+        b"RightBracket" => Some(KeyCode::RightBracket),
+        b"GraveAccent" => Some(KeyCode::GraveAccent),
+        b"World1" => Some(KeyCode::World1),
+        b"World2" => Some(KeyCode::World2),
+        b"Escape" => Some(KeyCode::Escape),
+        b"Enter" => Some(KeyCode::Enter),
+        b"Tab" => Some(KeyCode::Tab),
+        b"Backspace" => Some(KeyCode::Backspace),
+        b"Insert" => Some(KeyCode::Insert),
+        b"Delete" => Some(KeyCode::Delete),
+        b"Right" => Some(KeyCode::Right),
+        b"Left" => Some(KeyCode::Left),
+        b"Down" => Some(KeyCode::Down),
+        b"Up" => Some(KeyCode::Up),
+        b"PageUp" => Some(KeyCode::PageUp),
+        b"PageDown" => Some(KeyCode::PageDown),
+        b"Home" => Some(KeyCode::Home),
+        b"End" => Some(KeyCode::End),
+        b"CapsLock" => Some(KeyCode::CapsLock),
+        b"ScrollLock" => Some(KeyCode::ScrollLock),
+        b"NumLock" => Some(KeyCode::NumLock),
+        b"PrintScreen" => Some(KeyCode::PrintScreen),
+        b"Pause" => Some(KeyCode::Pause),
+        b"F1" => Some(KeyCode::F1),
+        b"F2" => Some(KeyCode::F2),
+        b"F3" => Some(KeyCode::F3),
+        b"F4" => Some(KeyCode::F4),
+        b"F5" => Some(KeyCode::F5),
+        b"F6" => Some(KeyCode::F6),
+        b"F7" => Some(KeyCode::F7),
+        b"F8" => Some(KeyCode::F8),
+        b"F9" => Some(KeyCode::F9),
+        b"F10" => Some(KeyCode::F10),
+        b"F11" => Some(KeyCode::F11),
+        b"F12" => Some(KeyCode::F12),
+        b"F13" => Some(KeyCode::F13),
+        b"F14" => Some(KeyCode::F14),
+        b"F15" => Some(KeyCode::F15),
+        b"F16" => Some(KeyCode::F16),
+        b"F17" => Some(KeyCode::F17),
+        b"F18" => Some(KeyCode::F18),
+        b"F19" => Some(KeyCode::F19),
+        b"F20" => Some(KeyCode::F20),
+        b"F21" => Some(KeyCode::F21),
+        b"F22" => Some(KeyCode::F22),
+        b"F23" => Some(KeyCode::F23),
+        b"F24" => Some(KeyCode::F24),
+        b"F25" => Some(KeyCode::F25),
+        b"Kp0" => Some(KeyCode::Kp0),
+        b"Kp1" => Some(KeyCode::Kp1),
+        b"Kp2" => Some(KeyCode::Kp2),
+        b"Kp3" => Some(KeyCode::Kp3),
+        b"Kp4" => Some(KeyCode::Kp4),
+        b"Kp5" => Some(KeyCode::Kp5),
+        b"Kp6" => Some(KeyCode::Kp6),
+        b"Kp7" => Some(KeyCode::Kp7),
+        b"Kp8" => Some(KeyCode::Kp8),
+        b"Kp9" => Some(KeyCode::Kp9),
+        b"KpDecimal" => Some(KeyCode::KpDecimal),
+        b"KpDivide" => Some(KeyCode::KpDivide),
+        b"KpMultiply" => Some(KeyCode::KpMultiply),
+        b"KpSubtract" => Some(KeyCode::KpSubtract),
+        b"KpAdd" => Some(KeyCode::KpAdd),
+        b"KpEnter" => Some(KeyCode::KpEnter),
+        b"KpEqual" => Some(KeyCode::KpEqual),
+        b"LeftShift" => Some(KeyCode::LeftShift),
+        b"LeftControl" => Some(KeyCode::LeftControl),
+        b"LeftAlt" => Some(KeyCode::LeftAlt),
+        b"LeftSuper" => Some(KeyCode::LeftSuper),
+        b"RightShift" => Some(KeyCode::RightShift),
+        b"RightControl" => Some(KeyCode::RightControl),
+        b"RightAlt" => Some(KeyCode::RightAlt),
+        b"RightSuper" => Some(KeyCode::RightSuper),
+        b"Menu" => Some(KeyCode::Menu),
+        b"Back" => Some(KeyCode::Back),
+        b"Unknown" => Some(KeyCode::Unknown),
+        _ => None,
+    }
 }
 
-fn shim_is_down_arrow_down(_interpreter: &mut Interpreter, _args: &ArgBundle) -> Result<ShimValue, String> {
-    Ok(ShimValue::Bool(is_key_down(KeyCode::Down)))
+#[derive(Debug)]
+struct KeyMap;
+
+impl ShimNative for KeyMap {
+    fn get_attr(&self, _self_as_val: &ShimValue, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
+        match key_code_from_name(ident) {
+            Some(code) => Ok(interpreter.mem.alloc_native(KeyValue { code })),
+            None => Err(format!("Unknown key: {}", debug_u8s(ident))),
+        }
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any where Self: Sized {
+        self
+    }
+
+    fn gc_vals(&self) -> Vec<ShimValue> {
+        Vec::new()
+    }
 }
 
-fn shim_is_w_down(_interpreter: &mut Interpreter, _args: &ArgBundle) -> Result<ShimValue, String> {
-    Ok(ShimValue::Bool(is_key_down(KeyCode::W)))
+#[derive(Debug)]
+struct KeyValue {
+    code: KeyCode,
 }
 
-fn shim_is_s_down(_interpreter: &mut Interpreter, _args: &ArgBundle) -> Result<ShimValue, String> {
-    Ok(ShimValue::Bool(is_key_down(KeyCode::S)))
+impl ShimNative for KeyValue {
+    fn get_attr(&self, _self_as_val: &ShimValue, _interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
+        if ident == b"is_down" {
+            Ok(ShimValue::Bool(is_key_down(self.code)))
+        } else {
+            Err(format!("KeyValue only has 'is_down', not '{}'", debug_u8s(ident)))
+        }
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any where Self: Sized {
+        self
+    }
+
+    fn gc_vals(&self) -> Vec<ShimValue> {
+        Vec::new()
+    }
 }
 
 fn shim_draw_rectangle(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
@@ -216,10 +371,6 @@ fn load_script(text: &[u8]) -> Result<(Interpreter, Environment, ShimValue), Str
         (b"draw_rectangle", Box::new(shim_draw_rectangle)),
         (b"draw_line", Box::new(shim_draw_line)),
         (b"clear_background", Box::new(shim_clear_background)),
-        (b"is_up_arrow_down", Box::new(shim_is_up_arrow_down)),
-        (b"is_down_arrow_down", Box::new(shim_is_down_arrow_down)),
-        (b"is_w_down", Box::new(shim_is_w_down)),
-        (b"is_s_down", Box::new(shim_is_s_down)),
         (b"new_bloop", Box::new(shim_new_bloop)),
     ];
 
@@ -227,6 +378,9 @@ fn load_script(text: &[u8]) -> Result<(Interpreter, Environment, ShimValue), Str
         let position = interpreter.mem.alloc_and_set(**func, &format!("builtin func {}", debug_u8s(name)));
         env.insert_new(&mut interpreter, name.to_vec(), ShimValue::NativeFn(position));
     }
+
+    let key_val = interpreter.mem.alloc_native(KeyMap);
+    env.insert_new(&mut interpreter, b"key".to_vec(), key_val);
 
     let mut pc = 0;
     interpreter.execute_bytecode_extended(&mut pc, shimlang::ArgBundle::new(), &mut env)?;
