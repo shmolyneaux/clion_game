@@ -310,9 +310,34 @@ async fn main() {
     let (mut interpreter, mut env, mut loop_fn) = load_script(b"fn loop() {}").expect("Should be able to load hardcoded script");
     let mut script_errors = Vec::new();
 
-    let mut mtime = SystemTime::now();
     let script_path = "game.shm";
+
+    // On wasm, load the script once via load_file
+    #[cfg(target_arch = "wasm32")]
+    match load_file(script_path).await {
+        Ok(bytes) => {
+            match load_script(&bytes) {
+                Ok(res) => {
+                    (interpreter, env, loop_fn) = res;
+                    script_errors = Vec::new();
+                },
+                Err(msg) => {
+                    script_errors.push(msg);
+                }
+            };
+        },
+        Err(_msg) => {
+            script_errors.push(format!("Could not read {script_path}"));
+        }
+    }
+
+    // On native, track mtime for auto-reloading
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut mtime = SystemTime::now();
+
     loop {
+        // Auto-reload script on native when file changes
+        #[cfg(not(target_arch = "wasm32"))]
         match fs::metadata(script_path) {
             Ok(metadata) => match metadata.modified() {
                 Ok(time) => {
@@ -330,7 +355,7 @@ async fn main() {
                                     }
                                 };
                             },
-                            Err(msg) => {
+                            Err(_msg) => {
                                 script_errors.push(format!("Could not read {script_path}"));
                             }
                         }
