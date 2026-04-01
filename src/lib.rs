@@ -154,6 +154,13 @@ mod test_mocks {
     pub fn igEndTable() {panic!("Can't call igEndTable in test context")}
 
     pub fn igFrameRate() -> f32 {panic!("Can't call igFrameRate in test context")}
+    pub fn igGetCursorScreenPos(pOut: *mut super::ImVec2) {panic!("Can't call igGetCursorScreenPos in test context")}
+    pub fn igDrawRectFilled(min: super::ImVec2, max: super::ImVec2, col: u32) {panic!("Can't call igDrawRectFilled in test context")}
+    pub fn igDummy(size: super::ImVec2) {panic!("Can't call igDummy in test context")}
+    pub fn igBeginTooltip() {panic!("Can't call igBeginTooltip in test context")}
+    pub fn igEndTooltip() {panic!("Can't call igEndTooltip in test context")}
+    pub fn igGetMousePos(pOut: *mut super::ImVec2) {panic!("Can't call igGetMousePos in test context")}
+    pub fn igIsMouseHoveringRect(min: super::ImVec2, max: super::ImVec2, clip: bool) -> bool {panic!("Can't call igIsMouseHoveringRect in test context")}
 }
 
 #[cfg(test)]
