@@ -3,6 +3,7 @@ use crate::lex::debug_u8s;
 use crate::runtime::ShimValue;
 use crate::runtime::format_float;
 
+// NOTE: When adding new bytecodes, also update format_asm() below.
 #[repr(u8)]
 pub(crate) enum ByteCode {
     NoOp,
