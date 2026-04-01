@@ -112,11 +112,23 @@ pub struct Struct {
 }
 
 #[derive(Debug)]
+pub enum CompoundOp {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Modulus,
+}
+
+#[derive(Debug)]
 pub enum Statement {
     Let(Vec<u8>, ExprNode),
     Assignment(Vec<u8>, ExprNode),
     AttributeAssignment(ExprNode, Vec<u8>, ExprNode),
     IndexAssignment(ExprNode, ExprNode, ExprNode),
+    CompoundAssignment(Vec<u8>, CompoundOp, ExprNode),
+    CompoundAttributeAssignment(ExprNode, Vec<u8>, CompoundOp, ExprNode),
+    CompoundIndexAssignment(ExprNode, ExprNode, CompoundOp, ExprNode),
     If(ExprNode, Block, Block),
     For(Vec<u8>, ExprNode, Block),
     While(ExprNode, Block),
@@ -1046,6 +1058,56 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
                                 expr.span,
                                 &tokens.script,
                                 &format!("Can't assign to {:?}", expr_data),
+                            ));
+                        }
+                    }
+                }
+                Token::PlusEqual
+                | Token::MinusEqual
+                | Token::StarEqual
+                | Token::SlashEqual
+                | Token::PercentEqual => {
+                    let op = match tokens.pop()? {
+                        Token::PlusEqual => CompoundOp::Add,
+                        Token::MinusEqual => CompoundOp::Subtract,
+                        Token::StarEqual => CompoundOp::Multiply,
+                        Token::SlashEqual => CompoundOp::Divide,
+                        Token::PercentEqual => CompoundOp::Modulus,
+                        _ => unreachable!(),
+                    };
+                    match expr.data {
+                        Expression::Primary(Primary::Identifier(ident)) => {
+                            let rhs = parse_expression(tokens)?;
+                            let end_span = tokens.peek_span()?;
+                            tokens.consume(Token::Semicolon)?;
+                            StatementNode {
+                                data: Statement::CompoundAssignment(ident.clone(), op, rhs),
+                                span: start_span + end_span,
+                            }
+                        }
+                        Expression::Attribute(obj_expr, ident) => {
+                            let rhs = parse_expression(tokens)?;
+                            let end_span = tokens.peek_span()?;
+                            tokens.consume(Token::Semicolon)?;
+                            StatementNode {
+                                data: Statement::CompoundAttributeAssignment(*obj_expr, ident.clone(), op, rhs),
+                                span: start_span + end_span,
+                            }
+                        }
+                        Expression::Index(obj_expr, index_expr) => {
+                            let rhs = parse_expression(tokens)?;
+                            let end_span = tokens.peek_span()?;
+                            tokens.consume(Token::Semicolon)?;
+                            StatementNode {
+                                data: Statement::CompoundIndexAssignment(*obj_expr, *index_expr, op, rhs),
+                                span: start_span + end_span,
+                            }
+                        }
+                        expr_data => {
+                            return Err(format_script_err(
+                                expr.span,
+                                &tokens.script,
+                                &format!("Can't use compound assignment on {:?}", expr_data),
                             ));
                         }
                     }
