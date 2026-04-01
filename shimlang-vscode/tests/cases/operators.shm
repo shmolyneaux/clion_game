@@ -36,6 +36,21 @@ a < b;
 x = 42;
 //^ keyword.operator.assignment.shim
 
+x += 1;
+//^^ keyword.operator.assignment.compound.shim
+
+x -= 1;
+//^^ keyword.operator.assignment.compound.shim
+
+x *= 1;
+//^^ keyword.operator.assignment.compound.shim
+
+x /= 1;
+//^^ keyword.operator.assignment.compound.shim
+
+x %= 1;
+//^^ keyword.operator.assignment.compound.shim
+
 let r = 1..10;
 //       ^^ keyword.operator.range.shim
 

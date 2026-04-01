@@ -162,12 +162,16 @@
                     "match": "==|!=|>=|<=|>|<"
                 },
                 {
+                    "name": "keyword.operator.assignment.compound.shim",
+                    "match": "[+\\-*/%]="
+                },
+                {
                     "name": "keyword.operator.assignment.shim",
-                    "match": "(?<![=!<>])=(?!=)"
+                    "match": "(?<![=!<>+\\-*/%])=(?!=)"
                 },
                 {
                     "name": "keyword.operator.arithmetic.shim",
-                    "match": "[+\\-*/%]"
+                    "match": "[+\\-*/%](?!=)"
                 },
                 {
                     "name": "keyword.operator.range.shim",
