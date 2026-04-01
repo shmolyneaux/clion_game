@@ -653,6 +653,19 @@ macro_rules! numeric_op {
     };
 }
 
+/// Intermediate result of resolving an attribute name on a ShimValue.
+/// Used to share lookup logic between `get_attr` and `attr_call`.
+enum ResolvedAttr {
+    /// A plain value (e.g. a struct field).
+    Value(ShimValue),
+    /// An instance method: (self_val, fn_pos). Caller must prepend self_val to args.
+    BoundMethod(ShimValue, u24),
+    /// A static/def method accessed on a StructDef: fn_pos only (no self).
+    Fn(u24),
+    /// A built-in native method on String/List/Dict: (self_val, func).
+    NativeMethod(ShimValue, NativeFn),
+}
+
 impl ShimValue {
     /// Try to call a named method on a struct as an operator override.
     /// Returns None if self is not a Struct or the method doesn't exist.
@@ -801,33 +814,21 @@ impl ShimValue {
         }
     }
 
-    pub(crate) fn attr_call(
-        &self,
-        ident: &[u8],
-        interpreter: &mut Interpreter,
-        args: &mut ArgBundle,
-    ) -> Result<CallResult, String> {
+    /// Resolves an attribute name to a `ResolvedAttr`, sharing lookup logic between
+    /// `get_attr` (which allocates a bound value) and `attr_call` (which calls directly).
+    fn resolve_attr(&self, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ResolvedAttr, String> {
         match self {
             ShimValue::Struct(def_pos, pos) => {
-                // Handle __type__ special attribute
-                if ident == b"__type__" {
-                    return ShimValue::StructDef(*def_pos).call(interpreter, args);
-                }
-                
                 unsafe {
                     let def: &StructDef = interpreter.mem.get(*def_pos);
                     for (attr, loc) in def.lookup.iter() {
                         if ident == attr {
                             return match loc {
                                 StructAttribute::MemberInstanceOffset(offset) => {
-                                    let val: ShimValue = *interpreter.mem.get(*pos + *offset as u32);
-                                    val.call(interpreter, args)
+                                    Ok(ResolvedAttr::Value(*interpreter.mem.get(*pos + *offset as u32)))
                                 }
                                 StructAttribute::MethodDef(fn_pos) => {
-                                    // push struct pos to start of arg list then return the pc of the method
-                                    args.args.insert(0, *self);
-                                    let shim_fn: &ShimFn = interpreter.mem.get(*fn_pos);
-                                    Ok(CallResult::PC(shim_fn.pc, shim_fn.captured_scope))
+                                    Ok(ResolvedAttr::BoundMethod(*self, *fn_pos))
                                 }
                             };
                         }
@@ -836,11 +837,6 @@ impl ShimValue {
                 Err(format!("Ident {:?} not found for {}", debug_u8s(ident), self.to_string_mem(&interpreter.mem)))
             }
             ShimValue::StructDef(def_pos) => {
-                // Handle __name__ special attribute
-                if ident == b"__name__" {
-                    return Err("__name__ is not callable".to_string());
-                }
-                
                 unsafe {
                     let def: &StructDef = interpreter.mem.get(*def_pos);
                     for (attr, loc) in def.lookup.iter() {
@@ -851,7 +847,7 @@ impl ShimValue {
                                     ident, self.to_string_mem(&interpreter.mem)
                                 )),
                                 StructAttribute::MethodDef(fn_pos) => {
-                                    ShimValue::Fn(*fn_pos).call(interpreter, args)
+                                    Ok(ResolvedAttr::Fn(*fn_pos))
                                 }
                             };
                         }
@@ -860,16 +856,14 @@ impl ShimValue {
                 Err(format!("Ident {:?} not found for {}", debug_u8s(ident), self.to_string_mem(&interpreter.mem)))
             }
             ShimValue::String(..) => {
-                args.args.insert(0, *self);
                 let func = match ident {
                     b"len" => shim_str_len,
                     b"split" => shim_str_split,
                     _ => return Err(format!("No ident {:?} on str", debug_u8s(ident))),
                 };
-                func(interpreter, args).map(|v| CallResult::ReturnValue(v))
+                Ok(ResolvedAttr::NativeMethod(*self, func))
             }
             ShimValue::List(_) => {
-                args.args.insert(0, *self);
                 let func = match ident {
                     b"map" => shim_list_map,
                     b"filter" => shim_list_filter,
@@ -887,10 +881,9 @@ impl ShimValue {
                     b"reversed" => shim_list_reversed,
                     _ => return Err(format!("No ident {:?} on list", debug_u8s(ident))),
                 };
-                func(interpreter, args).map(|v| CallResult::ReturnValue(v))
+                Ok(ResolvedAttr::NativeMethod(*self, func))
             }
             ShimValue::Dict(_) => {
-                args.args.insert(0, *self);
                 let func = match ident {
                     b"set" => shim_dict_index_set,
                     b"get" => shim_dict_index_get,
@@ -904,14 +897,44 @@ impl ShimValue {
                     b"shrink_to_fit" => shim_dict_shrink_to_fit,
                     _ => return Err(format!("No ident {:?} on dict", debug_u8s(ident))),
                 };
-                func(interpreter, args).map(|v| CallResult::ReturnValue(v))
+                Ok(ResolvedAttr::NativeMethod(*self, func))
             }
             ShimValue::Native(_) => {
-                let func = self.native(interpreter).unwrap().get_attr(self, interpreter, ident)?;
-                // TODO: add attr_call to ShimNative
-                func.call(interpreter, args)
+                let result = self.native(interpreter).unwrap().get_attr(self, interpreter, ident)?;
+                Ok(ResolvedAttr::Value(result))
             }
             val => Err(format!("Ident {:?} not available on {}", debug_u8s(ident), val.to_string_mem(&interpreter.mem))),
+        }
+    }
+
+    pub(crate) fn attr_call(
+        &self,
+        ident: &[u8],
+        interpreter: &mut Interpreter,
+        args: &mut ArgBundle,
+    ) -> Result<CallResult, String> {
+        if let ShimValue::Struct(def_pos, _) = self {
+            if ident == b"__type__" {
+                return ShimValue::StructDef(*def_pos).call(interpreter, args);
+            }
+        }
+        if let ShimValue::StructDef(_) = self {
+            if ident == b"__name__" {
+                return Err("__name__ is not callable".to_string());
+            }
+        }
+        match self.resolve_attr(interpreter, ident)? {
+            ResolvedAttr::Value(v) => v.call(interpreter, args),
+            ResolvedAttr::BoundMethod(self_val, fn_pos) => {
+                args.args.insert(0, self_val);
+                let shim_fn: &ShimFn = unsafe { interpreter.mem.get(fn_pos) };
+                Ok(CallResult::PC(shim_fn.pc, shim_fn.captured_scope))
+            }
+            ResolvedAttr::Fn(fn_pos) => ShimValue::Fn(fn_pos).call(interpreter, args),
+            ResolvedAttr::NativeMethod(self_val, func) => {
+                args.args.insert(0, self_val);
+                func(interpreter, args).map(CallResult::ReturnValue)
+            }
         }
     }
 
@@ -1294,11 +1317,11 @@ impl ShimValue {
             (ShimValue::Fn(pos_a), ShimValue::Fn(pos_b)) => {
                 Ok(pos_a == pos_b)
             },
-            (ShimValue::BoundMethod(pos_a), ShimValue::BoundMethod(pos_b)) => {
+            (ShimValue::BoundMethod(_pos_a), ShimValue::BoundMethod(_pos_b)) => {
                 // The pos's might not match up but still have an equivalent obj/func
                 Err("Can't yet check equality between bound methods".to_string())
             },
-            (ShimValue::BoundNativeMethod(pos_a), ShimValue::BoundNativeMethod(pos_b)) => {
+            (ShimValue::BoundNativeMethod(_pos_a), ShimValue::BoundNativeMethod(_pos_b)) => {
                 // The pos's might not match up but still have an equivalent obj/func
                 Err("Can't yet check equality between bound native methods".to_string())
             },
@@ -1424,107 +1447,29 @@ impl ShimValue {
     }
 
     pub(crate) fn get_attr(&self, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
-        match self {
-            ShimValue::Struct(def_pos, pos) => {
-                // Handle __type__ special attribute
-                if ident == b"__type__" {
-                    return Ok(ShimValue::StructDef(*def_pos));
-                }
-                
+        if let ShimValue::Struct(def_pos, _) = self {
+            if ident == b"__type__" {
+                return Ok(ShimValue::StructDef(*def_pos));
+            }
+        }
+        if let ShimValue::StructDef(def_pos) = self {
+            if ident == b"__name__" {
                 unsafe {
                     let def: &StructDef = interpreter.mem.get(*def_pos);
-                    for (attr, loc) in def.lookup.iter() {
-                        if ident == attr {
-                            return match loc {
-                                StructAttribute::MemberInstanceOffset(offset) => {
-                                    Ok(*interpreter.mem.get(*pos + *offset as u32))
-                                }
-                                StructAttribute::MethodDef(fn_pos) => {
-                                    Ok(interpreter.mem.alloc_bound_method(self, *fn_pos))
-                                }
-                            };
-                        }
-                    }
+                    let name = def.name.clone();
+                    return Ok(interpreter.mem.alloc_str(&name));
                 }
-                Err(format!("Ident {:?} not found for {}", debug_u8s(ident), self.to_string_mem(&interpreter.mem)))
             }
-            ShimValue::StructDef(def_pos) => {
-                // Handle __name__ special attribute
-                if ident == b"__name__" {
-                    unsafe {
-                        let def: &StructDef = interpreter.mem.get(*def_pos);
-                        let name = def.name.clone();
-                        return Ok(interpreter.mem.alloc_str(&name));
-                    }
-                }
-                
-                unsafe {
-                    let def: &StructDef = interpreter.mem.get(*def_pos);
-                    for (attr, loc) in def.lookup.iter() {
-                        if ident == attr {
-                            return match loc {
-                                StructAttribute::MemberInstanceOffset(_) => Err(format!(
-                                    "Can't access member {:?} on StructDef {}",
-                                    ident, self.to_string_mem(&interpreter.mem)
-                                )),
-                                StructAttribute::MethodDef(fn_pos) => {
-                                    // Return the pre-allocated method function
-                                    Ok(ShimValue::Fn(*fn_pos))
-                                }
-                            };
-                        }
-                    }
-                }
-                Err(format!("Ident {:?} not found for {}", debug_u8s(ident), self.to_string_mem(&interpreter.mem)))
+        }
+        match self.resolve_attr(interpreter, ident)? {
+            ResolvedAttr::Value(v) => Ok(v),
+            ResolvedAttr::BoundMethod(self_val, fn_pos) => {
+                Ok(interpreter.mem.alloc_bound_method(&self_val, fn_pos))
             }
-            ShimValue::String(..) => {
-                let func = match ident {
-                    b"len" => shim_str_len,
-                    b"split" => shim_str_split,
-                    _ => return Err(format!("No ident {:?} on str", debug_u8s(ident))),
-                };
-                Ok(interpreter.mem.alloc_bound_native_fn(self, func))
+            ResolvedAttr::Fn(fn_pos) => Ok(ShimValue::Fn(fn_pos)),
+            ResolvedAttr::NativeMethod(self_val, func) => {
+                Ok(interpreter.mem.alloc_bound_native_fn(&self_val, func))
             }
-            ShimValue::List(_) => {
-                let func = match ident {
-                    b"map" => shim_list_map,
-                    b"filter" => shim_list_filter,
-                    b"len" => shim_list_len,
-                    b"iter" => shim_list_iter,
-                    b"sort" => shim_list_sort,
-                    b"append" => shim_list_append,
-                    b"clear" => shim_list_clear,
-                    b"extend" => shim_list_extend,
-                    b"index" => shim_list_index,
-                    b"insert" => shim_list_insert,
-                    b"pop" => shim_list_pop,
-                    b"sorted" => shim_list_sorted,
-                    b"reverse" => shim_list_reverse,
-                    b"reversed" => shim_list_reversed,
-                    _ => return Err(format!("No ident {:?} on list", debug_u8s(ident))),
-                };
-                Ok(interpreter.mem.alloc_bound_native_fn(self, func))
-            }
-            ShimValue::Dict(_) => {
-                let func = match ident {
-                    b"set" => shim_dict_index_set,
-                    b"get" => shim_dict_index_get,
-                    b"has" => shim_dict_index_has,
-                    b"len" => shim_dict_len,
-                    b"pop" => shim_dict_pop,
-                    b"iter" => shim_dict_iter,
-                    b"keys" => shim_dict_keys,
-                    b"values" => shim_dict_values,
-                    b"items" => shim_dict_items,
-                    b"shrink_to_fit" => shim_dict_shrink_to_fit,
-                    _ => return Err(format!("No ident {:?} on dict", debug_u8s(ident))),
-                };
-                Ok(interpreter.mem.alloc_bound_native_fn(self, func))
-            }
-            ShimValue::Native(_) => {
-                self.native(interpreter).unwrap().get_attr(self, interpreter, ident)
-            }
-            val => Err(format!("Ident {:?} not available on {}", debug_u8s(ident), val.to_string_mem(&interpreter.mem))),
         }
     }
 
