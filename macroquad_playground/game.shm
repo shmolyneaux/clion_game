@@ -127,9 +127,7 @@ struct Paddle {
         } else {
             int(key.Down.is_down) - int(key.Up.is_down)
         };
-        self.y = clamp(self.y + 5*dir, 0, screen_height-paddle_height);
-        // TODO?
-        // (self.y + 5*dir).clamp(0, screen_height-paddle_height)
+        self.y = (self.y + 5*dir).clamp(0, screen_height-paddle_height);
     }
 
     fn draw(self) {

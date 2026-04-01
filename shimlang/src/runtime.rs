@@ -903,6 +903,20 @@ impl ShimValue {
                 let result = self.native(interpreter).unwrap().get_attr(self, interpreter, ident)?;
                 Ok(ResolvedAttr::Value(result))
             }
+            ShimValue::Integer(_) => {
+                let func = match ident {
+                    b"clamp" => shim_clamp,
+                    _ => return Err(format!("Ident {:?} not available on {}", debug_u8s(ident), self.to_string_mem(&interpreter.mem))),
+                };
+                Ok(ResolvedAttr::NativeMethod(*self, func))
+            }
+            ShimValue::Float(_) => {
+                let func = match ident {
+                    b"clamp" => shim_clamp,
+                    _ => return Err(format!("Ident {:?} not available on {}", debug_u8s(ident), self.to_string_mem(&interpreter.mem))),
+                };
+                Ok(ResolvedAttr::NativeMethod(*self, func))
+            }
             val => Err(format!("Ident {:?} not available on {}", debug_u8s(ident), val.to_string_mem(&interpreter.mem))),
         }
     }
