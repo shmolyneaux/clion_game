@@ -271,6 +271,16 @@ pub fn compile_return(expr: &Option<&ExprNode>, span: Span) -> Result<Vec<(u8, S
     Ok(res)
 }
 
+fn compound_op_bytecode(op: &CompoundOp) -> u8 {
+    match op {
+        CompoundOp::Add => ByteCode::Add as u8,
+        CompoundOp::Subtract => ByteCode::Sub as u8,
+        CompoundOp::Multiply => ByteCode::Multiply as u8,
+        CompoundOp::Divide => ByteCode::Divide as u8,
+        CompoundOp::Modulus => ByteCode::Modulus as u8,
+    }
+}
+
 pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, String> {
     let stmt_span = stmt_node.span;
     match &stmt_node.data {
@@ -324,6 +334,71 @@ pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, S
             expr_asm.push((ByteCode::SetIndex as u8, expr.span));
 
             Ok(expr_asm)
+        }
+        Statement::CompoundAssignment(ident, op, rhs) => {
+            // Desugar: x += e  →  x = x + e
+            // Emit: load x, compile rhs, binary op, assign x
+            let op_bytecode = compound_op_bytecode(op);
+            let mut asm = Vec::new();
+            asm.push((ByteCode::VariableLoad as u8, rhs.span));
+            asm.push((
+                ident.len().try_into().expect("Ident len should into u8"),
+                rhs.span,
+            ));
+            for b in ident.iter() {
+                asm.push((*b, rhs.span));
+            }
+            asm.extend(compile_expression(rhs)?);
+            asm.push((op_bytecode, rhs.span));
+            asm.push((ByteCode::Assignment as u8, rhs.span));
+            asm.push((
+                ident.len().try_into().expect("Ident len should into u8"),
+                rhs.span,
+            ));
+            for b in ident.iter() {
+                asm.push((*b, rhs.span));
+            }
+            Ok(asm)
+        }
+        Statement::CompoundAttributeAssignment(obj_expr, ident, op, rhs) => {
+            // Desugar: obj.attr += e  →  obj.attr = obj.attr + e
+            // Emit: compile obj, compile obj, GetAttr, compile rhs, binary op, SetAttr
+            let op_bytecode = compound_op_bytecode(op);
+            let mut asm = compile_expression(obj_expr)?;
+            asm.extend(compile_expression(obj_expr)?);
+            asm.push((ByteCode::GetAttr as u8, rhs.span));
+            asm.push((
+                ident.len().try_into().expect("Ident len should into u8"),
+                rhs.span,
+            ));
+            for b in ident.iter() {
+                asm.push((*b, rhs.span));
+            }
+            asm.extend(compile_expression(rhs)?);
+            asm.push((op_bytecode, rhs.span));
+            asm.push((ByteCode::SetAttr as u8, rhs.span));
+            asm.push((
+                ident.len().try_into().expect("Ident len should into u8"),
+                rhs.span,
+            ));
+            for b in ident.iter() {
+                asm.push((*b, rhs.span));
+            }
+            Ok(asm)
+        }
+        Statement::CompoundIndexAssignment(obj_expr, index_expr, op, rhs) => {
+            // Desugar: obj[idx] += e  →  obj[idx] = obj[idx] + e
+            // Emit: compile obj, compile idx, compile obj, compile idx, Index, compile rhs, binary op, SetIndex
+            let op_bytecode = compound_op_bytecode(op);
+            let mut asm = compile_expression(obj_expr)?;
+            asm.extend(compile_expression(index_expr)?);
+            asm.extend(compile_expression(obj_expr)?);
+            asm.extend(compile_expression(index_expr)?);
+            asm.push((ByteCode::Index as u8, rhs.span));
+            asm.extend(compile_expression(rhs)?);
+            asm.push((op_bytecode, rhs.span));
+            asm.push((ByteCode::SetIndex as u8, rhs.span));
+            Ok(asm)
         }
         Statement::Fn(func) => {
             compile_fn(func, stmt_span)

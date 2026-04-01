@@ -26,6 +26,7 @@ with methods, and a growing standard library of built-in types and functions.
   - [Logical](#logical)
   - [Negation](#negation)
   - [Range](#range)
+  - [Assignment Operators](#assignment-operators)
 - [Control Flow](#control-flow)
   - [If / Else / Else If](#if--else--else-if)
   - [While Loops](#while-loops)
@@ -638,6 +639,55 @@ Output:
 3
 2
 1
+```
+
+### Assignment Operators
+
+Compound assignment operators combine an arithmetic operation with assignment.
+They modify a variable, struct field, or list element in place:
+
+| Operator | Equivalent to |
+|----------|---------------|
+| `+=` | `x = x + value` |
+| `-=` | `x = x - value` |
+| `*=` | `x = x * value` |
+| `/=` | `x = x / value` |
+| `%=` | `x = x % value` |
+
+```rust
+let count = 0;
+count += 5;
+count -= 2;
+count *= 4;
+count /= 3;
+count %= 3;
+print(count);
+```
+
+Output:
+
+```
+1
+```
+
+These operators also work on struct fields and list elements:
+
+```rust
+struct Point { x, y }
+let p = Point(1, 2);
+p.x += 10;
+print(p.x);
+
+let lst = [10, 20, 30];
+lst[0] += 5;
+print(lst[0]);
+```
+
+Output:
+
+```
+11
+15
 ```
 
 ## Control Flow
@@ -1352,8 +1402,6 @@ environment rather than conditions to catch at runtime.
 
 The following changes would improve the Shimlang experience for users:
 
-- **Compound assignment operators:** `+=`, `-=`, `*=`, and `/=` would reduce
-  boilerplate in expressions like `count = count + 1`.
 - **Error handling:** The absence of `try`/`catch` is a deliberate design
   choice (see [Error Handling Philosophy](#error-handling-philosophy)). Future
   work in this area focuses on the time-travelling debugger and expanding the

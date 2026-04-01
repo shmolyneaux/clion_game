@@ -34,6 +34,11 @@ pub enum Token {
     LT,
     LTE,
     Percent,
+    PlusEqual,
+    MinusEqual,
+    StarEqual,
+    SlashEqual,
+    PercentEqual,
     Semicolon,
     LSquare,
     RSquare,
@@ -670,9 +675,30 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
                 }
             },
             b',' => tokens.push(Token::Comma),
-            b'+' => tokens.push(Token::Plus),
-            b'*' => tokens.push(Token::Star),
-            b'%' => tokens.push(Token::Percent),
+            b'+' => {
+                if text.len() > 1 && text[1] == b'=' {
+                    text = &text[1..];
+                    tokens.push(Token::PlusEqual);
+                } else {
+                    tokens.push(Token::Plus);
+                }
+            },
+            b'*' => {
+                if text.len() > 1 && text[1] == b'=' {
+                    text = &text[1..];
+                    tokens.push(Token::StarEqual);
+                } else {
+                    tokens.push(Token::Star);
+                }
+            },
+            b'%' => {
+                if text.len() > 1 && text[1] == b'=' {
+                    text = &text[1..];
+                    tokens.push(Token::PercentEqual);
+                } else {
+                    tokens.push(Token::Percent);
+                }
+            },
             b'/' => match text[1] {
                 b'/' => {
                     loop {
@@ -691,9 +717,20 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
                     let idx = lex_multiline_comment_end_idx(&text)?;
                     text = &text[(idx-1)..];
                 }
+                b'=' => {
+                    text = &text[1..];
+                    tokens.push(Token::SlashEqual);
+                }
                 _ => tokens.push(Token::Slash),
             },
-            b'-' => tokens.push(Token::Minus),
+            b'-' => {
+                if text.len() > 1 && text[1] == b'=' {
+                    text = &text[1..];
+                    tokens.push(Token::MinusEqual);
+                } else {
+                    tokens.push(Token::Minus);
+                }
+            },
             b'=' => match text[1] {
                 b'=' => {
                     text = &text[1..];
