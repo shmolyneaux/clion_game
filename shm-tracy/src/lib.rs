@@ -54,9 +54,16 @@ unsafe extern "C" {
     pub fn tracy_zone_name(ctx: TracyCZoneCtx, txt: *const c_char, len: c_uint);
     pub fn tracy_zone_color(ctx: TracyCZoneCtx, color: c_uint);
 
+    #[cfg(target_arch = "x86_64")]
     pub unsafe fn ___tracy_emit_zone_begin(loc: *const ___tracy_source_location_data, active: i32) -> TracyCZoneCtx;
+    #[cfg(target_arch = "x86_64")]
     pub unsafe fn ___tracy_emit_zone_end(ctx: TracyCZoneCtx);
 }
+
+#[cfg(not(target_arch = "x86_64"))]
+pub unsafe fn ___tracy_emit_zone_begin(_loc: *const ___tracy_source_location_data, _active: i32) -> TracyCZoneCtx { TracyCZoneCtx {id: 0, active: 0} }
+#[cfg(not(target_arch = "x86_64"))]
+pub unsafe fn ___tracy_emit_zone_end(_ctx: TracyCZoneCtx) {}
 
 #[cfg(not(feature = "tracy-enable"))]
 mod stubs {

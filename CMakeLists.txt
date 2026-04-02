@@ -17,20 +17,22 @@ FetchContent_MakeAvailable(tracy)
 # --- Rust Configuration ---
 set(CARGO_PROFILE_DIR  "$<$<CONFIG:Debug>:debug>$<$<NOT:$<CONFIG:Debug>>:release>")
 set(CARGO_RELEASE_FLAG "$<$<NOT:$<CONFIG:Debug>>:--release>")
-set(OBJECT_FILE ${CMAKE_BINARY_DIR}/cmake_this_is_a_test3.o)
 
 # Detect OS for Rust Output Path
 if (CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     set(RUST_TARGET "wasm32-unknown-emscripten")
     set(INTERMEDIATE_FILE ${CMAKE_SOURCE_DIR}/target/${RUST_TARGET}/${CARGO_PROFILE_DIR}/libclion_game.a)
+    set(OBJECT_FILE ${CMAKE_BINARY_DIR}/libclion_game_rust.a)
 elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(RUST_TARGET "x86_64-unknown-linux-gnu")
     # Linux uses lib<name>.a
     set(INTERMEDIATE_FILE ${CMAKE_SOURCE_DIR}/target/${RUST_TARGET}/${CARGO_PROFILE_DIR}/libclion_game.a)
+    set(OBJECT_FILE ${CMAKE_BINARY_DIR}/cmake_this_is_a_test3.o)
 else()
     set(RUST_TARGET "x86_64-pc-windows-msvc")
     # Windows uses <name>.lib
     set(INTERMEDIATE_FILE ${CMAKE_SOURCE_DIR}/target/${RUST_TARGET}/${CARGO_PROFILE_DIR}/clion_game.lib)
+    set(OBJECT_FILE ${CMAKE_BINARY_DIR}/cmake_this_is_a_test3.o)
 endif()
 
 # Build Rust Object
@@ -69,7 +71,11 @@ include_directories(${IMGUI_DIR})
 include_directories(${IMGUI_DIR}/backends)
 
 # Define Executable
-add_executable(game ${SOURCES} ${OBJECT_FILE})
+if (CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+    add_executable(game ${SOURCES})
+else()
+    add_executable(game ${SOURCES} ${OBJECT_FILE})
+endif()
 add_dependencies(game generate_object regen_obj)
 
 # --- Linking & Libraries ---
@@ -95,6 +101,7 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         "SHELL:--shell-file ${IMGUI_DIR}/examples/libs/emscripten/shell_minimal.html"
     )
     target_compile_definitions(game PRIVATE IMGUI_IMPL_OPENGL_ES3)
+    target_link_libraries(game PRIVATE ${OBJECT_FILE})
 
 elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # --- LINUX SETUP ---
