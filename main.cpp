@@ -74,6 +74,18 @@ char* exe_path() {
 std::vector<std::string> logs;
 
 SDL_Window* window;
+SDL_AudioDeviceID audio_device = 0;
+
+void play_beep(float frequency = 440.0f, float duration = 0.1f) {
+    if (audio_device == 0) return;
+    const int sample_rate = 44100;
+    const int num_samples = (int)(sample_rate * duration);
+    std::vector<Sint16> buffer(num_samples);
+    for (int i = 0; i < num_samples; i++) {
+        buffer[i] = (Sint16)(32767 * sinf(2.0f * M_PI * frequency * i / sample_rate));
+    }
+    SDL_QueueAudio(audio_device, buffer.data(), num_samples * sizeof(Sint16));
+}
 
 extern "C" int rust_init();
 extern "C" int rust_frame(float delta);
@@ -368,6 +380,7 @@ void simple_window(ImVec4 *clear_color, bool *show_demo_window, bool *show_anoth
 
     if (ImGui::Button("Button")) {
         counter++;
+        play_beep();
     }
     ImGui::SameLine();
     ImGui::Text("counter = %d", counter);
@@ -584,6 +597,7 @@ void debug_box(glm::vec3 position, glm::vec3 size) {
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <cmath>
 
 #define BUFFER_SIZE (100 * 1024 * 1024) // 100 MB
 
@@ -594,7 +608,7 @@ int main(int, char**)
     log_error("Starting game....");
 
     // Setup SDL
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_GAMECONTROLLER) != 0)
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_GAMECONTROLLER | SDL_INIT_AUDIO) != 0)
     {
         log_error("SDL_Init Error:");
         log_error(SDL_GetError());
@@ -728,6 +742,22 @@ int main(int, char**)
 
     init_debug_drawing();
 
+    {
+        SDL_AudioSpec want, have;
+        SDL_memset(&want, 0, sizeof(want));
+        want.freq = 44100;
+        want.format = AUDIO_S16SYS;
+        want.channels = 1;
+        want.samples = 512;
+        want.callback = nullptr;
+        audio_device = SDL_OpenAudioDevice(nullptr, 0, &want, &have, 0);
+        if (audio_device == 0) {
+            log_error("Failed to open audio device");
+        } else {
+            SDL_PauseAudioDevice(audio_device, 0);
+        }
+    }
+
     double elapsed = 0.0f;
 
     if (rust_init()) {
@@ -812,6 +842,7 @@ int main(int, char**)
 #ifndef __EMSCRIPTEN__
                 TracyCZoneEnd(ctx);
 #endif
+                simple_window(&clear_color, &show_demo_window, &show_another_window);
             }
         } else {
             ImGui::Begin("STARTUP ERROR");
@@ -851,6 +882,8 @@ int main(int, char**)
     ImGui_ImplSDL2_Shutdown();
     ImGui::DestroyContext();
 
+    if (audio_device != 0)
+        SDL_CloseAudioDevice(audio_device);
     SDL_GL_DeleteContext(gl_context);
     SDL_DestroyWindow(window);
     SDL_Quit();
