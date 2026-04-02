@@ -1871,6 +1871,12 @@ impl Interpreter {
                 val if val == ByteCode::Copy as u8 => {
                     stack.push(*stack.last().expect("non-empty stack"));
                 }
+                val if val == ByteCode::CopyFrom as u8 => {
+                    let offset = bytes[pc + 1] as usize;
+                    let idx = stack.len() - 1 - offset;
+                    stack.push(stack[idx]);
+                    pc += 1;
+                }
                 val if val == ByteCode::LoopStart as u8 => {
                     let loop_end = pc + (((bytes[pc + 1] as usize) << 8) + bytes[pc + 2] as usize);
                     loop_info.push((pc + 3, loop_end, env.scope_depth(&self.mem)));
