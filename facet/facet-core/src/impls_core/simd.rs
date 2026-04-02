@@ -1,6 +1,10 @@
+#[cfg(target_arch = "x86_64")]
 use crate::*;
+
+#[cfg(target_arch = "x86_64")]
 use core::arch::x86_64::__m128;
 
+#[cfg(target_arch = "x86_64")]
 unsafe impl<'a> Facet<'a> for __m128
 {
     const VTABLE: &'static ValueVTable = <[f32; 4]>::VTABLE;

@@ -14,9 +14,21 @@
 #include <SDL.h>
 #include <GL/glew.h>
 
+#if defined(_WIN32)
 #include "Tracy.hpp"
 #include "TracyC.h"
-
+#elif defined(__linux__)
+#include "Tracy.hpp"
+#include "TracyC.h"
+#elif defined(__EMSCRIPTEN__)
+struct ___tracy_c_zone_context
+{
+    uint32_t id;
+    int active;
+};
+typedef struct ___tracy_c_zone_context TracyCZoneCtx;
+#define ZoneScoped
+#endif
 #include <iostream>
 #include <filesystem>
 #include <vector>
@@ -270,29 +282,45 @@ extern "C" {
     }
 
     TracyCZoneCtx tracy_zone_begin_n(const char* name, int active) {
+#ifdef __EMSCRIPTEN__
+        return TracyCZoneCtx {0 , 0};
+#else
         TracyCZoneN(ctx, name, active);
         return ctx;
+#endif
     }
 
     TracyCZoneCtx tracy_zone_begin_ns(const char* name, int depth, int active) {
+#ifdef __EMSCRIPTEN__
+        return TracyCZoneCtx {0 , 0};
+#else
         TracyCZoneNS(ctx, name, depth, active);
         return ctx;
+#endif
     }
 
     void tracy_zone_end(TracyCZoneCtx ctx) {
+#ifndef __EMSCRIPTEN__
         TracyCZoneEnd(ctx);
+#endif
     }
 
     void tracy_zone_text(TracyCZoneCtx ctx, const char* txt, unsigned len) {
+#ifndef __EMSCRIPTEN__
         TracyCZoneText(ctx, txt, len);
+#endif
     }
 
     void tracy_zone_name(TracyCZoneCtx ctx, const char* txt, unsigned len) {
+#ifndef __EMSCRIPTEN__
         TracyCZoneName(ctx, txt, len);
+#endif
     }
 
     void tracy_zone_color(TracyCZoneCtx ctx, unsigned color) {
+#ifndef __EMSCRIPTEN__
         TracyCZoneColor(ctx, color);
+#endif
     }
 
     float igFrameRate() {
@@ -777,9 +805,13 @@ int main(int, char**)
 
             {
                 ZoneScoped;
+#ifndef __EMSCRIPTEN__
                 TracyCZoneN(ctx, "rust_frame", 1);
+#endif
                 rust_frame(delta);
+#ifndef __EMSCRIPTEN__
                 TracyCZoneEnd(ctx);
+#endif
             }
         } else {
             ImGui::Begin("STARTUP ERROR");
@@ -806,7 +838,9 @@ int main(int, char**)
         }
 
         SDL_GL_SwapWindow(window);
+#ifndef __EMSCRIPTEN__
         FrameMark;
+#endif
     }
 #ifdef __EMSCRIPTEN__
     EMSCRIPTEN_MAINLOOP_END;
@@ -816,8 +850,6 @@ int main(int, char**)
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplSDL2_Shutdown();
     ImGui::DestroyContext();
-
-    SDL_SCANCODE_LSHIFT;
 
     SDL_GL_DeleteContext(gl_context);
     SDL_DestroyWindow(window);

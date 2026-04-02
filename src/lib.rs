@@ -273,7 +273,7 @@ pub struct DebugState {
 //#[derive(Facet)]
 /// -180.0 180.0
 pub struct State {
-    script_bridge: ScriptBridge,
+    //script_bridge: ScriptBridge,
 
     frame_num: u64,
     view: Mat4,
@@ -955,7 +955,7 @@ fn init_state() -> State {
     println!("Starting Rust state initialization");
 
     println!("Creating interpreter");
-    let script_bridge = ScriptBridge::new();
+    //let script_bridge = ScriptBridge::new();
 
     println!("Generating arrays/buffers");
     let debug_vao = VertexArray::create();
@@ -1191,7 +1191,7 @@ fn init_state() -> State {
 
     println!("State initialized!");
     let mut state = State {
-        script_bridge,
+        //script_bridge,
         frame_num,
         debug_vao,
         debug_vbo,
@@ -1264,14 +1264,14 @@ fn frame(state: &mut State, delta: f32) {
 
         if igButton(CString::new(format!("Execute One Frame")).unwrap().as_ptr()) {
             let _zone = zone_scoped!("Run interpreter");
-            state.script_bridge.step();
+            //state.script_bridge.step();
         }
 
-        for err in state.script_bridge.errors() {
-            igTextColoredBC(0.7, 0.0, 0.0, 1.0, 0.5, 0.5, 0.5, 0.5,
-            CString::new(format!("{}", err)).unwrap().as_ptr()
-            );
-        }
+        // for err in state.script_bridge.errors() {
+        //     igTextColoredBC(0.7, 0.0, 0.0, 1.0, 0.5, 0.5, 0.5, 0.5,
+        //     CString::new(format!("{}", err)).unwrap().as_ptr()
+        //     );
+        // }
 
         igTextColoredBC(1.0, 1.0, 1.0, 1.0, 0.5, 0.5, 0.5, 0.5,
         CString::new(format!("BG text")).unwrap().as_ptr()
@@ -1391,7 +1391,7 @@ fn frame(state: &mut State, delta: f32) {
             let zone = zone_scoped!("IMGUI Debug Windows");
             {
                 let _zone = zone_scoped!("ShimLang Debug");
-                state.script_bridge.debug_window(&mut state.debug_state.shimlang_debug_window, &mut state.debug_state.shimlang_repl);
+                //state.script_bridge.debug_window(&mut state.debug_state.shimlang_debug_window, &mut state.debug_state.shimlang_repl);
 
                 draw_log_window();
             }
