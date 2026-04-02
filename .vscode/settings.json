@@ -3,5 +3,6 @@
         "*.fs": "plaintext",
         "system_error": "cpp",
         "xlocale": "cpp"
-    }
+    },
+    "cmake.buildDirectory": "${workspaceFolder}/build/${buildKit}"
 }

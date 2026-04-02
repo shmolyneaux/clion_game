@@ -5,14 +5,16 @@ project(clion_game)
 include(ExternalProject) # For Rust
 include(FetchContent)    # For Tracy
 
-FetchContent_Declare(
-    tracy
-    GIT_REPOSITORY https://github.com/wolfpld/tracy.git
-    GIT_TAG v0.11.1
-    GIT_SHALLOW TRUE
-    GIT_PROGRESS TRUE
-)
-FetchContent_MakeAvailable(tracy)
+if (NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+    FetchContent_Declare(
+        tracy
+        GIT_REPOSITORY https://github.com/wolfpld/tracy.git
+        GIT_TAG v0.11.1
+        GIT_SHALLOW TRUE
+        GIT_PROGRESS TRUE
+    )
+    FetchContent_MakeAvailable(tracy)
+endif()
 
 # --- Rust Configuration ---
 set(CARGO_PROFILE_DIR  "$<$<CONFIG:Debug>:debug>$<$<NOT:$<CONFIG:Debug>>:release>")
