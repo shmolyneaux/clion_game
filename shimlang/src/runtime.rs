@@ -1048,7 +1048,7 @@ impl ShimValue {
         self.string(interpreter).unwrap()
     }
 
-    pub(crate) fn string_from_mem(&self, mem: &MMU) -> Result<&[u8], String> {
+    pub fn string_from_mem(&self, mem: &MMU) -> Result<&[u8], String> {
         match self {
             ShimValue::String(len, offset, position) => {
                 let len = *len as usize;
@@ -1074,11 +1074,11 @@ impl ShimValue {
         }
     }
 
-    pub(crate) fn string(&self, interpreter: &Interpreter) -> Result<&[u8], String> {
+    pub fn string(&self, interpreter: &Interpreter) -> Result<&[u8], String> {
         self.string_from_mem(&interpreter.mem)
     }
 
-    pub(crate) fn integer(&self) -> Result<i32, String> {
+    pub fn integer(&self) -> Result<i32, String> {
         match self {
             ShimValue::Integer(i) => Ok(*i),
             _ => Err(format!("Not an integer")),
