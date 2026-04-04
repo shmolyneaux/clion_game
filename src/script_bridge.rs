@@ -2,36 +2,45 @@ use std::mem;
 use std::ffi::CString;
 
 use shimlang::{Environment, Interpreter, ShimValue};
-use shimlang::runtime::{ArgUnpacker, NativeFn};
+use shimlang::runtime::{ArgUnpacker, NativeFn, CallResult};
 use shimlang::ArgBundle;
 
 use crate::shimlang_imgui;
+//use crate::test_mocks::igBegin;
+use crate::*;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::mpsc::{channel, Receiver, Sender};
+#[cfg(not(target_arch = "wasm32"))]
+use std::fs;
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::SystemTime;
 
 /// Messages sent from the Engine (Main Thread) to the Script Thread
 #[cfg(not(target_arch = "wasm32"))]
 pub enum ScriptRequest {
-    ExecuteLoop(Interpreter, Environment),
+    ExecuteLoop(Interpreter, Environment, ShimValue),
 }
 
 /// Messages sent from the Script Thread to the Engine
 #[cfg(not(target_arch = "wasm32"))]
 pub enum ScriptResponse {
-    LoopComplete(Interpreter, Environment),
-    Error(Interpreter, Environment, String),
+    LoopComplete(Interpreter, Environment, ShimValue),
+    Error(Interpreter, Environment, ShimValue, String),
 }
 
 enum BridgeState {
     #[cfg(not(target_arch = "wasm32"))]
     Running,
-    Paused(Interpreter, Environment),
+    Paused(Interpreter, Environment, ShimValue),
 }
 
 pub struct ScriptBridge {
     state: BridgeState,
     pub interpreter_errors: Vec<String>,
+    script_path: String,
+    #[cfg(not(target_arch = "wasm32"))]
+    mtime: SystemTime,
     #[cfg(not(target_arch = "wasm32"))]
     tx: Sender<ScriptRequest>,
     #[cfg(not(target_arch = "wasm32"))]
@@ -71,21 +80,9 @@ fn shim_ig_text(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimV
     Ok(ShimValue::None)
 }
 
-fn make_initial_interpreter_and_env() -> (Interpreter, Environment) {
-    let ast = shimlang::ast_from_text(br#"
-    struct Point {
-        x,
-        y
-    }
-
-    let p = Point(2, 3);
-
-    if ig_begin("from shimlang") {
-        ig_text(p);
-        ig_end();
-    }
-    "#).unwrap();
-    let program = shimlang::compile_ast(&ast).unwrap();
+fn load_script(bytes: &[u8]) -> Result<(Interpreter, Environment, ShimValue), String> {
+    let ast = shimlang::ast_from_text(bytes)?;
+    let program = shimlang::compile_ast(&ast)?;
     let mut interpreter = shimlang::Interpreter::create(&shimlang::Config::default(), program);
     let mut env = shimlang::Environment::new_with_builtins(&mut interpreter);
 
@@ -99,12 +96,47 @@ fn make_initial_interpreter_and_env() -> (Interpreter, Environment) {
         env.insert_new(&mut interpreter, name.to_vec(), ShimValue::NativeFn(position));
     }
 
-    (interpreter, env)
+    let mut pc = 0;
+    interpreter.execute_bytecode_extended(&mut pc, shimlang::ArgBundle::new(), &mut env)?;
+    interpreter.gc(&env);
+
+    let loop_fn = match env.get(&mut interpreter, b"loop") {
+        Some(func @ ShimValue::Fn(_)) => func,
+        None => return Err("No loop function found".to_string()),
+        _ => return Err("Identifier 'loop' is not a function".to_string()),
+    };
+
+    Ok((interpreter, env, loop_fn))
+}
+
+fn call_loop_fn(interpreter: &mut Interpreter, env: &mut Environment, loop_fn: ShimValue) -> Result<(), String> {
+    match loop_fn.call(interpreter, &mut shimlang::ArgBundle::new()) {
+        Ok(CallResult::ReturnValue(_)) => {
+            interpreter.gc(env);
+            Ok(())
+        }
+        Ok(CallResult::PC(pc, captured_scope)) => {
+            let mut new_env = Environment::with_scope(captured_scope);
+            match interpreter.execute_bytecode_extended(
+                &mut (pc as usize),
+                shimlang::ArgBundle::new(),
+                &mut new_env,
+            ) {
+                Err(msg) => Err(msg),
+                Ok(_) => {
+                    interpreter.gc(env);
+                    Ok(())
+                }
+            }
+        }
+        Err(msg) => Err(msg),
+    }
 }
 
 impl ScriptBridge {
     pub fn new() -> Self {
-        let (interpreter, env) = make_initial_interpreter_and_env();
+        let (interpreter, env, loop_fn) = load_script(b"fn loop() {}").expect("Should be able to load hardcoded script");
+        let script_path = "game.shm".to_string();
 
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -116,8 +148,10 @@ impl ScriptBridge {
             });
 
             Self {
-                state: BridgeState::Paused(interpreter, env),
+                state: BridgeState::Paused(interpreter, env, loop_fn),
                 interpreter_errors: Vec::new(),
+                script_path,
+                mtime: SystemTime::UNIX_EPOCH,
                 tx: request_tx,
                 rx: response_rx,
             }
@@ -126,8 +160,9 @@ impl ScriptBridge {
         #[cfg(target_arch = "wasm32")]
         {
             Self {
-                state: BridgeState::Paused(interpreter, env),
+                state: BridgeState::Paused(interpreter, env, loop_fn),
                 interpreter_errors: Vec::new(),
+                script_path,
             }
         }
     }
@@ -135,37 +170,79 @@ impl ScriptBridge {
     pub fn step(&mut self) {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            // Get the state, and put `Running` in its place
-            let state = mem::replace(&mut self.state, BridgeState::Running);
-            match state {
-                // It shouldn't be possible to run .step in a overlapping way since there
-                // should only be a single mutable reference
-                BridgeState::Running => panic!("Somehow the interpreter is running"),
-                BridgeState::Paused(interpreter, env) => {
-                    self.tx.send(ScriptRequest::ExecuteLoop(interpreter, env)).unwrap();
+            // Check for file changes and reload
+            match fs::metadata(&self.script_path) {
+                Ok(metadata) => match metadata.modified() {
+                    Ok(time) => {
+                        if self.mtime != time {
+                            self.mtime = time;
+                            match fs::read(&self.script_path) {
+                                Ok(bytes) => {
+                                    match load_script(&bytes) {
+                                        Ok((interpreter, env, loop_fn)) => {
+                                            self.state = BridgeState::Paused(interpreter, env, loop_fn);
+                                            self.interpreter_errors = Vec::new();
+                                        },
+                                        Err(msg) => {
+                                            self.interpreter_errors.push(msg);
+                                        }
+                                    }
+                                },
+                                Err(_) => {
+                                    self.interpreter_errors.push(format!("Could not read {}", self.script_path));
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        self.interpreter_errors.push(format!("Could not get modification time for {}: {}", self.script_path, e));
+                    }
                 },
+                Err(_) => {
+                    // File not found yet; silently wait
+                }
             }
 
-            match self.rx.recv().unwrap() {
-                ScriptResponse::Error(interpreter, env, msg) => {
-                    self.state = BridgeState::Paused(interpreter, env);
-                    self.interpreter_errors.push(msg);
+            if self.interpreter_errors.is_empty() {
+                let state = mem::replace(&mut self.state, BridgeState::Running);
+                match state {
+                    BridgeState::Running => panic!("Somehow the interpreter is running"),
+                    BridgeState::Paused(interpreter, env, loop_fn) => {
+                        self.tx.send(ScriptRequest::ExecuteLoop(interpreter, env, loop_fn)).unwrap();
+                    },
                 }
-                ScriptResponse::LoopComplete(interpreter, env) => {
-                    self.state = BridgeState::Paused(interpreter, env);
+
+                match self.rx.recv().unwrap() {
+                    ScriptResponse::Error(interpreter, env, loop_fn, msg) => {
+                        self.state = BridgeState::Paused(interpreter, env, loop_fn);
+                        self.interpreter_errors.push(msg);
+                    }
+                    ScriptResponse::LoopComplete(interpreter, env, loop_fn) => {
+                        self.state = BridgeState::Paused(interpreter, env, loop_fn);
+                    }
+                }
+            }
+        }
+
+        if !self.interpreter_errors.is_empty() {
+            let mut open = true;
+            unsafe {
+                if super::igBegin(c"Shimlang Errors".as_ptr(), &mut open as *mut bool, IMGUI_WINDOW_FLAGS_NO_FOCUS_ON_APPEARING) {
+                    for err in self.interpreter_errors.iter() {
+                        super::igTextColoredBC(1.0, 1.0, 1.0, 1.0, 0.5, 0.5, 0.5, 0.5,
+                            CString::new(format!("{}", err)).unwrap().as_ptr()
+                        );
+                    }
+                    super::igEnd();
                 }
             }
         }
 
         #[cfg(target_arch = "wasm32")]
         {
-            if let BridgeState::Paused(ref mut interpreter, ref mut env) = self.state {
-                let mut pc = 0;
-                match interpreter.execute_bytecode_extended(&mut pc, shimlang::ArgBundle::new(), env) {
-                    Ok(_) => {
-                        interpreter.gc(env);
-                    }
-                    Err(msg) => {
+            if self.interpreter_errors.is_empty() {
+                if let BridgeState::Paused(ref mut interpreter, ref mut env, loop_fn) = self.state {
+                    if let Err(msg) = call_loop_fn(interpreter, env, loop_fn) {
                         self.interpreter_errors.push(msg);
                     }
                 }
@@ -185,7 +262,7 @@ impl ScriptBridge {
         match &mut self.state {
             #[cfg(not(target_arch = "wasm32"))]
             BridgeState::Running => {},
-            BridgeState::Paused(interpreter, env) => {
+            BridgeState::Paused(interpreter, env, _loop_fn) => {
                 shimlang_debug_window.debug_window(interpreter, &env);
                 shimlang_repl.window(interpreter);
             },
@@ -195,22 +272,14 @@ impl ScriptBridge {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn script_thread_logic(rx: Receiver<ScriptRequest>, tx: Sender<ScriptResponse>) {
-    let mut is_running = true;
-
-    while is_running {
+    loop {
         if let Ok(request) = rx.recv() {
             match request {
-                ScriptRequest::ExecuteLoop(mut interpreter, mut env) => {
-                    let mut pc = 0;
+                ScriptRequest::ExecuteLoop(mut interpreter, mut env, loop_fn) => {
                     tx.send(
-                        match interpreter.execute_bytecode_extended(&mut pc, shimlang::ArgBundle::new(), &mut env) {
-                            Ok(_) => {
-                                interpreter.gc(&env);
-                                ScriptResponse::LoopComplete(interpreter, env)
-                            },
-                            Err(msg) => {
-                                ScriptResponse::Error(interpreter, env, msg)
-                            }
+                        match call_loop_fn(&mut interpreter, &mut env, loop_fn) {
+                            Ok(()) => ScriptResponse::LoopComplete(interpreter, env, loop_fn),
+                            Err(msg) => ScriptResponse::Error(interpreter, env, loop_fn, msg),
                         }
                     ).unwrap();
                 }
