@@ -831,6 +831,33 @@ const fn compile_time_checks() {
     assert!(2 + 2 == 4);
 }
 
+fn capture_frame_texture(resolution_x: i32, resolution_y: i32) -> u32 {
+    let mut fbo: GLuint = 0;
+    let mut texture: GLuint = 0;
+    unsafe {
+        gl::GenTextures(1, &mut texture as *mut u32);
+        gl::GenFramebuffers(1, &mut fbo as *mut u32);
+
+        gl::BindTexture(gl::TEXTURE_2D, texture);
+        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as i32);
+        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as i32);
+        gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA as i32, 128, 128, 0, gl::RGBA, gl::UNSIGNED_BYTE, std::ptr::null_mut());
+
+        gl::BindFramebuffer(gl::FRAMEBUFFER, fbo);
+        gl::FramebufferTexture2D(gl::FRAMEBUFFER, gl::COLOR_ATTACHMENT0, gl::TEXTURE_2D, texture, 0);
+
+        gl::BindFramebuffer(gl::READ_FRAMEBUFFER, 0);
+        gl::BindFramebuffer(gl::DRAW_FRAMEBUFFER, fbo);
+        gl::BlitFramebuffer(0, 0, resolution_x, resolution_y, 0, 0, 128, 128, gl::COLOR_BUFFER_BIT, gl::LINEAR);
+
+        gl::BindFramebuffer(gl::DRAW_FRAMEBUFFER, 0);
+    }
+
+    log(format!("Created FBO texture {}", texture));
+
+    texture
+}
+
 fn gen_fbo_texture(code: &str) -> u32 {
      let view = Mat4::IDENTITY;
      let projection = Mat4::IDENTITY;
@@ -1427,6 +1454,12 @@ fn frame(state: &mut State, delta: f32) {
         {
             let _zone = zone_scoped!("draw_debug_shapes");
             draw_debug_shapes(state);
+        }
+
+        {
+            let _zone = zone_scoped!("capture frame");
+            let texture: GLuint = capture_frame_texture(display_w, display_h);
+            state.test_mesh.uniform_override.insert("texture1".to_string(), gpu::ShaderValue::Sampler2D(texture));
         }
 
         {
