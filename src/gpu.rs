@@ -47,7 +47,7 @@ impl fmt::Display for ShaderDataType {
     }
 }
 
-#[derive(Facet, Copy, Clone)]
+#[derive(Debug, Facet, Copy, Clone)]
 #[repr(u8)]
 pub enum ShaderValue {
     Float(f32),
@@ -58,7 +58,7 @@ pub enum ShaderValue {
     Sampler2D(GLuint),
 }
 
-#[derive(Facet, Clone)]
+#[derive(Debug, Facet, Clone)]
 pub struct ShaderSymbol {
     data_type: ShaderDataType,
     name: String,
@@ -70,7 +70,7 @@ impl ShaderSymbol {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum ShaderType {
     Vertex,
     Fragment,
@@ -147,7 +147,7 @@ impl ShaderBuilder {
     }
 }
 
-#[derive(Facet)]
+#[derive(Debug, Facet)]
 pub struct VertexShader {
     id: gl::types::GLuint,
     inputs: Vec<ShaderSymbol>,
@@ -170,7 +170,7 @@ impl Drop for VertexShader {
     }
 }
 
-#[derive(Facet)]
+#[derive(Debug, Facet)]
 pub struct FragmentShader {
     id: gl::types::GLuint,
     inputs: Vec<ShaderSymbol>,
@@ -220,7 +220,7 @@ pub fn compile_shader(src: &CStr, shader_type: gl::types::GLuint) -> Result<gl::
     }
 }
 
-#[derive(Facet)]
+#[derive(Debug, Facet)]
 #[repr(transparent)]
 pub struct SHMUnsafeCell<T: Sized> {
     value: T,
@@ -243,7 +243,7 @@ impl<T: Sized> SHMUnsafeCell<T> {
     }
 }
 
-#[derive(Facet)]
+#[derive(Debug, Facet)]
 pub struct ShaderProgram {
     pub id: gl::types::GLuint,
     // TODO: we shouldn't need to store the vertex/fragment shader OpenGL handles after the program is linked
@@ -505,7 +505,7 @@ impl VertexAttribute {
     }
 }
 
-#[derive(Facet)]
+#[derive(Debug, Facet)]
 pub struct Mesh {
     // NOTE: Does not include VertexArray since vertex arrays are specific to the shader program being used
     pub vbo: VertexBufferObject,
@@ -592,7 +592,7 @@ pub struct MeshDataRaw {
     pub primitive_type: Primitive,
 }
 
-#[derive(Facet)]
+#[derive(Debug, Facet)]
 pub struct StaticMesh {
     pub shader: Rc<ShaderProgram>,
     pub vao: VertexArray,
@@ -665,7 +665,7 @@ impl StaticMesh {
                             let zone = zone_scoped!("self.shader.uniform_location");
                             self.shader.uniform_location(&CString::new(uniform_info.name.clone()).unwrap())
                         };
-                        match (uniform_info.data_type, self.uniform_override.get(&uniform_info.name).or_else(|| ctx.get(&uniform_info.name)).unwrap()) {
+                        match (uniform_info.data_type, self.uniform_override.get(&uniform_info.name).or_else(|| ctx.get(&uniform_info.name)).expect(&format!("Could not get uniform {}", &uniform_info.name))) {
                             (ShaderDataType::Float, ShaderValue::Float(v)) => {
                                 let zone = zone_scoped!("gl::Uniform1f");
                                 gl::Uniform1f(
