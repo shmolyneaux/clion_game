@@ -155,6 +155,8 @@ for command in (
         for line in proc.stderr.splitlines():
             if line.startswith("[src/lib.rs"):
                 continue
+            if line.startswith("[gc_stats]"):
+                continue
             cleaned_stderr += f"\n{line}"
 
         if command != "errors" and proc.returncode:
