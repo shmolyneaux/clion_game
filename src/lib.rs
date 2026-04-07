@@ -310,6 +310,7 @@ pub struct State {
 
     keys: KeyState,
 
+    // TODO: Keep at less than 1000
     frame_captures: Vec<GLuint>,
     texture_shader: Rc<ShaderProgram>,
 
