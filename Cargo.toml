@@ -21,6 +21,9 @@ facet = { path = "facet/facet" }
 facet-reflect = { path = "facet/facet-reflect" }
 
 
+[profile.dev]
+debug = "line-tables-only"
+
 [features]
 default = ["facet", "dev"]
 facet = ["dep:facet", "dep:facet-reflect"]

@@ -123,6 +123,14 @@ elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
         Threads::Threads
         ${CMAKE_DL_LIBS}
     )
+    find_program(MOLD_LINKER mold)
+    if(MOLD_LINKER)
+        # GCC 9 doesn't know -fuse-ld=mold; use the -B wrapper dir trick instead
+        set(MOLD_WRAPPER_DIR "${CMAKE_BINARY_DIR}/mold-wrapper")
+        file(MAKE_DIRECTORY "${MOLD_WRAPPER_DIR}")
+        execute_process(COMMAND ln -sf "${MOLD_LINKER}" "${MOLD_WRAPPER_DIR}/ld")
+        target_link_options(game PRIVATE "-B${MOLD_WRAPPER_DIR}")
+    endif()
 
 else()
     # --- WINDOWS SETUP ---
