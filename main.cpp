@@ -706,6 +706,10 @@ int main(int, char**)
         SDL_Quit();
         return -1;
     }
+    // glewInit() with glewExperimental calls glGetString(GL_EXTENSIONS) which
+    // is invalid in a core profile context, leaving a spurious INVALID_ENUM in
+    // the error queue. Clear it before handing control to Rust.
+    glGetError();
 
     SDL_GL_MakeCurrent(window, gl_context);
     SDL_GL_SetSwapInterval(1); // Enable vsync
@@ -730,6 +734,8 @@ int main(int, char**)
     // Setup Platform/Renderer backends
     ImGui_ImplSDL2_InitForOpenGL(window, gl_context);
     ImGui_ImplOpenGL3_Init(glsl_version);
+    // ImGui's internal GL loader probes extensions and can leave spurious errors.
+    while (glGetError() != GL_NO_ERROR) {}
 
     // Our state
     bool show_demo_window = true;
@@ -852,7 +858,6 @@ int main(int, char**)
 
         // Rendering
         ImGui::Render();
-
 
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 

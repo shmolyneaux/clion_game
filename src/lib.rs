@@ -866,7 +866,7 @@ fn draw_frame_captures(frame_captures: &[GLuint], ctx: &mut HashMap<String, Shad
         ).expect("Could not build texture shader");
     let texture_shader = Rc::new(texture_shader);
     for (idx, frame_texture) in frame_captures.iter().enumerate() {
-        if idx < frame_captures.len() - 10 {
+        if (idx as isize) < frame_captures.len() as isize - 10 {
             continue;
         }
         let local_idx = (idx + 10 - frame_captures.len()) as f32;
@@ -903,7 +903,7 @@ fn capture_frame_texture(resolution_x: i32, resolution_y: i32) -> u32 {
 
         gl::BindFramebuffer(gl::READ_FRAMEBUFFER, 0);
         gl::BindFramebuffer(gl::DRAW_FRAMEBUFFER, fbo);
-        gl::BlitFramebuffer(0, 0, resolution_x, resolution_y, 0, 0, 128, 128, gl::COLOR_BUFFER_BIT, gl::LINEAR);
+        gl::BlitFramebuffer(0, 0, resolution_x, resolution_y, 0, 0, 128, 128, gl::COLOR_BUFFER_BIT, gl::NEAREST);
 
         gl::BindFramebuffer(gl::DRAW_FRAMEBUFFER, 0);
     }
