@@ -40,7 +40,7 @@ use crate::sdf::*;
 use crate::gpu::*;
 use crate::debug_draw::*;
 use crate::script_bridge::*;
-use crate::mesh_gen::{box_mesh, quad_mesh};
+use crate::mesh_gen::{box_mesh, quad_mesh, screen_quad_mesh};
 
 use shm_tracy::*;
 
@@ -738,21 +738,17 @@ unsafe fn imgui_debug_inner(peek: &Peek, attributes: &[FieldAttribute], path: &s
     }
 }
 
-fn gen_cpu_texture() -> GLuint {
+fn gen_cpu_texture(width: i32, height: i32, f: impl Fn(i32, i32) -> [u8; 3]) -> GLuint {
     let mut texture: GLuint = 0;
 
-    let width: i32 = 128;
-    let height: i32 = 128;
-
-    let mut my_data: Vec<u8> = vec![
-        0xff; (width*height*3) as usize
-    ];
+    let mut my_data: Vec<u8> = vec![0u8; (width * height * 3) as usize];
 
     for x in 0..width {
         for y in 0..height {
-            my_data[((y*height + x)*3) as usize] = 0xff;//x as u8;
-            my_data[((y*height + x)*3+1) as usize] = 0x0;//y as u8;
-            my_data[((y*height + x)*3+2) as usize] = 0xff;
+            let [r, g, b] = f(x, y);
+            my_data[((y * width + x) * 3) as usize] = r;
+            my_data[((y * width + x) * 3 + 1) as usize] = g;
+            my_data[((y * width + x) * 3 + 2) as usize] = b;
         }
     }
 
@@ -770,8 +766,6 @@ fn gen_cpu_texture() -> GLuint {
         gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGB as i32, width, height, 0, gl::RGB, gl::UNSIGNED_BYTE, my_data.as_ptr().cast());
         gl::GenerateMipmap(gl::TEXTURE_2D);
     }
-
-    log(format!("Created texture in Rust {}", texture));
 
     texture
 }
@@ -907,8 +901,6 @@ fn capture_frame_texture(resolution_x: i32, resolution_y: i32) -> u32 {
 
         gl::BindFramebuffer(gl::DRAW_FRAMEBUFFER, 0);
     }
-
-    log(format!("Created FBO texture {}", texture));
 
     texture
 }
@@ -1522,7 +1514,70 @@ fn frame(state: &mut State, delta: f32) {
             state.frame_captures.push(texture);
         }
 
+        gl::Disable(gl::DEPTH_TEST);
         draw_frame_captures(&state.frame_captures, &mut ctx);
+
+        let red_shader = ShaderProgram::create(
+            ShaderBuilder::new()
+                .with_input(ShaderSymbol::new(ShaderDataType::Vec3, "aPos"))
+                .with_input(ShaderSymbol::new(ShaderDataType::Vec2, "aUV"))
+                .with_uniform(ShaderSymbol::new(ShaderDataType::Vec2, "uResolution"))
+                .with_output(ShaderSymbol::new(ShaderDataType::Vec2, "uv"))
+                .with_code(
+                    r#"
+                        void main() {
+                            // if aPos.x is 0, that should map to -1.0
+                            // if aPos.x is uResolution that should map to 1.0
+
+                            // if aPos.y is 0, that should map to 1.0
+                            // if aPos.y is uResolution that should map to -1.0
+
+                            gl_Position = vec4(
+                                aPos.x * (2.0/uResolution.x) - 1.0,
+                                aPos.y * (-2.0/uResolution.y) + 1.0,
+                                aPos.z,
+                                1.0
+                            );
+                            uv = aUV;
+                        }
+                    "#.to_string()
+                ).build_vertex_shader().unwrap(),
+            ShaderBuilder::new()
+                .with_input(ShaderSymbol::new(ShaderDataType::Vec2, "uv"))
+                .with_output(ShaderSymbol::new(ShaderDataType::Vec4, "FragColor"))
+                .with_uniform(ShaderSymbol::new(ShaderDataType::Sampler2D, "texture1"))
+                .with_code(
+                    r#"
+                        void main() {
+                            FragColor = texture(texture1, uv);
+                        }
+                    "#.to_string()
+                ).build_fragment_shader().unwrap()
+            ).expect("Could not build red shader");
+        let red_shader = Rc::new(red_shader);
+
+        for rect in state.script_bridge.draw_list.iter() {
+            let mut my_box = screen_quad_mesh(
+                rect.x.round() as u32,
+                rect.y.round() as u32,
+                rect.w.round() as u32,
+                rect.h.round() as u32,
+            );
+            let mut box_static_mesh = StaticMesh::create(
+                red_shader.clone(),
+                Rc::new(Mesh::create(&my_box).unwrap()),
+            ).expect("Can't create the test mesh");
+            box_static_mesh.uniform_override.insert(
+                "uResolution".to_string(), ShaderValue::Vec2(Vec2::new(display_w as f32, display_h as f32))
+            );
+
+            let grad_texture = gen_cpu_texture(128, 128, |x, y| [x as u8, y as u8, 0xff]);
+            box_static_mesh.uniform_override.insert("texture1".to_string(), ShaderValue::Sampler2D(grad_texture));
+
+            box_static_mesh.draw(&mut ctx);
+        }
+
+        gl::Enable(gl::DEPTH_TEST);
 
         {
             // let _zone = zone_scoped!("Log OpenGL Error Macro");

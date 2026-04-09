@@ -10,4 +10,12 @@ fn loop() {
         ig_text(p);
         ig_end();
     }
+
+    draw_rect(
+        10,
+        20,
+        200,
+        100,
+    );
+    let foo = [];
 }

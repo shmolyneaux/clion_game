@@ -1,7 +1,8 @@
+use std::cell::RefCell;
 use std::mem;
 use std::ffi::CString;
 
-use shimlang::{Environment, Interpreter, ShimValue};
+use shimlang::{Environment, Interpreter, ShimValue, debug_u8s};
 use shimlang::runtime::{ArgUnpacker, NativeFn, CallResult};
 use shimlang::ArgBundle;
 
@@ -16,6 +17,18 @@ use std::fs;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::SystemTime;
 
+#[derive(Debug, Clone)]
+pub struct DrawRect {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
+thread_local! {
+    static DRAW_LIST: RefCell<Vec<DrawRect>> = RefCell::new(Vec::new());
+}
+
 /// Messages sent from the Engine (Main Thread) to the Script Thread
 #[cfg(not(target_arch = "wasm32"))]
 pub enum ScriptRequest {
@@ -25,7 +38,7 @@ pub enum ScriptRequest {
 /// Messages sent from the Script Thread to the Engine
 #[cfg(not(target_arch = "wasm32"))]
 pub enum ScriptResponse {
-    LoopComplete(Interpreter, Environment, ShimValue),
+    LoopComplete(Interpreter, Environment, ShimValue, Vec<DrawRect>),
     Error(Interpreter, Environment, ShimValue, String),
 }
 
@@ -38,6 +51,7 @@ enum BridgeState {
 pub struct ScriptBridge {
     state: BridgeState,
     pub interpreter_errors: Vec<String>,
+    pub draw_list: Vec<DrawRect>,
     script_path: String,
     #[cfg(not(target_arch = "wasm32"))]
     mtime: SystemTime,
@@ -80,6 +94,17 @@ fn shim_ig_text(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimV
     Ok(ShimValue::None)
 }
 
+fn shim_draw_rect(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let x = unpacker.required_number(b"x")?;
+    let y = unpacker.required_number(b"y")?;
+    let w = unpacker.required_number(b"w")?;
+    let h = unpacker.required_number(b"h")?;
+    unpacker.end()?;
+    DRAW_LIST.with(|list| list.borrow_mut().push(DrawRect { x, y, w, h }));
+    Ok(ShimValue::None)
+}
+
 fn load_script(bytes: &[u8]) -> Result<(Interpreter, Environment, ShimValue), String> {
     let ast = shimlang::ast_from_text(bytes)?;
     let program = shimlang::compile_ast(&ast)?;
@@ -90,6 +115,7 @@ fn load_script(bytes: &[u8]) -> Result<(Interpreter, Environment, ShimValue), St
         (b"ig_begin", shim_ig_begin),
         (b"ig_end", shim_ig_end),
         (b"ig_text", shim_ig_text),
+        (b"draw_rect", shim_draw_rect),
     ];
     for (name, func) in builtins {
         let position = interpreter.mem.alloc_and_set(*func, &format!("builtin imgui::{}", std::str::from_utf8(name).unwrap()));
@@ -150,6 +176,7 @@ impl ScriptBridge {
             Self {
                 state: BridgeState::Paused(interpreter, env, loop_fn),
                 interpreter_errors: Vec::new(),
+                draw_list: Vec::new(),
                 script_path,
                 mtime: SystemTime::UNIX_EPOCH,
                 tx: request_tx,
@@ -162,6 +189,7 @@ impl ScriptBridge {
             Self {
                 state: BridgeState::Paused(interpreter, env, loop_fn),
                 interpreter_errors: Vec::new(),
+                draw_list: Vec::new(),
                 script_path,
             }
         }
@@ -178,6 +206,7 @@ impl ScriptBridge {
                             self.mtime = time;
                             match fs::read(&self.script_path) {
                                 Ok(bytes) => {
+                                    println!("{}", debug_u8s(&bytes));
                                     match load_script(&bytes) {
                                         Ok((interpreter, env, loop_fn)) => {
                                             self.state = BridgeState::Paused(interpreter, env, loop_fn);
@@ -199,6 +228,7 @@ impl ScriptBridge {
                     }
                 },
                 Err(_) => {
+                    println!("file not found {}", &self.script_path);
                     // File not found yet; silently wait
                 }
             }
@@ -217,8 +247,9 @@ impl ScriptBridge {
                         self.state = BridgeState::Paused(interpreter, env, loop_fn);
                         self.interpreter_errors.push(msg);
                     }
-                    ScriptResponse::LoopComplete(interpreter, env, loop_fn) => {
+                    ScriptResponse::LoopComplete(interpreter, env, loop_fn, draw_list) => {
                         self.state = BridgeState::Paused(interpreter, env, loop_fn);
+                        self.draw_list = draw_list;
                     }
                 }
             }
@@ -245,6 +276,7 @@ impl ScriptBridge {
                     if let Err(msg) = call_loop_fn(interpreter, env, loop_fn) {
                         self.interpreter_errors.push(msg);
                     }
+                    self.draw_list = DRAW_LIST.with(|l| l.borrow_mut().drain(..).collect());
                 }
             }
         }
@@ -276,7 +308,10 @@ fn script_thread_logic(rx: Receiver<ScriptRequest>, tx: Sender<ScriptResponse>) 
                 ScriptRequest::ExecuteLoop(mut interpreter, mut env, loop_fn) => {
                     tx.send(
                         match call_loop_fn(&mut interpreter, &mut env, loop_fn) {
-                            Ok(()) => ScriptResponse::LoopComplete(interpreter, env, loop_fn),
+                            Ok(()) => {
+                                let draw_list = DRAW_LIST.with(|l| l.borrow_mut().drain(..).collect());
+                                ScriptResponse::LoopComplete(interpreter, env, loop_fn, draw_list)
+                            }
                             Err(msg) => ScriptResponse::Error(interpreter, env, loop_fn, msg),
                         }
                     ).unwrap();

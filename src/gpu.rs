@@ -257,7 +257,6 @@ pub struct ShaderProgram {
 
 impl ShaderProgram {
     pub fn create(vert: VertexShader, frag: FragmentShader) -> Result<Self, String> {
-        println!("Creating shader");
         unsafe {
             let id = gl::CreateProgram();
             gl::AttachShader(id, vert.id);
@@ -279,7 +278,6 @@ impl ShaderProgram {
 
             let uniform_location_cache = SHMUnsafeCell::new(HashMap::new());
 
-            println!("Returning shader");
             Ok(Self {id, vert, frag, uniform_location_cache})
         }
     }
