@@ -266,7 +266,6 @@ pub struct DebugState {
     sdf_test_draw_wireframe: bool,
     sdf_box_size: Vec3,
     shimlang_debug_window: shimlang_imgui::Navigation,
-    shimlang_repl: shimlang_imgui::Repl,
 }
 
 
@@ -1478,7 +1477,7 @@ fn frame(state: &mut State, delta: f32) {
             let zone = zone_scoped!("IMGUI Debug Windows");
             {
                 let _zone = zone_scoped!("ShimLang Debug");
-                state.script_bridge.debug_window(&mut state.debug_state.shimlang_debug_window, &mut state.debug_state.shimlang_repl);
+                state.script_bridge.debug_window(&mut state.debug_state.shimlang_debug_window);
 
                 draw_log_window();
             }

@@ -257,14 +257,12 @@ impl ScriptBridge {
     pub fn debug_window(
         &mut self,
         shimlang_debug_window: &mut shimlang_imgui::Navigation,
-        shimlang_repl: &mut shimlang_imgui::Repl,
     ) {
         match &mut self.state {
             #[cfg(not(target_arch = "wasm32"))]
             BridgeState::Running => {},
             BridgeState::Paused(interpreter, env, _loop_fn) => {
                 shimlang_debug_window.debug_window(interpreter, &env);
-                shimlang_repl.window(interpreter);
             },
         }
     }

@@ -4,62 +4,6 @@ use crate::*;
 use ::shimlang::{u24, FreeBlock, Interpreter, fnv1a_hash};
 
 #[derive(Facet, Default)]
-pub struct Repl {
-    lines: Vec<Vec<u8>>,
-    input: Vec<u8>,
-    sent_last_frame: bool,
-}
-
-impl Repl {
-    pub fn window(&mut self, vm: &mut Interpreter) {
-        let _zone = zone_scoped!("Repl::window");
-        // Set the capacity of the vec here since we want to derive Default for convenience
-
-        unsafe {
-            if self.input.capacity() == 0 {
-                self.input.reserve(4096);
-                self.input.set_len(self.input.capacity());
-                // Fill will nulls
-                for c in self.input.iter_mut() {
-                    *c = 0;
-                }
-            }
-
-            let mut open = true;
-            igBegin(c"Shimlang REPL".as_ptr(), &mut open as *mut bool, IMGUI_WINDOW_FLAGS_NO_FOCUS_ON_APPEARING);
-            for line in self.lines.iter() {
-                igText(CString::new(line.clone()).unwrap().as_ptr());
-            }
-
-            if self.sent_last_frame {
-                igSetKeyboardFocusHere();
-                self.sent_last_frame = false;
-            }
-            igSeparator();
-            let height = shmConsoleFooterHeight();
-            igText(CString::new(format!("Footer height {}", height)).unwrap().as_ptr());
-            let sent = igInputText(
-                c"REPL Input Line".as_ptr(), 
-                self.input.as_mut_ptr() as *mut i8, 
-                self.input.capacity() as i32,
-                IMGUI_INPUT_TEXT_FLAGS_ENTER_RETURNS_TRUE
-            );
-            if sent {
-                if let Some(index) = self.input.iter().position(|&x| x == 0) {
-                    self.lines.push(self.input[..index].to_vec());
-                    self.input[..index].fill(0);
-                } else {
-                    // Since we couldn't find the null byte, the len being the capacity is okay
-                    self.lines.push(b"Could not find null byte".to_vec())
-                }
-                self.sent_last_frame = true;
-            }
-            igEnd();
-        }
-    }
-}
-
-#[derive(Facet, Default)]
 pub struct Navigation {
     memory_page: u32,
 }

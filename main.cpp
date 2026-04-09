@@ -393,7 +393,7 @@ void error_window() {
     ImGui::SetNextWindowSize(ImVec2(600, 300), ImGuiCond_FirstUseEver);       // Set default size: 400x300
     ImGui::SetNextWindowPos(ImVec2(20, 350), ImGuiCond_FirstUseEver);        // Set default position: (100, 100)
 
-    ImGui::Begin("Message log", nullptr, ImGuiWindowFlags_NoFocusOnAppearing);
+    ImGui::Begin("C++ message log", nullptr, ImGuiWindowFlags_NoFocusOnAppearing);
 
     for (const auto &error : logs) {
         ImGui::Text("%s", error.c_str());
@@ -729,7 +729,66 @@ int main(int, char**)
     style.WindowRounding = 0.0f;
     // Docs suggest making windows opaque so the transition to a platform window isn't noticeable. I don't care about
     // that and much prefer the usefulness of seeing behind normal windows.
-    style.Colors[ImGuiCol_WindowBg].w = 0.85f;
+    auto transparency = 0.35f;
+    style.Colors[ImGuiCol_WindowBg].w *= transparency;
+    // style.Colors[ImGuiCol_Text].w *= transparency;
+    // style.Colors[ImGuiCol_TextDisabled].w *= transparency;
+    style.Colors[ImGuiCol_WindowBg].w *= transparency;
+    style.Colors[ImGuiCol_ChildBg].w *= transparency;
+    style.Colors[ImGuiCol_PopupBg].w *= transparency;
+    style.Colors[ImGuiCol_Border].w *= transparency;
+    style.Colors[ImGuiCol_BorderShadow].w *= transparency;
+    style.Colors[ImGuiCol_FrameBg].w *= transparency;
+    style.Colors[ImGuiCol_FrameBgHovered].w *= transparency;
+    style.Colors[ImGuiCol_FrameBgActive].w *= transparency;
+    style.Colors[ImGuiCol_TitleBg].w *= transparency;
+    style.Colors[ImGuiCol_TitleBgActive].w *= transparency;
+    style.Colors[ImGuiCol_TitleBgCollapsed].w *= transparency;
+    style.Colors[ImGuiCol_MenuBarBg].w *= transparency;
+    style.Colors[ImGuiCol_ScrollbarBg].w *= transparency;
+    style.Colors[ImGuiCol_ScrollbarGrab].w *= transparency;
+    style.Colors[ImGuiCol_ScrollbarGrabHovered].w *= transparency;
+    style.Colors[ImGuiCol_ScrollbarGrabActive].w *= transparency;
+    style.Colors[ImGuiCol_CheckMark].w *= transparency;
+    style.Colors[ImGuiCol_SliderGrab].w *= transparency;
+    style.Colors[ImGuiCol_SliderGrabActive].w *= transparency;
+    style.Colors[ImGuiCol_Button].w *= transparency;
+    style.Colors[ImGuiCol_ButtonHovered].w *= transparency;
+    style.Colors[ImGuiCol_ButtonActive].w *= transparency;
+    style.Colors[ImGuiCol_Header].w *= transparency;
+    style.Colors[ImGuiCol_HeaderHovered].w *= transparency;
+    style.Colors[ImGuiCol_HeaderActive].w *= transparency;
+    style.Colors[ImGuiCol_Separator].w *= transparency;
+    style.Colors[ImGuiCol_SeparatorHovered].w *= transparency;
+    style.Colors[ImGuiCol_SeparatorActive].w *= transparency;
+    style.Colors[ImGuiCol_ResizeGrip].w *= transparency;
+    style.Colors[ImGuiCol_ResizeGripHovered].w *= transparency;
+    style.Colors[ImGuiCol_ResizeGripActive].w *= transparency;
+    style.Colors[ImGuiCol_TabHovered].w *= transparency;
+    style.Colors[ImGuiCol_Tab].w *= transparency;
+    style.Colors[ImGuiCol_TabSelected].w *= transparency;
+    style.Colors[ImGuiCol_TabSelectedOverline].w *= transparency;
+    style.Colors[ImGuiCol_TabDimmed].w *= transparency;
+    style.Colors[ImGuiCol_TabDimmedSelected].w *= transparency;
+    style.Colors[ImGuiCol_TabDimmedSelectedOverline].w *= transparency;
+    style.Colors[ImGuiCol_DockingPreview].w *= transparency;
+    style.Colors[ImGuiCol_DockingEmptyBg].w *= transparency;
+    style.Colors[ImGuiCol_PlotLines].w *= transparency;
+    style.Colors[ImGuiCol_PlotLinesHovered].w *= transparency;
+    style.Colors[ImGuiCol_PlotHistogram].w *= transparency;
+    style.Colors[ImGuiCol_PlotHistogramHovered].w *= transparency;
+    style.Colors[ImGuiCol_TableHeaderBg].w *= transparency;
+    style.Colors[ImGuiCol_TableBorderStrong].w *= transparency;
+    style.Colors[ImGuiCol_TableBorderLight].w *= transparency;
+    style.Colors[ImGuiCol_TableRowBg].w *= transparency;
+    style.Colors[ImGuiCol_TableRowBgAlt].w *= transparency;
+    style.Colors[ImGuiCol_TextLink].w *= transparency;
+    style.Colors[ImGuiCol_TextSelectedBg].w *= transparency;
+    style.Colors[ImGuiCol_DragDropTarget].w *= transparency;
+    style.Colors[ImGuiCol_NavCursor].w *= transparency;
+    style.Colors[ImGuiCol_NavWindowingHighlight].w *= transparency;
+    style.Colors[ImGuiCol_NavWindowingDimBg].w *= transparency;
+    style.Colors[ImGuiCol_ModalWindowDimBg].w *= transparency;
 
     // Setup Platform/Renderer backends
     ImGui_ImplSDL2_InitForOpenGL(window, gl_context);
@@ -822,6 +881,35 @@ int main(int, char**)
         ImGui_ImplSDL2_NewFrame();
         ImGui::NewFrame();
 
+        // Fullscreen DockSpace
+        {
+            ImGuiWindowFlags dockspace_flags =
+                ImGuiWindowFlags_NoDocking |
+                ImGuiWindowFlags_NoTitleBar |
+                ImGuiWindowFlags_NoCollapse |
+                ImGuiWindowFlags_NoResize |
+                ImGuiWindowFlags_NoMove |
+                ImGuiWindowFlags_NoBringToFrontOnFocus |
+                ImGuiWindowFlags_NoNavFocus |
+                ImGuiWindowFlags_NoBackground;
+
+            ImGuiViewport* viewport = ImGui::GetMainViewport();
+            ImGui::SetNextWindowPos(viewport->WorkPos);
+            ImGui::SetNextWindowSize(viewport->WorkSize);
+            ImGui::SetNextWindowViewport(viewport->ID);
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+
+            ImGui::Begin("DockSpaceWindow", nullptr, dockspace_flags);
+            ImGui::PopStyleVar(3);
+
+            ImGuiID dockspace_id = ImGui::GetID("MyDockSpace");
+            ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_PassthruCentralNode);
+
+            ImGui::End();
+        }
+
         int display_w, display_h;
         SDL_GL_GetDrawableSize(window, &display_w, &display_h);
         glViewport(0, 0, display_w, display_h);
@@ -848,7 +936,6 @@ int main(int, char**)
 #ifndef __EMSCRIPTEN__
                 TracyCZoneEnd(ctx);
 #endif
-                simple_window(&clear_color, &show_demo_window, &show_another_window);
             }
         } else {
             ImGui::Begin("STARTUP ERROR");
