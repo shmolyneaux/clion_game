@@ -1040,12 +1040,12 @@ impl ShimDict {
 }
 
 #[derive(Debug)]
-pub(crate) struct ShimList {
+pub struct ShimList {
     // The memory is limited to u24, so we know there can't be more than this
     // number of values
-    pub(crate) len: u24,
+    pub len: u24,
     // We don't really need any more than 64 distinct capacities
-    pub(crate) capacity_lut: u8,
+    pub capacity_lut: u8,
     // Add 1 byte of padding so that ShimList is 8 bytes
     _pad: u8,
     // Memory position of the list data
@@ -1057,7 +1057,7 @@ const _: () = {
 };
 
 impl ShimList {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             len: 0.into(),
             capacity_lut: 0,
@@ -1066,19 +1066,19 @@ impl ShimList {
         }
     }
 
-    pub(crate) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.len.into()
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
-    pub(crate) fn capacity(&self) -> usize {
+    pub fn capacity(&self) -> usize {
         LIST_CAPACITY_LUT[self.capacity_lut as usize] as usize
     }
 
-    pub(crate) fn wrap_idx(&self, idx: isize) -> Result<usize, String> {
+    pub fn wrap_idx(&self, idx: isize) -> Result<usize, String> {
         if idx >= self.len() as isize {
             return Err(format!("Index {idx} is out of bounds"));
         }
@@ -1097,18 +1097,22 @@ impl ShimList {
         )
     }
 
-    pub(crate) fn get(&self, mem: &MMU, idx: isize) -> Result<ShimValue, String> {
+    pub fn raw_data<'a>(&self, mem: &'a MMU) -> &'a [u64] {
+        &mem.mem[usize::from(self.data)..usize::from(self.len)]
+    }
+
+    pub fn get(&self, mem: &MMU, idx: isize) -> Result<ShimValue, String> {
         let idx = self.wrap_idx(idx)?;
         unsafe { Ok(ShimValue::from_u64(mem.mem[usize::from(self.data) + idx])) }
     }
 
-    pub(crate) fn set(&self, mem: &mut MMU, idx: isize, value: ShimValue) -> Result<(), String> {
+    pub fn set(&self, mem: &mut MMU, idx: isize, value: ShimValue) -> Result<(), String> {
         let idx = self.wrap_idx(idx)?;
         mem.mem[usize::from(self.data) + idx] = value.to_u64();
         Ok(())
     }
 
-    pub(crate) fn push(&mut self, mem: &mut MMU, val: ShimValue) {
+    pub fn push(&mut self, mem: &mut MMU, val: ShimValue) {
         if self.len() == self.capacity() {
             let old_capacity = self.capacity();
             self.capacity_lut += 1;

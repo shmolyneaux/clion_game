@@ -105,6 +105,36 @@ fn shim_draw_rect(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Sh
     Ok(ShimValue::None)
 }
 
+fn shim_create_texture(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let data = unpacker.required_list(b"rgba_bytes")?;
+    let w = unpacker.required_int(b"w")?;
+    let h = unpacker.required_int(b"h")?;
+    unpacker.end()?;
+
+    if data.len() != (w*h*4) as usize {
+        return Err(format!("Expected a w*h*4={} length array but got array length {}", w*h*4, raw_data.len()));
+    }
+
+    // TODO: The ShimList should provide an iterable the yields ShimValues
+    let shimvalues = data.raw_data(&interpreter.mem);
+
+    let rgba_bytes: Vec<u8> = Vec::with_capacity((w*h*4) as usize);
+    for val in shimvalues.iter() {
+        match unsafe { ShimValue::from_u64(val) } {
+            ShimValue::Integer(i) => {
+            }
+            ShimValue::Float(f) => {
+            }
+            _ => return Err(format!("Non-numeric passed to create_texture {}", val.to_string(
+        }
+    }
+
+    // TODO: create the texture and return a handle to it
+
+    Ok(ShimValue::None)
+}
+
 fn load_script(bytes: &[u8]) -> Result<(Interpreter, Environment, ShimValue), String> {
     let ast = shimlang::ast_from_text(bytes)?;
     let program = shimlang::compile_ast(&ast)?;

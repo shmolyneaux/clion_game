@@ -578,12 +578,32 @@ impl<'a> ArgUnpacker<'a> {
         self.optional(name).ok_or_else(|| format!("Missing required argument: '{}'", debug_u8s(name)))
     }
 
+    pub fn required_list(&mut self, interpreter: &mut Interpreter, name: &[u8]) -> Result<&mut ShimList, String> {
+        match self.optional(name).ok_or_else(|| format!("Missing required argument: '{}'", debug_u8s(name)))? {
+            ShimValue::List(position) => {
+                unsafe {
+                    Ok(std::mem::transmute(&mut interpreter.mem.mem[usize::from(position)]))
+                }
+            },
+            _ => {
+                Err(format!("Not a list"))
+            }
+        }
+    }
+
     pub fn required_number(&mut self, name: &[u8]) -> Result<f32, String> {
-        match self.optional(name).ok_or_else(|| format!("Missing required argument: '{}'", debug_u8s(name))) {
-            Ok(ShimValue::Float(f)) => Ok(f),
-            Ok(ShimValue::Integer(i)) => Ok(i as f32),
-            Ok(_) => Err(format!("Required argument non-numeric: '{}'", debug_u8s(name))),
-            Err(e) => Err(e),
+        match self.optional(name).ok_or_else(|| format!("Missing required argument: '{}'", debug_u8s(name)))? {
+            ShimValue::Float(f) => Ok(f),
+            ShimValue::Integer(i) => Ok(i as f32),
+            _ => Err(format!("Required argument non-numeric: '{}'", debug_u8s(name))),
+        }
+    }
+
+    pub fn required_int(&mut self, name: &[u8]) -> Result<i32, String> {
+        match self.optional(name).ok_or_else(|| format!("Missing required argument: '{}'", debug_u8s(name)))? {
+            ShimValue::Integer(i) => Ok(i),
+            ShimValue::Float(f) => Ok(f as i32),
+            _ => Err(format!("Required argument non-integer: '{}'", debug_u8s(name))),
         }
     }
 
@@ -1544,7 +1564,7 @@ impl ShimValue {
         unsafe { std::mem::transmute(bytes) }
     }
 
-    pub(crate) unsafe fn from_u64(data: u64) -> Self {
+    pub unsafe fn from_u64(data: u64) -> Self {
         unsafe {
             let mut tmp: Self = std::mem::zeroed(); // Will be overwritten
             std::ptr::copy_nonoverlapping(

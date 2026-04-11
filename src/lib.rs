@@ -738,20 +738,24 @@ unsafe fn imgui_debug_inner(peek: &Peek, attributes: &[FieldAttribute], path: &s
     }
 }
 
-fn gen_cpu_texture(width: i32, height: i32, f: impl Fn(i32, i32) -> [u8; 3]) -> GLuint {
-    let mut texture: GLuint = 0;
-
-    let mut my_data: Vec<u8> = vec![0u8; (width * height * 3) as usize];
+fn gen_cpu_texture(width: i32, height: i32, f: impl Fn(i32, i32) -> [u8; 4]) -> GLuint {
+    let mut my_data: Vec<u8> = vec![0u8; (width * height * 4) as usize];
 
     for x in 0..width {
         for y in 0..height {
-            let [r, g, b] = f(x, y);
-            my_data[((y * width + x) * 3) as usize] = r;
-            my_data[((y * width + x) * 3 + 1) as usize] = g;
-            my_data[((y * width + x) * 3 + 2) as usize] = b;
+            let [r, g, b, a] = f(x, y);
+            my_data[((y * width + x) * 4) as usize] = r;
+            my_data[((y * width + x) * 4 + 1) as usize] = g;
+            my_data[((y * width + x) * 4 + 2) as usize] = b;
+            my_data[((y * width + x) * 4 + 3) as usize] = a;
         }
     }
 
+    texture_from_rgba(width, height, &my_data)
+}
+
+fn texture_from_rgba(width: i32, height: i32, rgba_bytes: &[u8]) -> GLuint {
+    let mut texture: GLuint = 0;
     unsafe {
         gl::GenTextures(1, &mut texture as *mut u32);
         gl::BindTexture(gl::TEXTURE_2D, texture);
@@ -763,7 +767,7 @@ fn gen_cpu_texture(width: i32, height: i32, f: impl Fn(i32, i32) -> [u8; 3]) -> 
         gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32);
         gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32);
 
-        gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGB as i32, width, height, 0, gl::RGB, gl::UNSIGNED_BYTE, my_data.as_ptr().cast());
+        gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA as i32, width, height, 0, gl::RGBA, gl::UNSIGNED_BYTE, rgba_bytes.as_ptr().cast());
         gl::GenerateMipmap(gl::TEXTURE_2D);
     }
 
@@ -1571,7 +1575,7 @@ fn frame(state: &mut State, delta: f32) {
                 "uResolution".to_string(), ShaderValue::Vec2(Vec2::new(display_w as f32, display_h as f32))
             );
 
-            let grad_texture = gen_cpu_texture(128, 128, |x, y| [x as u8, y as u8, 0xff]);
+            let grad_texture = gen_cpu_texture(128, 128, |x, y| [x as u8, y as u8, 0xff, 0xff]);
             box_static_mesh.uniform_override.insert("texture1".to_string(), ShaderValue::Sampler2D(grad_texture));
 
             box_static_mesh.draw(&mut ctx);
