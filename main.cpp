@@ -1,12 +1,3 @@
-// Dear ImGui: standalone example application for SDL2 + OpenGL
-// (SDL is a cross-platform general purpose library for handling windows, inputs, OpenGL/Vulkan/Metal graphics context creation, etc.)
-
-// Learn about Dear ImGui:
-// - FAQ                  https://dearimgui.com/faq
-// - Getting Started      https://dearimgui.com/getting-started
-// - Documentation        https://dearimgui.com/docs (same as your local docs/ folder).
-// - Introduction, links and more at the top of imgui.cpp
-
 #include "imgui.h"
 #include "imgui_impl_sdl2.h"
 #include "imgui_impl_opengl3.h"
@@ -21,19 +12,10 @@
 #include "Tracy.hpp"
 #include "TracyC.h"
 #elif defined(__EMSCRIPTEN__)
-struct ___tracy_c_zone_context
-{
-    uint32_t id;
-    int active;
-};
-typedef struct ___tracy_c_zone_context TracyCZoneCtx;
 #define ZoneScoped
 #endif
-#include <iostream>
-#include <filesystem>
 #include <vector>
 #include <string>
-#include <cstring>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -44,303 +26,17 @@ typedef struct ___tracy_c_zone_context TracyCZoneCtx;
 #include <SDL_opengl.h>
 #endif
 
-#if defined(_WIN32)
-#include <windows.h>
-char* exe_path() {
-    static char path[MAX_PATH];
-    GetModuleFileNameA(NULL, path, MAX_PATH);
-    std::cout << "Executable path: " << path << std::endl;
-    return path;
-}
-#elif defined(__linux__)
+#if defined(__linux__) || defined(__EMSCRIPTEN__)
 #include "imgui-docking/examples/libs/emscripten/emscripten_mainloop_stub.h"
-char _whatever[] = "linux/has/no/exe";
-char* exe_path() {
-    return _whatever;
-}
-#elif defined(__EMSCRIPTEN__)
-#include "imgui-docking/examples/libs/emscripten/emscripten_mainloop_stub.h"
-char _whatever[] = "empscripten/has/no/exe";
-char* exe_path() {
-    return _whatever;
-}
 #endif
-
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/type_ptr.hpp>
 
 // Global vector to store error logs
 std::vector<std::string> logs;
 
 SDL_Window* window;
-SDL_AudioDeviceID audio_device = 0;
-
-void play_beep(float frequency = 440.0f, float duration = 0.1f) {
-    if (audio_device == 0) return;
-    const int sample_rate = 44100;
-    const int num_samples = (int)(sample_rate * duration);
-    std::vector<Sint16> buffer(num_samples);
-    for (int i = 0; i < num_samples; i++) {
-        buffer[i] = (Sint16)(32767 * sinf(2.0f * M_PI * frequency * i / sample_rate));
-    }
-    SDL_QueueAudio(audio_device, buffer.data(), num_samples * sizeof(Sint16));
-}
 
 extern "C" int rust_init();
 extern "C" int rust_frame(float delta);
-
-extern "C" {
-    bool igBegin(const char* name, bool* p_open, ImGuiWindowFlags flags)
-    {
-        ZoneScoped;
-        return ImGui::Begin(name, p_open, flags);
-    }
-
-    void igEnd()
-    {
-        ZoneScoped;
-        return ImGui::End();
-    }
-
-    void igBeginDisabled() {
-        ZoneScoped;
-        ImGui::BeginDisabled();
-    }
-
-    void igEndDisabled() {
-        ZoneScoped;
-        ImGui::EndDisabled();
-    }
-
-    // Returns true if the last item is hovered (with optional flags)
-    bool igIsItemHovered(unsigned int flags) {
-        ZoneScoped;
-        return ImGui::IsItemHovered(static_cast<ImGuiHoveredFlags>(flags));
-    }
-
-    // Sets a tooltip for the last item
-    void igSetTooltip(const char* text) {
-        ZoneScoped;
-        ImGui::SetTooltip("%s", text);
-    }
-
-    bool igInputText(const char* label, char* buffer, int buffer_size, int flags) {
-        ZoneScoped;
-        return ImGui::InputText(label, buffer, buffer_size, (ImGuiInputTextFlags)flags);
-    }
-
-    void igTextC(const char* fmt, ...) {
-        ZoneScoped;
-        va_list args;
-        va_start(args, fmt);
-        ImGui::TextV(fmt,args);
-        va_end(args);
-    }
-
-    void igRemoveSpacingH() {
-        // Move back to the same line with 0 pixels of horizontal spacing
-        ImGui::SameLine(0, 0); 
-    }
-
-    void igTextColoredC(float r, float g, float b, float a, const char* fmt, ...) {
-        ZoneScoped;
-        va_list args;
-        va_start(args, fmt);
-        ImGui::TextColoredV(ImVec4(r, g, b, a), fmt, args);
-        va_end(args);
-    }
-
-    void igGetCursorScreenPos(ImVec2* pOut) {
-        if (pOut) *pOut = ImGui::GetCursorScreenPos();
-    }
-
-    void igDrawRectFilled(ImVec2 min, ImVec2 max, ImU32 col) {
-        // Access the current window's draw list and add the rect
-        ImGui::GetWindowDrawList()->AddRectFilled(min, max, col);
-    }
-
-    void igDummy(ImVec2 size) {
-        ImGui::Dummy(size);
-    }
-
-    void igBeginTooltip() {
-        ImGui::BeginTooltip();
-    }
-
-    void igEndTooltip() {
-        ImGui::EndTooltip();
-    }
-
-    void igGetMousePos(ImVec2* pOut) {
-        if (pOut) *pOut = ImGui::GetIO().MousePos;
-    }
-
-    bool igIsMouseHoveringRect(ImVec2 min, ImVec2 max, bool clip) {
-        return ImGui::IsMouseHoveringRect(min, max, clip);
-    }
-
-    void igTextColoredBC(float r, float g, float b, float a, float br, float bg, float bb, float ba, const char* text) {
-        ImVec2 pos = ImGui::GetCursorScreenPos();
-        ImVec2 textSize = ImGui::CalcTextSize(text);
-
-        ImVec4 bgColor = ImVec4(br, bg, bb, ba);
-        
-        ImGui::GetWindowDrawList()->AddRectFilled(
-            pos, 
-            ImVec2(pos.x + textSize.x, pos.y + textSize.y), 
-            ImGui::ColorConvertFloat4ToU32(bgColor)
-        );
-
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(r, g, b, a));
-        ImGui::TextUnformatted(text);
-        ImGui::PopStyleColor();
-    }
-
-    bool igButton(const char* label) {
-        ZoneScoped;
-        return ImGui::Button(label);
-    }
-
-    void igSliderFloat(const char* label, float* v, float v_min, float v_max, const char* format) {
-        ZoneScoped;
-        ImGui::SliderFloat(label, v, v_min, v_max, format);
-    }
-
-    bool igCheckbox(const char* label, bool* v) {
-        ZoneScoped;
-        return ImGui::Checkbox(label, v);
-    }
-
-    bool igWantCaptureKeyboard() {
-        ZoneScoped;
-        return ImGui::GetIO().WantCaptureKeyboard;
-    }
-
-    bool igWantCaptureMouse() {
-        ZoneScoped;
-        return ImGui::GetIO().WantCaptureMouse;
-    }
-
-    void SHM_GetDrawableSize(int *display_w, int *display_h) {
-        ZoneScoped;
-        SDL_GL_GetDrawableSize(window, display_w, display_h);
-    }
-
-    void igSHMNextItemOpenOnce() {
-        ZoneScoped;
-        ImGui::SetNextItemOpen(true, ImGuiCond_Once);
-    }
-
-    bool igTreeNode(const char* label) {
-        ZoneScoped;
-        return ImGui::TreeNode(label);
-    }
-
-    void igTreePop() {
-        ZoneScoped;
-        return ImGui::TreePop();
-    }
-
-    void igSameLine() {
-        ZoneScoped;
-        return ImGui::SameLine();
-    }
-
-    void igSeparator() {
-        ImGui::Separator();
-    }
-
-    bool igBeginTable(const char* label, int columns) {
-        ZoneScoped;
-        return ImGui::BeginTable(label, columns, ImGuiTableFlags_SizingStretchProp);
-    }
-
-
-    bool igBeginChild(const char* str_id, const ImVec2& size_arg, ImGuiChildFlags child_flags, ImGuiWindowFlags window_flags) {
-        return ImGui::BeginChild(str_id, size_arg, child_flags, window_flags);
-    }
-
-    float shmConsoleFooterHeight() {
-        return ImGui::GetStyle().ItemSpacing.y + ImGui::GetFrameHeightWithSpacing();
-    }
-
-    void igTableSetupColumn(const char* label) {
-        ZoneScoped;
-        ImGui::TableSetupColumn(label);
-    }
-
-    void igTableHeadersRow() {
-        ZoneScoped;
-        ImGui::TableHeadersRow();
-    }
-
-    void igTableNextRow() {
-        ZoneScoped;
-        ImGui::TableNextRow();
-    }
-
-    void igTableSetColumnIndex(int index) {
-        ZoneScoped;
-        ImGui::TableSetColumnIndex(index);
-    }
-    void igEndTable() {
-        ZoneScoped;
-        return ImGui::EndTable();
-    }
-    void igSetKeyboardFocusHere() {
-        ZoneScoped;
-        ImGui::SetKeyboardFocusHere();
-    }
-
-    TracyCZoneCtx tracy_zone_begin_n(const char* name, int active) {
-#ifdef __EMSCRIPTEN__
-        return TracyCZoneCtx {0 , 0};
-#else
-        TracyCZoneN(ctx, name, active);
-        return ctx;
-#endif
-    }
-
-    TracyCZoneCtx tracy_zone_begin_ns(const char* name, int depth, int active) {
-#ifdef __EMSCRIPTEN__
-        return TracyCZoneCtx {0 , 0};
-#else
-        TracyCZoneNS(ctx, name, depth, active);
-        return ctx;
-#endif
-    }
-
-    void tracy_zone_end(TracyCZoneCtx ctx) {
-#ifndef __EMSCRIPTEN__
-        TracyCZoneEnd(ctx);
-#endif
-    }
-
-    void tracy_zone_text(TracyCZoneCtx ctx, const char* txt, unsigned len) {
-#ifndef __EMSCRIPTEN__
-        TracyCZoneText(ctx, txt, len);
-#endif
-    }
-
-    void tracy_zone_name(TracyCZoneCtx ctx, const char* txt, unsigned len) {
-#ifndef __EMSCRIPTEN__
-        TracyCZoneName(ctx, txt, len);
-#endif
-    }
-
-    void tracy_zone_color(TracyCZoneCtx ctx, unsigned color) {
-#ifndef __EMSCRIPTEN__
-        TracyCZoneColor(ctx, color);
-#endif
-    }
-
-    float igFrameRate() {
-        ImGuiIO& io = ImGui::GetIO(); (void)io;
-        return io.Framerate;
-    }
-}
-
 
 
 // Function to log error messages
@@ -348,45 +44,6 @@ void log_error(const char *error_message) {
     printf("%s\n", error_message);
     // Append a copy of the error_message to the global vector
     logs.emplace_back(error_message);
-}
-
-void log(const char *message) {
-    printf("%s\n", message);
-    logs.emplace_back(message);
-}
-
-void example_window(bool *show_another_window) {
-    ImGui::Begin("Another Window", show_another_window);   // Pass a pointer to our bool variable (the window will have a closing button that will clear the bool when clicked)
-    ImGui::Text("Hello from another window!");
-    if (ImGui::Button("Close Me"))
-        *show_another_window = false;
-    ImGui::End();
-}
-
-void simple_window(ImVec4 *clear_color, bool *show_demo_window, bool *show_another_window) {
-    static float f = 0.0f;
-    static int counter = 0;
-
-    const ImGuiIO& io = ImGui::GetIO();
-
-    ImGui::Begin("Hello, world 6!");
-
-    ImGui::Text("This is some useful text.");
-    ImGui::Checkbox("Demo Window", show_demo_window);
-    ImGui::Checkbox("Another Window", show_another_window);
-
-    ImGui::SliderFloat("float", &f, 0.0f, 1.0f);
-    ImGui::ColorEdit3("clear color", (float *) clear_color);
-
-    if (ImGui::Button("Button")) {
-        counter++;
-        play_beep();
-    }
-    ImGui::SameLine();
-    ImGui::Text("counter = %d", counter);
-
-    ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
-    ImGui::End();
 }
 
 void error_window() {
@@ -401,205 +58,6 @@ void error_window() {
 
     ImGui::End();
 }
-
-void checkShaderCompilation(GLuint shader) {
-    GLint success;
-    glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
-    if (!success) {
-        char infoLog[512];
-        glGetShaderInfoLog(shader, 512, nullptr, infoLog);
-        log_error("Error: Shader Compilation Failed");
-        log_error(infoLog);
-    }
-}
-
-void checkProgramLinking(GLuint program) {
-    GLint success;
-    glGetProgramiv(program, GL_LINK_STATUS, &success);
-    if (!success) {
-        char infoLog[512];
-        glGetProgramInfoLog(program, 512, nullptr, infoLog);
-        log_error("Error: Shader Compilation Failed");
-        log_error(infoLog);
-    }
-}
-
-glm::mat4 view;
-glm::mat4 projection;
-unsigned int debugViewLoc;
-unsigned int debugProjectionLoc;
-GLuint debugShaderProgram;
-
-GLuint BoxVAO, BoxVBO, BoxEBO;
-
-std::vector<glm::vec3> debug_verts;
-std::vector<unsigned int> debug_vert_indices;
-
-#define END_PRIMITIVE 0xFFFFFFFF
-
-void init_debug_drawing() {
-    glGenVertexArrays(1, &BoxVAO);
-    glGenBuffers(1, &BoxVBO);
-    glGenBuffers(1, &BoxEBO);
-}
-
-void draw_debug_shapes() {
-    glBindVertexArray(BoxVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, BoxVBO);
-    glBufferData(
-        GL_ARRAY_BUFFER,
-        debug_verts.size() * sizeof(glm::vec3),
-        debug_verts.data(),
-        GL_DYNAMIC_DRAW);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, BoxEBO);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, debug_vert_indices.size() * sizeof(unsigned int), debug_vert_indices.data(), GL_DYNAMIC_DRAW);
-
-    // Vertex Position Attribute
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
-    glEnableVertexAttribArray(0);
-
-    glUseProgram(debugShaderProgram);
-
-    glUniformMatrix4fv(debugViewLoc, 1, GL_FALSE, glm::value_ptr(view));
-    glUniformMatrix4fv(debugProjectionLoc, 1, GL_FALSE, glm::value_ptr(projection));
-
-    glDrawElements(GL_LINE_STRIP, debug_vert_indices.size(), GL_UNSIGNED_INT, 0);
-
-    debug_verts.clear();
-    debug_vert_indices.clear();
-}
-
-
-
-
-template <typename T>
-struct Slice {
-    T* data;
-    std::size_t length;
-
-    Slice(T* ptr, std::size_t len) : data(ptr), length(len) {}
-
-    template <std::size_t N>
-    Slice(T (&arr)[N]) : data(arr), length(N) {} // Constructor from C-array
-
-    T& operator[](std::size_t index) {
-        return data[index];
-    }
-
-    const T& operator[](std::size_t index) const {
-        return data[index];
-    }
-
-    T* begin() { return data; }
-    T* end() { return data + length; }
-
-    const T* begin() const { return data; }
-    const T* end() const { return data + length; }
-
-    std::size_t size() const { return length; }
-    bool empty() const { return length == 0; }
-
-    // Nested Iterator Class for `enumerate()`
-    struct EnumerateIterator {
-        std::size_t index;
-        T* ptr;
-
-        EnumerateIterator(std::size_t i, T* p) : index(i), ptr(p) {}
-
-        bool operator!=(const EnumerateIterator& other) const { return index != other.index; }
-        void operator++() { ++index; ++ptr; }
-        std::pair<std::size_t, T&> operator*() { return {index, *ptr}; }
-    };
-
-    // Enumerate Wrapper
-    struct EnumerateRange {
-        Slice& slice;
-        EnumerateIterator begin() { return {0, slice.data}; }
-        EnumerateIterator end() { return {slice.length, slice.data + slice.length}; }
-    };
-
-    // Method to return EnumerateRange
-    EnumerateRange enumerate() { return EnumerateRange{*this}; }
-};
-
-
-
-void debug_lines(Slice<glm::vec3> points, bool connect_last) {
-    int start_offset = debug_verts.size();
-    int offset = debug_verts.size();
-    for (glm::vec3 p : points) {
-        debug_vert_indices.push_back(offset);
-        debug_verts.push_back(p);
-        offset += 1;
-    }
-    if (connect_last) {
-        debug_vert_indices.push_back(start_offset);
-    }
-    debug_vert_indices.push_back(END_PRIMITIVE);
-}
-
-void debug_lines(Slice<glm::vec3> points) {
-    debug_lines(points, false);
-    int offset = debug_verts.size();
-    for (glm::vec3 p : points) {
-        debug_vert_indices.push_back(offset);
-        debug_verts.push_back(p);
-        offset += 1;
-    }
-    debug_vert_indices.push_back(END_PRIMITIVE);
-}
-
-void debug_box(glm::vec3 position, glm::vec3 size, glm::vec3 color) {
-    int offset = debug_verts.size();
-
-    glm::vec3 debug_verts_here[] = {
-        position + glm::vec3(+size.x, +size.y, +size.z)/2.0f,
-        position + glm::vec3(+size.x, +size.y, -size.z)/2.0f,
-        position + glm::vec3(+size.x, -size.y, +size.z)/2.0f,
-        position + glm::vec3(+size.x, -size.y, -size.z)/2.0f,
-        position + glm::vec3(-size.x, +size.y, +size.z)/2.0f,
-        position + glm::vec3(-size.x, +size.y, -size.z)/2.0f,
-        position + glm::vec3(-size.x, -size.y, +size.z)/2.0f,
-        position + glm::vec3(-size.x, -size.y, -size.z)/2.0f,
-    };
-
-    for (int i = 0; i < sizeof(debug_verts_here) / sizeof(glm::vec3); i++) {
-        debug_verts.push_back(debug_verts_here[i]);
-    }
-
-    unsigned int debug_vert_indices_here[] = {
-        0, 1, 3, 2, 0,
-        4, 5, 7, 6, 4,
-        END_PRIMITIVE,
-        1, 5,
-        END_PRIMITIVE,
-        3, 7,
-        END_PRIMITIVE,
-        2, 6,
-        END_PRIMITIVE,
-    };
-
-    for (int i = 0; i < sizeof(debug_vert_indices_here) / sizeof(unsigned int); i++) {
-        unsigned int index = debug_vert_indices_here[i];
-        if (index == END_PRIMITIVE) {
-            debug_vert_indices.push_back(index);
-        } else {
-            debug_vert_indices.push_back(index+offset);
-        }
-    }
-}
-
-void debug_box(glm::vec3 position, glm::vec3 size) {
-    debug_box(position, size, glm::vec3(0.0f, 1.0f, 0.0f));
-}
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-#include <cmath>
-
-#define BUFFER_SIZE (100 * 1024 * 1024) // 100 MB
 
 // Main code
 int main(int, char**)
@@ -674,10 +132,8 @@ int main(int, char**)
         return -1;
     }
 
-    bool mouse_captured = false;
     #ifndef __EMSCRIPTEN__
     SDL_SetRelativeMouseMode(SDL_TRUE);
-    mouse_captured = true;
     #endif
 
     SDL_GLContext gl_context = SDL_GL_CreateContext(window);
@@ -798,32 +254,11 @@ int main(int, char**)
 
     // Our state
     bool show_demo_window = true;
-    bool show_another_window = false;
     ImVec4 clear_color = ImVec4(0.102f, 0.102f, 0.114f, 1.00f);
     glClearColor(clear_color.x * clear_color.w, clear_color.y * clear_color.w, clear_color.z * clear_color.w, clear_color.w);
 
     Uint64 frequency = SDL_GetPerformanceFrequency();
     Uint64 ticks = 0;
-
-    init_debug_drawing();
-
-    {
-        SDL_AudioSpec want, have;
-        SDL_memset(&want, 0, sizeof(want));
-        want.freq = 44100;
-        want.format = AUDIO_S16SYS;
-        want.channels = 1;
-        want.samples = 512;
-        want.callback = nullptr;
-        audio_device = SDL_OpenAudioDevice(nullptr, 0, &want, &have, 0);
-        if (audio_device == 0) {
-            log_error("Failed to open audio device");
-        } else {
-            SDL_PauseAudioDevice(audio_device, 0);
-        }
-    }
-
-    double elapsed = 0.0f;
 
     if (rust_init()) {
         printf("Rust failed to initialize!\n");
@@ -847,8 +282,6 @@ int main(int, char**)
             current_ticks = ticks + 1;
         }
         float delta = ticks > 0 ? (float)((double)(current_ticks - ticks) / frequency) : (float)(1.0f / 60.0f);
-
-        elapsed += delta;
 
         ticks = current_ticks;
 
@@ -923,10 +356,6 @@ int main(int, char**)
                 ImGui::ShowDemoWindow(&show_demo_window);
             }
 
-            if (show_another_window) {
-                example_window(&show_another_window);
-            }
-
             {
                 ZoneScoped;
 #ifndef __EMSCRIPTEN__
@@ -974,13 +403,9 @@ int main(int, char**)
     ImGui_ImplSDL2_Shutdown();
     ImGui::DestroyContext();
 
-    if (audio_device != 0)
-        SDL_CloseAudioDevice(audio_device);
     SDL_GL_DeleteContext(gl_context);
     SDL_DestroyWindow(window);
     SDL_Quit();
 
     return 0;
 }
-
-#undef END_PRIMITIVE
