@@ -481,7 +481,9 @@ impl MMU {
         let type_idx = match self.native_type_ids.get(&type_id) {
             Some(&idx) => idx,
             None => {
-                let idx = self.native_type_registry.len() as u32;
+                let len = self.native_type_registry.len();
+                assert!(len < u32::MAX as usize, "native type registry overflow: too many distinct ShimNative types");
+                let idx = len as u32;
                 // Extract the vtable pointer from a fat reference before moving val.
                 let vtable = unsafe {
                     let reference: &dyn ShimNative = &val;

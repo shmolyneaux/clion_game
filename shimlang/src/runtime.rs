@@ -756,7 +756,7 @@ impl ShimValue {
                 let expected_type_id = TypeId::of::<T>();
                 let actual_type_id = interpreter.mem.native_type_registry[usize::from(*type_idx)].type_id;
                 if actual_type_id != expected_type_id {
-                    return Err(format!("Can't get native as {}", type_name::<T>()));
+                    return Err(format!("Can't get native as {} (actual type does not match)", type_name::<T>()));
                 }
                 Ok(unsafe {
                     let ptr: *mut T = std::mem::transmute(&mut interpreter.mem.mem[usize::from(*position)]);
