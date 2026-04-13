@@ -5,8 +5,6 @@ use std::mem;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::fs;
 use std::time::SystemTime;
-use std::any::Any;
-
 use shimlang::{ShimValue, Environment, Interpreter, ShimNative};
 use shimlang::runtime::{ArgUnpacker, NativeFn, CallResult};
 use shimlang::ArgBundle;
@@ -98,10 +96,6 @@ impl ShimNative for SoundHandle {
         } else {
             Err("Can only play on a SoundHandle".to_string())
         }
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any where Self: Sized {
-        self
     }
 
     fn gc_vals(&self) -> Vec<ShimValue> {
@@ -308,10 +302,6 @@ impl ShimNative for KeyMap {
         }
     }
 
-    fn as_any_mut(&mut self) -> &mut dyn Any where Self: Sized {
-        self
-    }
-
     fn gc_vals(&self) -> Vec<ShimValue> {
         Vec::new()
     }
@@ -329,10 +319,6 @@ impl ShimNative for KeyValue {
         } else {
             Err(format!("KeyValue only has 'is_down', not '{}'", debug_u8s(ident)))
         }
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any where Self: Sized {
-        self
     }
 
     fn gc_vals(&self) -> Vec<ShimValue> {

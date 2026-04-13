@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::any::{Any, TypeId, type_name};
+use std::any::{TypeId, type_name};
 use std::mem::size_of;
 use std::sync::Arc;
 
@@ -438,7 +438,7 @@ const _: () = {
     assert!(std::mem::size_of::<ShimValue>() == 8);
 };
 
-pub trait ShimNative: Any {
+pub trait ShimNative: 'static {
     fn to_string(&self, _interpreter: &mut Interpreter) -> String {
         format!("{}", type_name::<Self>())
     }
@@ -460,7 +460,6 @@ pub trait ShimNative: Any {
         Err(format!("Can't set_attr on {}", type_name::<Self>() ))
     }
 
-    fn as_any_mut(&mut self) -> &mut dyn Any;
     fn gc_vals(&self) -> Vec<ShimValue>;
 }
 

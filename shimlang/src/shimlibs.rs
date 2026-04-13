@@ -1,6 +1,6 @@
 use crate::runtime::*;
 use crate::lex::debug_u8s;
-use std::any::{Any, type_name};
+use std::any::type_name;
 use shm_tracy::*;
 use shm_tracy::zone_scoped;
 use crate::mem::*;
@@ -33,10 +33,6 @@ impl ShimNative for ListIterator {
         } else {
             Err(format!("Can't get_attr {} on {}", debug_u8s(ident), type_name::<Self>() ))
         }
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any where Self: Sized {
-        self
     }
 
     fn gc_vals(&self) -> Vec<ShimValue> {
@@ -88,10 +84,6 @@ impl ShimNative for DictKeysIterator {
         }
     }
 
-    fn as_any_mut(&mut self) -> &mut dyn Any where Self: Sized {
-        self
-    }
-
     fn gc_vals(&self) -> Vec<ShimValue> {
         vec![self.dict]
     }
@@ -141,10 +133,6 @@ impl ShimNative for DictValuesIterator {
         }
     }
 
-    fn as_any_mut(&mut self) -> &mut dyn Any where Self: Sized {
-        self
-    }
-
     fn gc_vals(&self) -> Vec<ShimValue> {
         vec![self.dict]
     }
@@ -163,10 +151,6 @@ impl ShimNative for DictEntryNative {
         } else {
             Err(format!("Can't get_attr {} on {}", debug_u8s(ident), type_name::<Self>() ))
         }
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any where Self: Sized {
-        self
     }
 
     fn gc_vals(&self) -> Vec<ShimValue> {
@@ -220,10 +204,6 @@ impl ShimNative for DictItemsIterator {
         } else {
             Err(format!("Can't get_attr {} on {}", debug_u8s(ident), type_name::<Self>() ))
         }
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any where Self: Sized {
-        self
     }
 
     fn gc_vals(&self) -> Vec<ShimValue> {
@@ -294,10 +274,6 @@ impl ShimNative for RangeNative {
         } else {
             Err(format!("Can't get_attr {} on {}", debug_u8s(ident), type_name::<Self>()))
         }
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any where Self: Sized {
-        self
     }
 
     fn gc_vals(&self) -> Vec<ShimValue> {
@@ -381,10 +357,6 @@ impl ShimNative for RangeIterator {
         } else {
             Err(format!("Can't get_attr {} on {}", debug_u8s(ident), type_name::<Self>()))
         }
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any where Self: Sized {
-        self
     }
 
     fn gc_vals(&self) -> Vec<ShimValue> {

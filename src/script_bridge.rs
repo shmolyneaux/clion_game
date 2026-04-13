@@ -1,8 +1,6 @@
 use std::cell::RefCell;
 use std::mem;
 use std::ffi::CString;
-use std::any::Any;
-
 use shimlang::{Environment, Interpreter, ShimNative, ShimValue, debug_u8s};
 use shimlang::runtime::{ArgUnpacker, NativeFn, CallResult};
 use shimlang::ArgBundle;
@@ -24,11 +22,7 @@ pub struct TextureHandle {
     pub texture_id: u32,
 }
 
-impl ShimNative for TextureHandle {
-    fn as_any_mut(&mut self) -> &mut dyn Any where Self: Sized {
-        self
-    }
-    
+impl ShimNative for TextureHandle {    
     fn gc_vals(&self) -> Vec<ShimValue> {
         Vec::new()
     }
@@ -173,10 +167,6 @@ impl ShimNative for KeyMap {
         }
     }
 
-    fn as_any_mut(&mut self) -> &mut dyn Any where Self: Sized {
-        self
-    }
-
     fn gc_vals(&self) -> Vec<ShimValue> {
         Vec::new()
     }
@@ -202,10 +192,6 @@ impl ShimNative for KeyValue {
                 _ => Err(format!("KeyValue has pressed/released/just_pressed/just_released, not '{}'", debug_u8s(ident))),
             }
         })
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any where Self: Sized {
-        self
     }
 
     fn gc_vals(&self) -> Vec<ShimValue> {
