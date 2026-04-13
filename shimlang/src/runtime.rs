@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::any::{TypeId, type_name};
+use std::any::{Any, TypeId, type_name};
 use std::mem::size_of;
 use std::sync::Arc;
 
@@ -1609,6 +1609,7 @@ pub struct Interpreter {
     pub mem: MMU,
     pub source: HashMap<String, String>,
     pub program: Arc<Program>,
+    singletons: HashMap<TypeId, Box<dyn Any + Send>>,
 }
 
 impl Interpreter {
@@ -1729,7 +1730,16 @@ impl Interpreter {
             mem: mmu,
             source: HashMap::new(),
             program: Arc::new(program),
+            singletons: HashMap::new(),
         }
+    }
+
+    pub fn fetch_mut<T: Default + Send + 'static>(&mut self) -> &mut T {
+        self.singletons
+            .entry(TypeId::of::<T>())
+            .or_insert_with(|| Box::new(T::default()))
+            .downcast_mut::<T>()
+            .expect("singleton type mismatch")
     }
 
     pub fn append_program(&mut self, program: Program) -> Result<(), String> {
@@ -2607,6 +2617,36 @@ mod tests {
                 other => panic!("Expected Integer({}), got {:?}", i, other),
             }
         }
+    }
+    #[test]
+    fn fetch_mut_returns_default_then_persists() {
+        let mut interpreter = test_interpreter();
+
+        #[derive(Default)]
+        struct Counter { val: u32 }
+
+        let c = interpreter.fetch_mut::<Counter>();
+        assert_eq!(c.val, 0);
+        c.val = 42;
+
+        let c = interpreter.fetch_mut::<Counter>();
+        assert_eq!(c.val, 42);
+    }
+
+    #[test]
+    fn fetch_mut_independent_types() {
+        let mut interpreter = test_interpreter();
+
+        #[derive(Default)]
+        struct A(u32);
+        #[derive(Default)]
+        struct B(String);
+
+        interpreter.fetch_mut::<A>().0 = 7;
+        interpreter.fetch_mut::<B>().0 = "hello".into();
+
+        assert_eq!(interpreter.fetch_mut::<A>().0, 7);
+        assert_eq!(interpreter.fetch_mut::<B>().0, "hello");
     }
 }
 
