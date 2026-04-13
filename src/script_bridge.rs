@@ -560,11 +560,9 @@ impl ScriptBridge {
         {
             if self.interpreter_errors.is_empty() {
                 if let BridgeState::Paused(ref mut interpreter, ref mut env, loop_fn) = self.state {
-                    {
-                        let ks = interpreter.fetch_mut::<KeyState>();
-                        ks.keys = keys.to_vec();
-                        ks.last_keys = last_keys.to_vec();
-                    }
+                    let ks = interpreter.fetch_mut::<KeyState>();
+                    ks.keys = keys.to_vec();
+                    ks.last_keys = last_keys.to_vec();
                     if let Err(msg) = call_loop_fn(interpreter, env, loop_fn) {
                         self.interpreter_errors.push(msg);
                     }
@@ -598,11 +596,9 @@ fn script_thread_logic(rx: Receiver<ScriptRequest>, tx: Sender<ScriptResponse>) 
         if let Ok(request) = rx.recv() {
             match request {
                 ScriptRequest::ExecuteLoop(mut interpreter, mut env, loop_fn, keys, last_keys) => {
-                    {
-                        let ks = interpreter.fetch_mut::<KeyState>();
-                        ks.keys = keys;
-                        ks.last_keys = last_keys;
-                    }
+                    let ks = interpreter.fetch_mut::<KeyState>();
+                    ks.keys = keys;
+                    ks.last_keys = last_keys;
                     tx.send(
                         match call_loop_fn(&mut interpreter, &mut env, loop_fn) {
                             Ok(()) => {
