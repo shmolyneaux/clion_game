@@ -58,6 +58,8 @@ set(IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/imgui-docking/")
 
 set(SOURCES
     main.cpp
+    imgui_exports.cpp
+    tracy_exports.cpp
     ${IMGUI_DIR}/imgui.cpp
     ${IMGUI_DIR}/imgui_demo.cpp
     ${IMGUI_DIR}/imgui_draw.cpp
