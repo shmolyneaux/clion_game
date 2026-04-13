@@ -2017,7 +2017,7 @@ pub(crate) fn get_type_name(value: &ShimValue) -> &'static str {
         ShimValue::Dict(_) => "dict",
         ShimValue::StructDef(_) => "struct definition",
         ShimValue::Struct(..) => "struct",
-        ShimValue::Native(_) => "native object",
+        ShimValue::Native(_, _) => "native object",
         ShimValue::Environment(_) => "environment",
     }
 }

@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::any::{Any, type_name, type_name_of_val};
+use std::any::{Any, TypeId, type_name};
 use std::mem::size_of;
 use std::sync::Arc;
 
@@ -430,7 +430,7 @@ pub enum ShimValue {
     StructDef(u24),
     // Struct type followed by struct data
     Struct(u24, u24),
-    Native(u24),
+    Native(u24, u24),
     // For now this is really only used for GC purposes
     Environment(u24),
 }
@@ -752,16 +752,16 @@ impl ShimValue {
 
     pub fn as_native<T: ShimNative>(&self, interpreter: &mut Interpreter) -> Result<&mut T, String> {
         match self {
-            ShimValue::Native(position) => unsafe {
-                let boxobj: &mut Box<dyn ShimNative> =
-                    std::mem::transmute(&mut interpreter.mem.mem[usize::from(*position)]);
-
-                let mutboxobj = boxobj.as_any_mut();
-                let name = type_name_of_val(mutboxobj);
-                match mutboxobj.downcast_mut::<T>() {
-                    Some(obj) => Ok(obj),
-                    _ => Err(format!("Can't get {} as {}", name, type_name::<T>()))
+            ShimValue::Native(type_idx, position) => {
+                let expected_type_id = TypeId::of::<T>();
+                let actual_type_id = interpreter.mem.native_type_registry[usize::from(*type_idx)].type_id;
+                if actual_type_id != expected_type_id {
+                    return Err(format!("Can't get native as {} (actual type does not match)", type_name::<T>()));
                 }
+                Ok(unsafe {
+                    let ptr: *mut T = std::mem::transmute(&mut interpreter.mem.mem[usize::from(*position)]);
+                    &mut *ptr
+                })
             },
             _ => Err(format!("Can't try_into non-native {}", self.to_string_mem(&interpreter.mem)))
         }
@@ -920,8 +920,18 @@ impl ShimValue {
                 };
                 Ok(ResolvedAttr::NativeMethod(*self, func))
             }
-            ShimValue::Native(_) => {
-                let result = self.native(interpreter).unwrap().get_attr(self, interpreter, ident)?;
+            ShimValue::Native(type_idx, position) => {
+                // SAFETY: The native object's memory location is stable during this call
+                // (MMU Vec has fixed capacity; GC is not triggered here). We use a raw
+                // pointer so the borrow checker does not extend the immutable borrow of
+                // `interpreter` across the mutable `&mut Interpreter` passed to get_attr.
+                let result = unsafe {
+                    let vtable = interpreter.mem.native_type_registry[usize::from(*type_idx)].vtable;
+                    let data_ptr = interpreter.mem.mem.as_ptr().add(usize::from(*position)) as *const ();
+                    let fat_ptr: (*const (), *const ()) = (data_ptr, vtable);
+                    let native_ptr: *const dyn ShimNative = std::mem::transmute(fat_ptr);
+                    (*native_ptr).get_attr(self, interpreter, ident)?
+                };
                 Ok(ResolvedAttr::Value(result))
             }
             ShimValue::Integer(_) => {
@@ -1031,12 +1041,17 @@ impl ShimValue {
         self.list_from_mem(&interpreter.mem)
     }
 
-    fn native_from_mem(&self, mem: &MMU) -> Result<&Box<dyn ShimNative>, String> {
+    fn native_from_mem<'a>(&self, mem: &'a MMU) -> Result<&'a dyn ShimNative, String> {
         match self {
-            ShimValue::Native(position) => unsafe {
-                let ptr: *const Box<dyn ShimNative> =
-                    std::mem::transmute(&mem.mem[usize::from(*position)]);
-                Ok(&*ptr)
+            ShimValue::Native(type_idx, position) => {
+                let type_idx: usize = (*type_idx).into();
+                let position: usize = (*position).into();
+                let vtable = mem.native_type_registry[type_idx].vtable;
+                unsafe {
+                    let data_ptr = &mem.mem[position] as *const u64 as *const ();
+                    let fat_ptr: (*const (), *const ()) = (data_ptr, vtable);
+                    Ok(std::mem::transmute::<(*const (), *const ()), &dyn ShimNative>(fat_ptr))
+                }
             },
             _ => {
                 Err(format!("Not a native"))
@@ -1044,16 +1059,21 @@ impl ShimValue {
         }
     }
 
-    fn native(&self, interpreter: &Interpreter) -> Result<&Box<dyn ShimNative>, String> {
+    fn native<'a>(&self, interpreter: &'a Interpreter) -> Result<&'a dyn ShimNative, String> {
         self.native_from_mem(&interpreter.mem)
     }
 
-    fn native_mut_from_mem(&self, mem: &mut MMU) -> Result<&mut Box<dyn ShimNative>, String> {
+    fn native_mut_from_mem<'a>(&self, mem: &'a mut MMU) -> Result<&'a mut dyn ShimNative, String> {
         match self {
-            ShimValue::Native(position) => unsafe {
-                let ptr: *mut Box<dyn ShimNative> =
-                    std::mem::transmute(&mut mem.mem[usize::from(*position)]);
-                Ok(&mut *ptr)
+            ShimValue::Native(type_idx, position) => {
+                let type_idx: usize = (*type_idx).into();
+                let position: usize = (*position).into();
+                let vtable = mem.native_type_registry[type_idx].vtable;
+                unsafe {
+                    let data_ptr = &mut mem.mem[position] as *mut u64 as *mut ();
+                    let fat_ptr: (*mut (), *const ()) = (data_ptr, vtable);
+                    Ok(std::mem::transmute::<(*mut (), *const ()), &mut dyn ShimNative>(fat_ptr))
+                }
             },
             _ => {
                 Err(format!("Not a native"))
@@ -1061,7 +1081,7 @@ impl ShimValue {
         }
     }
 
-    fn native_mut(&self, interpreter: &mut Interpreter) -> Result<&mut Box<dyn ShimNative>, String> {
+    fn native_mut<'a>(&self, interpreter: &'a mut Interpreter) -> Result<&'a mut dyn ShimNative, String> {
         self.native_mut_from_mem(&mut interpreter.mem)
     }
 
@@ -1200,7 +1220,7 @@ impl ShimValue {
 
                 out
             },
-            ShimValue::Native(_) => {
+            ShimValue::Native(_, _) => {
                 self.native_from_mem(mem).unwrap().to_string_mem(mem)
             }
             ShimValue::Struct(def_pos, pos) => {
@@ -1537,8 +1557,15 @@ impl ShimValue {
                 }
                 Err(format!("Ident {:?} not found for {}", debug_u8s(ident), self.to_string_mem(&interpreter.mem)))
             }
-            ShimValue::Native(_) => {
-                self.native(interpreter).unwrap().set_attr(interpreter, ident, val)
+            ShimValue::Native(type_idx, position) => {
+                // SAFETY: Same reasoning as in get_attr - stable memory location during call.
+                unsafe {
+                    let vtable = interpreter.mem.native_type_registry[usize::from(*type_idx)].vtable;
+                    let data_ptr = interpreter.mem.mem.as_ptr().add(usize::from(*position)) as *const ();
+                    let fat_ptr: (*const (), *const ()) = (data_ptr, vtable);
+                    let native_ptr: *const dyn ShimNative = std::mem::transmute(fat_ptr);
+                    (*native_ptr).set_attr(interpreter, ident, val)
+                }
             }
             val => Err(format!("Ident {:?} not available on {}", debug_u8s(ident), val.to_string_mem(&interpreter.mem))),
         }
