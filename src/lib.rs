@@ -1399,7 +1399,7 @@ fn frame(state: &mut State, delta: f32) {
 
         {
             let _zone = zone_scoped!("Run interpreter");
-            state.script_bridge.step();
+            state.script_bridge.step(&state.keys.keys, &state.keys.last_keys);
         }
 
         for err in state.script_bridge.errors() {

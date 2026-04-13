@@ -51,6 +51,166 @@ pub enum DrawListItem {
 
 thread_local! {
     static DRAW_LIST: RefCell<DrawList> = RefCell::new(DrawList::new());
+    static KEY_STATE: RefCell<(Vec<u8>, Vec<u8>)> = RefCell::new((Vec::new(), Vec::new()));
+}
+
+fn scancode_from_name(name: &[u8]) -> Option<usize> {
+    match name {
+        b"A" => Some(4),
+        b"B" => Some(5),
+        b"C" => Some(6),
+        b"D" => Some(7),
+        b"E" => Some(8),
+        b"F" => Some(9),
+        b"G" => Some(10),
+        b"H" => Some(11),
+        b"I" => Some(12),
+        b"J" => Some(13),
+        b"K" => Some(14),
+        b"L" => Some(15),
+        b"M" => Some(16),
+        b"N" => Some(17),
+        b"O" => Some(18),
+        b"P" => Some(19),
+        b"Q" => Some(20),
+        b"R" => Some(21),
+        b"S" => Some(22),
+        b"T" => Some(23),
+        b"U" => Some(24),
+        b"V" => Some(25),
+        b"W" => Some(26),
+        b"X" => Some(27),
+        b"Y" => Some(28),
+        b"Z" => Some(29),
+        b"Key1" => Some(30),
+        b"Key2" => Some(31),
+        b"Key3" => Some(32),
+        b"Key4" => Some(33),
+        b"Key5" => Some(34),
+        b"Key6" => Some(35),
+        b"Key7" => Some(36),
+        b"Key8" => Some(37),
+        b"Key9" => Some(38),
+        b"Key0" => Some(39),
+        b"Enter" => Some(40),
+        b"Escape" => Some(41),
+        b"Backspace" => Some(42),
+        b"Tab" => Some(43),
+        b"Space" => Some(44),
+        b"Minus" => Some(45),
+        b"Equal" => Some(46),
+        b"LeftBracket" => Some(47),
+        b"RightBracket" => Some(48),
+        b"Backslash" => Some(49),
+        b"Semicolon" => Some(51),
+        b"Apostrophe" => Some(52),
+        b"GraveAccent" => Some(53),
+        b"Comma" => Some(54),
+        b"Period" => Some(55),
+        b"Slash" => Some(56),
+        b"CapsLock" => Some(57),
+        b"F1" => Some(58),
+        b"F2" => Some(59),
+        b"F3" => Some(60),
+        b"F4" => Some(61),
+        b"F5" => Some(62),
+        b"F6" => Some(63),
+        b"F7" => Some(64),
+        b"F8" => Some(65),
+        b"F9" => Some(66),
+        b"F10" => Some(67),
+        b"F11" => Some(68),
+        b"F12" => Some(69),
+        b"PrintScreen" => Some(70),
+        b"ScrollLock" => Some(71),
+        b"Pause" => Some(72),
+        b"Insert" => Some(73),
+        b"Home" => Some(74),
+        b"PageUp" => Some(75),
+        b"Delete" => Some(76),
+        b"End" => Some(77),
+        b"PageDown" => Some(78),
+        b"Right" => Some(79),
+        b"Left" => Some(80),
+        b"Down" => Some(81),
+        b"Up" => Some(82),
+        b"NumLock" => Some(83),
+        b"KpDivide" => Some(84),
+        b"KpMultiply" => Some(85),
+        b"KpMinus" => Some(86),
+        b"KpPlus" => Some(87),
+        b"KpEnter" => Some(88),
+        b"Kp1" => Some(89),
+        b"Kp2" => Some(90),
+        b"Kp3" => Some(91),
+        b"Kp4" => Some(92),
+        b"Kp5" => Some(93),
+        b"Kp6" => Some(94),
+        b"Kp7" => Some(95),
+        b"Kp8" => Some(96),
+        b"Kp9" => Some(97),
+        b"Kp0" => Some(98),
+        b"LeftCtrl" => Some(224),
+        b"LeftShift" => Some(225),
+        b"LeftAlt" => Some(226),
+        b"LeftSuper" => Some(227),
+        b"RightCtrl" => Some(228),
+        b"RightShift" => Some(229),
+        b"RightAlt" => Some(230),
+        b"RightSuper" => Some(231),
+        _ => None,
+    }
+}
+
+#[derive(Debug)]
+struct KeyMap;
+
+impl ShimNative for KeyMap {
+    fn get_attr(&self, _self_as_val: &ShimValue, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
+        match scancode_from_name(ident) {
+            Some(scancode) => Ok(interpreter.mem.alloc_native(KeyValue { scancode })),
+            None => Err(format!("Unknown key: {}", debug_u8s(ident))),
+        }
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any where Self: Sized {
+        self
+    }
+
+    fn gc_vals(&self) -> Vec<ShimValue> {
+        Vec::new()
+    }
+}
+
+#[derive(Debug)]
+struct KeyValue {
+    scancode: usize,
+}
+
+impl ShimNative for KeyValue {
+    fn get_attr(&self, _self_as_val: &ShimValue, _interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
+        KEY_STATE.with(|ks| {
+            let ks = ks.borrow();
+            let (keys, last_keys) = &*ks;
+            let cur = keys.get(self.scancode).copied().unwrap_or(0);
+            let last = last_keys.get(self.scancode).copied().unwrap_or(0);
+            match ident {
+                b"pressed" => Ok(ShimValue::Bool(cur == 1)),
+                b"released" => Ok(ShimValue::Bool(cur == 0)),
+                b"just_pressed" => Ok(ShimValue::Bool(cur == 1 && cur != last)),
+                b"just_released" => Ok(ShimValue::Bool(cur == 0 && cur != last)),
+                _ => Err(format!("KeyValue has pressed/released/just_pressed/just_released, not '{}'", debug_u8s(ident))),
+            }
+        })
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any where Self: Sized {
+        self
+    }
+
+    fn gc_vals(&self) -> Vec<ShimValue> {
+        Vec::new()
+    }
 }
 
 pub struct DrawList {
@@ -81,7 +241,7 @@ impl DrawList {
 /// Messages sent from the Engine (Main Thread) to the Script Thread
 #[cfg(not(target_arch = "wasm32"))]
 pub enum ScriptRequest {
-    ExecuteLoop(Interpreter, Environment, ShimValue),
+    ExecuteLoop(Interpreter, Environment, ShimValue, Vec<u8>, Vec<u8>),
 }
 
 /// Messages sent from the Script Thread to the Engine
@@ -249,6 +409,9 @@ fn load_script(bytes: &[u8]) -> Result<(Interpreter, Environment, ShimValue), St
         env.insert_new(&mut interpreter, name.to_vec(), ShimValue::NativeFn(position));
     }
 
+    let key_val = interpreter.mem.alloc_native(KeyMap);
+    env.insert_new(&mut interpreter, b"key".to_vec(), key_val);
+
     let mut pc = 0;
     interpreter.execute_bytecode_extended(&mut pc, shimlang::ArgBundle::new(), &mut env)?;
     interpreter.gc(&env);
@@ -322,7 +485,7 @@ impl ScriptBridge {
         }
     }
 
-    pub fn step(&mut self) {
+    pub fn step(&mut self, keys: &[u8], last_keys: &[u8]) {
         #[cfg(not(target_arch = "wasm32"))]
         {
             // Check for file changes and reload
@@ -365,7 +528,7 @@ impl ScriptBridge {
                 match state {
                     BridgeState::Running => panic!("Somehow the interpreter is running"),
                     BridgeState::Paused(interpreter, env, loop_fn) => {
-                        self.tx.send(ScriptRequest::ExecuteLoop(interpreter, env, loop_fn)).unwrap();
+                        self.tx.send(ScriptRequest::ExecuteLoop(interpreter, env, loop_fn, keys.to_vec(), last_keys.to_vec())).unwrap();
                     },
                 }
 
@@ -398,6 +561,7 @@ impl ScriptBridge {
 
         #[cfg(target_arch = "wasm32")]
         {
+            KEY_STATE.with(|ks| *ks.borrow_mut() = (keys.to_vec(), last_keys.to_vec()));
             if self.interpreter_errors.is_empty() {
                 if let BridgeState::Paused(ref mut interpreter, ref mut env, loop_fn) = self.state {
                     if let Err(msg) = call_loop_fn(interpreter, env, loop_fn) {
@@ -432,7 +596,8 @@ fn script_thread_logic(rx: Receiver<ScriptRequest>, tx: Sender<ScriptResponse>) 
     loop {
         if let Ok(request) = rx.recv() {
             match request {
-                ScriptRequest::ExecuteLoop(mut interpreter, mut env, loop_fn) => {
+                ScriptRequest::ExecuteLoop(mut interpreter, mut env, loop_fn, keys, last_keys) => {
+                    KEY_STATE.with(|ks| *ks.borrow_mut() = (keys, last_keys));
                     tx.send(
                         match call_loop_fn(&mut interpreter, &mut env, loop_fn) {
                             Ok(()) => {

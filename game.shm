@@ -34,12 +34,18 @@ fn debug_texture() {
 
 let texture = None;
 
+let y = 20;
+
 let frame_num = 0;
 fn loop() {
     frame_num += 1;
     if frame_num == 1 {
         texture = debug_texture();
     }
+
+    let speed = if key.LeftShift.pressed { 5 } else { 1 };
+    y += if key.W.pressed { -speed } else { 0 };
+    y += if key.S.pressed { speed } else { 0 };
 
     if ig_begin("from shimlang") {
         ig_text(p);
@@ -48,7 +54,7 @@ fn loop() {
 
     draw_rect(
         10,
-        20,
+        y,
         200,
         300,
     );
