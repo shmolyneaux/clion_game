@@ -17,7 +17,7 @@ typedef struct ___tracy_c_zone_context TracyCZoneCtx;
 extern "C" {
     TracyCZoneCtx tracy_zone_begin_n(const char* name, int active) {
 #ifdef __EMSCRIPTEN__
-        return TracyCZoneCtx {0 , 0};
+        return TracyCZoneCtx {0, 0};
 #else
         TracyCZoneN(ctx, name, active);
         return ctx;
@@ -26,7 +26,7 @@ extern "C" {
 
     TracyCZoneCtx tracy_zone_begin_ns(const char* name, int depth, int active) {
 #ifdef __EMSCRIPTEN__
-        return TracyCZoneCtx {0 , 0};
+        return TracyCZoneCtx {0, 0};
 #else
         TracyCZoneNS(ctx, name, depth, active);
         return ctx;
