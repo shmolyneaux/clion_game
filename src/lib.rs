@@ -313,10 +313,12 @@ pub struct State {
     frame_captures: Vec<GLuint>,
     texture_shader: Rc<ShaderProgram>,
     screen_quad_shader: Rc<ShaderProgram>,
+    screen_quad_mesh: StaticMesh,
 
     debug_state: DebugState,
 
     shimlang_texture_handle_to_gl_texture: HashMap<u32, i32>,
+    default_texture: GLuint,
 }
 
 /// Parses a string of the form `"range =(-180.0, 180.0)"` into a tuple of two `f32` values.
@@ -1268,19 +1270,16 @@ fn init_state() -> State {
             .with_input(ShaderSymbol::new(ShaderDataType::Vec3, "aPos"))
             .with_input(ShaderSymbol::new(ShaderDataType::Vec2, "aUV"))
             .with_uniform(ShaderSymbol::new(ShaderDataType::Vec2, "uResolution"))
+            .with_uniform(ShaderSymbol::new(ShaderDataType::Vec2, "uRectPos"))
+            .with_uniform(ShaderSymbol::new(ShaderDataType::Vec2, "uRectSize"))
             .with_output(ShaderSymbol::new(ShaderDataType::Vec2, "uv"))
             .with_code(
                 r#"
                     void main() {
-                        // if aPos.x is 0, that should map to -1.0
-                        // if aPos.x is uResolution that should map to 1.0
-
-                        // if aPos.y is 0, that should map to 1.0
-                        // if aPos.y is uResolution that should map to -1.0
-
+                        vec2 pixel_pos = uRectPos + aPos.xy * uRectSize;
                         gl_Position = vec4(
-                            aPos.x * (2.0/uResolution.x) - 1.0,
-                            aPos.y * (-2.0/uResolution.y) + 1.0,
+                            pixel_pos.x * (2.0/uResolution.x) - 1.0,
+                            pixel_pos.y * (-2.0/uResolution.y) + 1.0,
                             aPos.z,
                             1.0
                         );
@@ -1302,6 +1301,11 @@ fn init_state() -> State {
         ).expect("Could not build screen quad shader");
     let screen_quad_shader = Rc::new(screen_quad_shader);
 
+    let screen_quad_mesh = StaticMesh::create(
+        screen_quad_shader.clone(),
+        Rc::new(Mesh::create(&screen_quad_mesh(0, 0, 1, 1)).unwrap()),
+    ).expect("Can't create screen quad mesh");
+
     let mut debug_state = DebugState::default();
     debug_state.sphere_radius = 1.0;
     debug_state.sdf_box_size = Vec3::new(0.5, 0.7, 1.0);
@@ -1310,6 +1314,8 @@ fn init_state() -> State {
     log_opengl_errors!();
 
     let frame_captures = Vec::new();
+
+    let default_texture = gen_cpu_texture(128, 128, |x, y| [x as u8, y as u8, 0xff, 0xaa]);
 
     println!("State initialized!");
     let mut state = State {
@@ -1338,8 +1344,10 @@ fn init_state() -> State {
         frame_captures,
         texture_shader,
         screen_quad_shader,
+        screen_quad_mesh,
         debug_state,
         shimlang_texture_handle_to_gl_texture: HashMap::new(),
+        default_texture,
     };
 
     state
@@ -1565,37 +1573,30 @@ fn frame(state: &mut State, delta: f32) {
         gl::Disable(gl::DEPTH_TEST);
         draw_frame_captures(&state.frame_captures, &mut ctx);
 
-        let screen_quad_shader = state.screen_quad_shader.clone();
-
         gl::Enable(gl::BLEND);
         gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
         for item in state.script_bridge.draw_list.iter() {
             match item {
                 DrawListItem::Rect(rect) => {
-                    let mut my_box = screen_quad_mesh(
-                        rect.x.round() as u32,
-                        rect.y.round() as u32,
-                        rect.w.round() as u32,
-                        rect.h.round() as u32,
-                    );
-                    let mut box_static_mesh = StaticMesh::create(
-                        screen_quad_shader.clone(),
-                        Rc::new(Mesh::create(&my_box).unwrap()),
-                    ).expect("Can't create the test mesh");
-                    box_static_mesh.uniform_override.insert(
-                        "uResolution".to_string(), ShaderValue::Vec2(Vec2::new(display_w as f32, display_h as f32))
-                    );
-
                     let texture: u32 = match &rect.texture {
                         Some(id) => {
                             *state.shimlang_texture_handle_to_gl_texture.get(&id.texture_id).unwrap() as u32
                         },
                         None => {
-                            gen_cpu_texture(128, 128, |x, y| [x as u8, y as u8, 0xff, 0xaa])
+                            state.default_texture
                         }
                     };
-                    box_static_mesh.uniform_override.insert("texture1".to_string(), ShaderValue::Sampler2D(texture));
-                    box_static_mesh.draw(&mut ctx);
+                    state.screen_quad_mesh.uniform_override.insert(
+                        "uResolution".to_string(), ShaderValue::Vec2(Vec2::new(display_w as f32, display_h as f32))
+                    );
+                    state.screen_quad_mesh.uniform_override.insert(
+                        "uRectPos".to_string(), ShaderValue::Vec2(Vec2::new(rect.x.round(), rect.y.round()))
+                    );
+                    state.screen_quad_mesh.uniform_override.insert(
+                        "uRectSize".to_string(), ShaderValue::Vec2(Vec2::new(rect.w.round(), rect.h.round()))
+                    );
+                    state.screen_quad_mesh.uniform_override.insert("texture1".to_string(), ShaderValue::Sampler2D(texture));
+                    state.screen_quad_mesh.draw(&mut ctx);
                 }
                 DrawListItem::CreateTexture(shimlang_texture_handle, w, h, rgba_bytes) => {
                     let gl_texture_id = gen_cpu_texture(
