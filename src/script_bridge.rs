@@ -41,6 +41,7 @@ pub struct DrawRect {
     pub w: f32,
     pub h: f32,
     pub texture: Option<TextureHandle>,
+    pub modulate: [u8; 4],
 }
 
 pub enum DrawListItem {
@@ -65,8 +66,8 @@ impl DrawList {
         }
     }
 
-    fn push_rect(&mut self, x: f32, y: f32, w: f32, h: f32, texture: Option<TextureHandle>) {
-        self.items.push(DrawListItem::Rect(DrawRect { x, y, w, h, texture }));
+    fn push_rect(&mut self, x: f32, y: f32, w: f32, h: f32, texture: Option<TextureHandle>, modulate: [u8; 4]) {
+        self.items.push(DrawListItem::Rect(DrawRect { x, y, w, h, texture, modulate }));
     }
 
     fn push_texture(&mut self, w: u32, h: u32, data: Vec<u8>) -> TextureHandle {
@@ -154,9 +155,21 @@ fn shim_draw_rect(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shi
         }
         None => None,
     };
+    fn optional_channel(val: Option<ShimValue>) -> Result<u8, String> {
+        match val {
+            None => Ok(255),
+            Some(ShimValue::Integer(i)) => Ok(i.clamp(0, 255) as u8),
+            Some(ShimValue::Float(f)) => Ok(if f <= 0.0 { 0 } else if f >= 1.0 { 255 } else { (f * 255.0).round() as u8 }),
+            Some(_) => Err("Color channel must be a number".to_string()),
+        }
+    }
+    let r = optional_channel(unpacker.optional(b"r"))?;
+    let g = optional_channel(unpacker.optional(b"g"))?;
+    let b = optional_channel(unpacker.optional(b"b"))?;
+    let a = optional_channel(unpacker.optional(b"a"))?;
     unpacker.end()?;
 
-    DRAW_LIST.with(|list| list.borrow_mut().push_rect(x, y, w, h, texture));
+    DRAW_LIST.with(|list| list.borrow_mut().push_rect(x, y, w, h, texture, [r, g, b, a]));
     Ok(ShimValue::None)
 }
 

@@ -1291,10 +1291,11 @@ fn init_state() -> State {
             .with_input(ShaderSymbol::new(ShaderDataType::Vec2, "uv"))
             .with_output(ShaderSymbol::new(ShaderDataType::Vec4, "FragColor"))
             .with_uniform(ShaderSymbol::new(ShaderDataType::Sampler2D, "texture1"))
+            .with_uniform(ShaderSymbol::new(ShaderDataType::Vec4, "uModulate"))
             .with_code(
                 r#"
                     void main() {
-                        FragColor = texture(texture1, uv);
+                        FragColor = texture(texture1, uv) * uModulate;
                     }
                 "#.to_string()
             ).build_fragment_shader().unwrap()
@@ -1315,7 +1316,7 @@ fn init_state() -> State {
 
     let frame_captures = Vec::new();
 
-    let default_texture = gen_cpu_texture(128, 128, |x, y| [x as u8, y as u8, 0xff, 0xaa]);
+    let default_texture = gen_cpu_texture(128, 128, |x, y| [0xff, 0xff, 0xff, 0xff]);
 
     println!("State initialized!");
     let mut state = State {
@@ -1596,6 +1597,10 @@ fn frame(state: &mut State, delta: f32) {
                         "uRectSize".to_string(), ShaderValue::Vec2(Vec2::new(rect.w.round(), rect.h.round()))
                     );
                     state.screen_quad_mesh.uniform_override.insert("texture1".to_string(), ShaderValue::Sampler2D(texture));
+                    let [mr, mg, mb, ma] = rect.modulate;
+                    state.screen_quad_mesh.uniform_override.insert(
+                        "uModulate".to_string(), ShaderValue::Vec4(Vec4::new(mr as f32 / 255.0, mg as f32 / 255.0, mb as f32 / 255.0, ma as f32 / 255.0))
+                    );
                     state.screen_quad_mesh.draw(&mut ctx);
                 }
                 DrawListItem::CreateTexture(shimlang_texture_handle, w, h, rgba_bytes) => {
