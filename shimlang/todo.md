@@ -17,6 +17,7 @@
   - replace
 - `*args`, and `**kwargs`
 - Numeric literals with underscores
+- Hex literals (for colors)
 - Type annotations
 - Runtime type checking
 - Static type checking

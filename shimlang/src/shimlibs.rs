@@ -1098,7 +1098,7 @@ impl ShimList {
     }
 
     pub fn raw_data<'a>(&self, mem: &'a MMU) -> &'a [u64] {
-        &mem.mem[usize::from(self.data)..usize::from(self.len)]
+        &mem.mem[usize::from(self.data)..usize::from(self.data + self.len)]
     }
 
     pub fn get(&self, mem: &MMU, idx: isize) -> Result<ShimValue, String> {

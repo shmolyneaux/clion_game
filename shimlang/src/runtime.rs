@@ -578,7 +578,8 @@ impl<'a> ArgUnpacker<'a> {
         self.optional(name).ok_or_else(|| format!("Missing required argument: '{}'", debug_u8s(name)))
     }
 
-    pub fn required_list(&mut self, interpreter: &mut Interpreter, name: &[u8]) -> Result<&mut ShimList, String> {
+    // 'static is a lie, but this is short-lived and should not be a problem
+    pub fn required_list(&mut self, interpreter: &mut Interpreter, name: &[u8]) -> Result<&'static mut ShimList, String> {
         match self.optional(name).ok_or_else(|| format!("Missing required argument: '{}'", debug_u8s(name)))? {
             ShimValue::List(position) => {
                 unsafe {
@@ -586,7 +587,7 @@ impl<'a> ArgUnpacker<'a> {
                 }
             },
             _ => {
-                Err(format!("Not a list"))
+                Err(format!("Argument {} is not a list", debug_u8s(name)))
             }
         }
     }

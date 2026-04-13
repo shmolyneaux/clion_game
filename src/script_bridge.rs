@@ -1,8 +1,9 @@
 use std::cell::RefCell;
 use std::mem;
 use std::ffi::CString;
+use std::any::Any;
 
-use shimlang::{Environment, Interpreter, ShimValue, debug_u8s};
+use shimlang::{Environment, Interpreter, ShimNative, ShimValue, debug_u8s};
 use shimlang::runtime::{ArgUnpacker, NativeFn, CallResult};
 use shimlang::ArgBundle;
 
@@ -17,16 +18,63 @@ use std::fs;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::SystemTime;
 
+// TODO: Probably shouldn't be cloned?
+#[derive(Debug, Clone)]
+pub struct TextureHandle {
+    pub texture_id: u32,
+}
+
+impl ShimNative for TextureHandle {
+    fn as_any_mut(&mut self) -> &mut dyn Any where Self: Sized {
+        self
+    }
+    
+    fn gc_vals(&self) -> Vec<ShimValue> {
+        Vec::new()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct DrawRect {
     pub x: f32,
     pub y: f32,
     pub w: f32,
     pub h: f32,
+    pub texture: Option<TextureHandle>,
+}
+
+pub enum DrawListItem {
+    Rect(DrawRect),
+    CreateTexture(u32, u32, u32, Vec<u8>),
 }
 
 thread_local! {
-    static DRAW_LIST: RefCell<Vec<DrawRect>> = RefCell::new(Vec::new());
+    static DRAW_LIST: RefCell<DrawList> = RefCell::new(DrawList::new());
+}
+
+pub struct DrawList {
+    next_texture_handle: u32,
+    items: Vec<DrawListItem>,
+}
+
+impl DrawList {
+    fn new() -> Self {
+        Self {
+            next_texture_handle: 1,
+            items: Vec::new(),
+        }
+    }
+
+    fn push_rect(&mut self, x: f32, y: f32, w: f32, h: f32, texture: Option<TextureHandle>) {
+        self.items.push(DrawListItem::Rect(DrawRect { x, y, w, h, texture }));
+    }
+
+    fn push_texture(&mut self, w: u32, h: u32, data: Vec<u8>) -> TextureHandle {
+        let id = self.next_texture_handle;
+        self.next_texture_handle += 1;
+        self.items.push(DrawListItem::CreateTexture(id, w, h, data));
+        TextureHandle { texture_id: id }
+    }
 }
 
 /// Messages sent from the Engine (Main Thread) to the Script Thread
@@ -38,7 +86,7 @@ pub enum ScriptRequest {
 /// Messages sent from the Script Thread to the Engine
 #[cfg(not(target_arch = "wasm32"))]
 pub enum ScriptResponse {
-    LoopComplete(Interpreter, Environment, ShimValue, Vec<DrawRect>),
+    LoopComplete(Interpreter, Environment, ShimValue, Vec<DrawListItem>),
     Error(Interpreter, Environment, ShimValue, String),
 }
 
@@ -51,7 +99,7 @@ enum BridgeState {
 pub struct ScriptBridge {
     state: BridgeState,
     pub interpreter_errors: Vec<String>,
-    pub draw_list: Vec<DrawRect>,
+    pub draw_list: Vec<DrawListItem>,
     script_path: String,
     #[cfg(not(target_arch = "wasm32"))]
     mtime: SystemTime,
@@ -94,45 +142,80 @@ fn shim_ig_text(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimV
     Ok(ShimValue::None)
 }
 
-fn shim_draw_rect(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+fn shim_draw_rect(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let x = unpacker.required_number(b"x")?;
     let y = unpacker.required_number(b"y")?;
     let w = unpacker.required_number(b"w")?;
     let h = unpacker.required_number(b"h")?;
+    let texture: Option<TextureHandle> = match unpacker.optional(b"texture") {
+        Some(val) => {
+            Some(val.as_native::<TextureHandle>(interpreter)?.clone())
+        }
+        None => None,
+    };
     unpacker.end()?;
-    DRAW_LIST.with(|list| list.borrow_mut().push(DrawRect { x, y, w, h }));
+
+    DRAW_LIST.with(|list| list.borrow_mut().push_rect(x, y, w, h, texture));
     Ok(ShimValue::None)
 }
 
 fn shim_create_texture(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
-    let data = unpacker.required_list(b"rgba_bytes")?;
     let w = unpacker.required_int(b"w")?;
     let h = unpacker.required_int(b"h")?;
+    let data = unpacker.required_list(interpreter, b"rgba_bytes")?;
     unpacker.end()?;
 
+    let w: u32 = if w < 0 {
+        return Err(format!("Int w {} must be non-negative", w));
+    } else {
+        w as u32
+    };
+
+    let h: u32 = if h < 0 {
+        return Err(format!("Int h {} must be non-negative", h));
+    } else {
+        h as u32
+    };
+
     if data.len() != (w*h*4) as usize {
-        return Err(format!("Expected a w*h*4={} length array but got array length {}", w*h*4, raw_data.len()));
+        return Err(format!("Expected a w*h*4={} length array but got array length {}", w*h*4, data.len()));
     }
 
     // TODO: The ShimList should provide an iterable the yields ShimValues
     let shimvalues = data.raw_data(&interpreter.mem);
 
-    let rgba_bytes: Vec<u8> = Vec::with_capacity((w*h*4) as usize);
+    let mut rgba_bytes: Vec<u8> = Vec::with_capacity((w*h*4) as usize);
     for val in shimvalues.iter() {
-        match unsafe { ShimValue::from_u64(val) } {
-            ShimValue::Integer(i) => {
+        rgba_bytes.push(
+            match unsafe { ShimValue::from_u64(*val) } {
+                ShimValue::Integer(i) => {
+                    if i <= 0 {
+                        0
+                    } else if i >= 255 {
+                        255
+                    } else {
+                        i as u8
+                    }
+                }
+                ShimValue::Float(f) => {
+                    if f <= 0.0 {
+                        0
+                    } else if f >= 1.0 {
+                        255
+                    } else {
+                        (f * 255.0).round() as u8
+                    }
+                }
+                _ => return Err(format!("Non-numeric passed to create_texture {}", val.to_string()))
             }
-            ShimValue::Float(f) => {
-            }
-            _ => return Err(format!("Non-numeric passed to create_texture {}", val.to_string(
-        }
+        );
     }
 
-    // TODO: create the texture and return a handle to it
+    let handle = DRAW_LIST.with(|list| list.borrow_mut().push_texture(w, h, rgba_bytes));
 
-    Ok(ShimValue::None)
+    Ok(interpreter.mem.alloc_native(handle))
 }
 
 fn load_script(bytes: &[u8]) -> Result<(Interpreter, Environment, ShimValue), String> {
@@ -146,6 +229,7 @@ fn load_script(bytes: &[u8]) -> Result<(Interpreter, Environment, ShimValue), St
         (b"ig_end", shim_ig_end),
         (b"ig_text", shim_ig_text),
         (b"draw_rect", shim_draw_rect),
+        (b"create_texture", shim_create_texture),
     ];
     for (name, func) in builtins {
         let position = interpreter.mem.alloc_and_set(*func, &format!("builtin imgui::{}", std::str::from_utf8(name).unwrap()));
@@ -339,7 +423,7 @@ fn script_thread_logic(rx: Receiver<ScriptRequest>, tx: Sender<ScriptResponse>) 
                     tx.send(
                         match call_loop_fn(&mut interpreter, &mut env, loop_fn) {
                             Ok(()) => {
-                                let draw_list = DRAW_LIST.with(|l| l.borrow_mut().drain(..).collect());
+                                let draw_list = DRAW_LIST.with(|l| l.borrow_mut().items.drain(..).collect());
                                 ScriptResponse::LoopComplete(interpreter, env, loop_fn, draw_list)
                             }
                             Err(msg) => ScriptResponse::Error(interpreter, env, loop_fn, msg),
