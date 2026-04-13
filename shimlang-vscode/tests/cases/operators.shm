@@ -59,3 +59,13 @@ let r = 1..10;
 
 obj.field;
 // ^ keyword.operator.accessor.shim
+
+// If expressions combined with operators
+y += if foo { 1 } else { 0 } + if bar { -1 } else { 0 };
+//^^ keyword.operator.assignment.compound.shim
+//   ^^ keyword.control.shim
+//                ^^^^ keyword.control.shim
+//                           ^ keyword.operator.arithmetic.shim
+//                             ^^ keyword.control.shim
+//                                      ^ keyword.operator.arithmetic.shim
+//                                           ^^^^ keyword.control.shim

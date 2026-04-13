@@ -241,6 +241,11 @@ pub fn parse_primary(tokens: &mut TokenStream) -> Result<ExprNode, String> {
             // TODO: fix span here
             Expression::Primary(Primary::List(items))
         }
+        Token::If => {
+            tokens.unadvance()?;
+            let (cond, _cond_span) = parse_conditional(tokens)?;
+            Expression::If(Box::new(cond.conditional), cond.if_body, cond.else_body)
+        }
         Token::Fn => {
             tokens.unadvance()?;
             let f = parse_function(tokens)?;
@@ -691,16 +696,7 @@ pub fn parse_conditional(tokens: &mut TokenStream) -> Result<(Conditional, Span)
 }
 
 pub fn parse_expression(tokens: &mut TokenStream) -> Result<ExprNode, String> {
-    match *tokens.peek()? {
-        Token::If => {
-            let (cond, cond_span) = parse_conditional(tokens)?;
-            Ok(ExprNode {
-                data: Expression::If(Box::new(cond.conditional), cond.if_body, cond.else_body),
-                span: cond_span,
-            })
-        },
-        _ => parse_logical_or(tokens),
-    }
+    parse_logical_or(tokens)
 }
 
 pub fn parse_ast(tokens: &mut TokenStream) -> Result<Ast, String> {
