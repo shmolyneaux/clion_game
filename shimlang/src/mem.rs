@@ -1,11 +1,11 @@
 use std::ops::{Add, Sub, AddAssign, SubAssign};
 use std::ops::Range;
+use std::any::TypeId;
+use std::collections::HashMap;
 use shm_tracy::*;
 use shm_tracy::zone_scoped;
 use crate::runtime::*;
 use crate::shimlibs::*;
-#[cfg(feature = "gc_debug")]
-use std::collections::HashMap;
 
 #[cfg(feature = "gc_debug")]
 use crate::lex::debug_u8s;
@@ -176,6 +176,21 @@ impl FreeBlock {
     }
 }
 
+/// Type registration entry stored in the MMU for each unique ShimNative type.
+/// Allows reconstructing a trait object from raw memory without a Box.
+pub struct NativeTypeInfo {
+    pub type_id: TypeId,
+    /// The vtable pointer extracted from a `&dyn ShimNative` fat pointer for this type.
+    pub(crate) vtable: *const (),
+    /// Size of the native value in 8-byte words (rounded up).
+    pub word_count: usize,
+}
+
+// SAFETY: The vtable pointer is valid for the lifetime of the program and is
+// not mutated after insertion.
+unsafe impl Send for NativeTypeInfo {}
+unsafe impl Sync for NativeTypeInfo {}
+
 #[cfg_attr(feature = "facet", derive(Facet))]
 pub struct MMU {
     // This is the raw memory managed by the MMU
@@ -193,6 +208,12 @@ pub struct MMU {
     // We don't store metadata about any allocations
     // It's up to the caller to know how much memory
     // should be freed.
+
+    /// Maps Rust TypeId to autoincrementing index (stable across uses within a session).
+    pub native_type_ids: HashMap<TypeId, u32>,
+    /// Maps autoincrementing index back to type info (vtable + word_count).
+    /// The index into this Vec is the autoincrementing id stored in ShimValue::Native.
+    pub native_type_registry: Vec<NativeTypeInfo>,
 }
 
 macro_rules! alloc {
@@ -229,6 +250,8 @@ impl MMU {
         Self {
             mem: mem,
             free_list: free_list,
+            native_type_ids: HashMap::new(),
+            native_type_registry: Vec::new(),
         }
     }
 
@@ -454,14 +477,32 @@ impl MMU {
     }
 
     pub fn alloc_native<T: ShimNative>(&mut self, val: T) -> ShimValue {
-        let word_count: u24 = (std::mem::size_of::<Box<dyn ShimNative>>() as u32).div_ceil(8).into();
+        let type_id = TypeId::of::<T>();
+        let type_idx = match self.native_type_ids.get(&type_id) {
+            Some(&idx) => idx,
+            None => {
+                let idx = self.native_type_registry.len() as u32;
+                // Extract the vtable pointer from a fat reference before moving val.
+                let vtable = unsafe {
+                    let reference: &dyn ShimNative = &val;
+                    let fat_ptr: (*const (), *const ()) = std::mem::transmute(reference);
+                    fat_ptr.1
+                };
+                let word_count = std::mem::size_of::<T>().div_ceil(8);
+                self.native_type_ids.insert(type_id, idx);
+                self.native_type_registry.push(NativeTypeInfo { type_id, vtable, word_count });
+                idx
+            }
+        };
+
+        // Allocate T directly in MMU memory (no Box).
+        let word_count: u24 = (std::mem::size_of::<T>() as u32).div_ceil(8).into();
         let position = alloc!(self, word_count, "Native");
         unsafe {
-            let ptr: *mut Box<dyn ShimNative> =
-                std::mem::transmute(&mut self.mem[usize::from(position)]);
-            ptr.write(Box::new(val));
+            let ptr: *mut T = std::mem::transmute(&mut self.mem[usize::from(position)]);
+            ptr.write(val);
         }
-        ShimValue::Native(position)
+        ShimValue::Native(u24::from(type_idx), position)
     }
 
     pub fn alloc_bound_method(&mut self, obj: &ShimValue, func_pos: u24) -> ShimValue {
@@ -865,21 +906,26 @@ impl<'a> GC<'a> {
                         }
                         mark_bit!(self.mask, pos, MemDescriptor::other(pos, pos+1, "NativeFn"));
                     },
-                    ShimValue::Native(pos) => {
+                    ShimValue::Native(type_idx, pos) => {
                         let pos: usize = pos.into();
                         if self.mask.is_set(pos) {
                             continue;
                         }
-                        let native_word_count = std::mem::size_of::<Box<dyn ShimNative>>().div_ceil(8);
+                        let type_idx: usize = type_idx.into();
+                        let info = &self.mem.native_type_registry[type_idx];
+                        let native_word_count = info.word_count;
                         #[cfg(feature = "gc_debug")]
                         let desc = MemDescriptor::other(pos, pos + native_word_count, "Native");
                         for idx in pos..(pos + native_word_count) {
                             mark_bit!(self.mask, idx, desc);
                         }
 
-                        let ptr: &Box<dyn ShimNative> = std::mem::transmute(&self.mem.mem[pos]);
-
-                        vals.extend(ptr.gc_vals());
+                        // Reconstruct a fat pointer to call gc_vals() without a Box.
+                        let vtable = info.vtable;
+                        let data_ptr = &self.mem.mem[pos] as *const u64 as *const ();
+                        let fat_ptr: (*const (), *const ()) = (data_ptr, vtable);
+                        let native_ref: &dyn ShimNative = std::mem::transmute(fat_ptr);
+                        vals.extend(native_ref.gc_vals());
                     },
                     ShimValue::BoundMethod(pos) => {
                         let pos: usize = pos.into();
@@ -905,10 +951,10 @@ impl<'a> GC<'a> {
                         // Pointer to the fn
                         mark_bit!(self.mask, pos+1, MemDescriptor::other(pos, pos+2, "BoundNativeMethod"));
 
-                        // Any values that the obj holds
-                        let ptr: &Box<dyn ShimNative> = std::mem::transmute(&self.mem.mem[pos]);
-                        vals.extend(ptr.gc_vals());
-                        vals.push(ShimValue::Native(pos.into()));
+                        // word[pos] is the ShimValue object (e.g. ShimValue::Native); push it to
+                        // be processed so its memory is also marked and gc_vals() called on it.
+                        let obj = ShimValue::from_u64(self.mem.mem[pos]);
+                        vals.push(obj);
                     },
                     ShimValue::Environment(pos) => {
                         let og_pos = pos;
