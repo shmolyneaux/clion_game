@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::mem;
 use std::ffi::CString;
 use shimlang::{Environment, Interpreter, ShimNative, ShimValue, debug_u8s};
@@ -43,9 +42,18 @@ pub enum DrawListItem {
     CreateTexture(u32, u32, u32, Vec<u8>),
 }
 
-thread_local! {
-    static DRAW_LIST: RefCell<DrawList> = RefCell::new(DrawList::new());
-    static KEY_STATE: RefCell<(Vec<u8>, Vec<u8>)> = RefCell::new((Vec::new(), Vec::new()));
+pub struct KeyState {
+    pub keys: Vec<u8>,
+    pub last_keys: Vec<u8>,
+}
+
+impl Default for KeyState {
+    fn default() -> Self {
+        Self {
+            keys: Vec::new(),
+            last_keys: Vec::new(),
+        }
+    }
 }
 
 fn scancode_from_name(name: &[u8]) -> Option<usize> {
@@ -178,20 +186,17 @@ struct KeyValue {
 }
 
 impl ShimNative for KeyValue {
-    fn get_attr(&self, _self_as_val: &ShimValue, _interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
-        KEY_STATE.with(|ks| {
-            let ks = ks.borrow();
-            let (keys, last_keys) = &*ks;
-            let cur = keys.get(self.scancode).copied().unwrap_or(0);
-            let last = last_keys.get(self.scancode).copied().unwrap_or(0);
-            match ident {
-                b"pressed" => Ok(ShimValue::Bool(cur == 1)),
-                b"released" => Ok(ShimValue::Bool(cur == 0)),
-                b"just_pressed" => Ok(ShimValue::Bool(cur == 1 && cur != last)),
-                b"just_released" => Ok(ShimValue::Bool(cur == 0 && cur != last)),
-                _ => Err(format!("KeyValue has pressed/released/just_pressed/just_released, not '{}'", debug_u8s(ident))),
-            }
-        })
+    fn get_attr(&self, _self_as_val: &ShimValue, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
+        let ks = interpreter.fetch_mut::<KeyState>();
+        let cur = ks.keys.get(self.scancode).copied().unwrap_or(0);
+        let last = ks.last_keys.get(self.scancode).copied().unwrap_or(0);
+        match ident {
+            b"pressed" => Ok(ShimValue::Bool(cur == 1)),
+            b"released" => Ok(ShimValue::Bool(cur == 0)),
+            b"just_pressed" => Ok(ShimValue::Bool(cur == 1 && cur != last)),
+            b"just_released" => Ok(ShimValue::Bool(cur == 0 && cur != last)),
+            _ => Err(format!("KeyValue has pressed/released/just_pressed/just_released, not '{}'", debug_u8s(ident))),
+        }
     }
 
     fn gc_vals(&self) -> Vec<ShimValue> {
@@ -202,6 +207,12 @@ impl ShimNative for KeyValue {
 pub struct DrawList {
     next_texture_handle: u32,
     items: Vec<DrawListItem>,
+}
+
+impl Default for DrawList {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DrawList {
@@ -315,7 +326,7 @@ fn shim_draw_rect(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shi
     let a = optional_channel(unpacker.optional(b"a"))?;
     unpacker.end()?;
 
-    DRAW_LIST.with(|list| list.borrow_mut().push_rect(x, y, w, h, texture, [r, g, b, a]));
+    interpreter.fetch_mut::<DrawList>().push_rect(x, y, w, h, texture, [r, g, b, a]);
     Ok(ShimValue::None)
 }
 
@@ -372,7 +383,7 @@ fn shim_create_texture(interpreter: &mut Interpreter, args: &ArgBundle) -> Resul
         );
     }
 
-    let handle = DRAW_LIST.with(|list| list.borrow_mut().push_texture(w, h, rgba_bytes));
+    let handle = interpreter.fetch_mut::<DrawList>().push_texture(w, h, rgba_bytes);
 
     Ok(interpreter.mem.alloc_native(handle))
 }
@@ -547,13 +558,17 @@ impl ScriptBridge {
 
         #[cfg(target_arch = "wasm32")]
         {
-            KEY_STATE.with(|ks| *ks.borrow_mut() = (keys.to_vec(), last_keys.to_vec()));
             if self.interpreter_errors.is_empty() {
                 if let BridgeState::Paused(ref mut interpreter, ref mut env, loop_fn) = self.state {
+                    {
+                        let ks = interpreter.fetch_mut::<KeyState>();
+                        ks.keys = keys.to_vec();
+                        ks.last_keys = last_keys.to_vec();
+                    }
                     if let Err(msg) = call_loop_fn(interpreter, env, loop_fn) {
                         self.interpreter_errors.push(msg);
                     }
-                    self.draw_list = DRAW_LIST.with(|l| l.borrow_mut().drain(..).collect());
+                    self.draw_list = interpreter.fetch_mut::<DrawList>().items.drain(..).collect();
                 }
             }
         }
@@ -583,11 +598,15 @@ fn script_thread_logic(rx: Receiver<ScriptRequest>, tx: Sender<ScriptResponse>) 
         if let Ok(request) = rx.recv() {
             match request {
                 ScriptRequest::ExecuteLoop(mut interpreter, mut env, loop_fn, keys, last_keys) => {
-                    KEY_STATE.with(|ks| *ks.borrow_mut() = (keys, last_keys));
+                    {
+                        let ks = interpreter.fetch_mut::<KeyState>();
+                        ks.keys = keys;
+                        ks.last_keys = last_keys;
+                    }
                     tx.send(
                         match call_loop_fn(&mut interpreter, &mut env, loop_fn) {
                             Ok(()) => {
-                                let draw_list = DRAW_LIST.with(|l| l.borrow_mut().items.drain(..).collect());
+                                let draw_list = interpreter.fetch_mut::<DrawList>().items.drain(..).collect();
                                 ScriptResponse::LoopComplete(interpreter, env, loop_fn, draw_list)
                             }
                             Err(msg) => ScriptResponse::Error(interpreter, env, loop_fn, msg),
