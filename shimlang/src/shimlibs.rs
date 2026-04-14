@@ -1995,6 +1995,20 @@ pub(crate) fn shim_dict_index_get(
     dict.get(interpreter, key)
 }
 
+pub(crate) fn shim_dict_index_get_default(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let binding = unpacker.required(b"obj")?;
+    let dict = binding.dict_mut(interpreter)?;
+    let key = unpacker.required(b"key")?;
+    let default = unpacker.optional(b"key").unwrap_or(ShimValue::None);
+    unpacker.end()?;
+
+    Ok(dict.get(interpreter, key).unwrap_or(default))
+}
+
 pub(crate) fn shim_dict_index_has(
     interpreter: &mut Interpreter,
     args: &ArgBundle,

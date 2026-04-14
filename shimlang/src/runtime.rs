@@ -1039,7 +1039,7 @@ impl ShimValue {
             ShimValue::Dict(_) => {
                 let func = match ident {
                     b"set" => shim_dict_index_set,
-                    b"get" => shim_dict_index_get,
+                    b"get" => shim_dict_index_get_default,
                     b"has" => shim_dict_index_has,
                     b"len" => shim_dict_len,
                     b"pop" => shim_dict_pop,
