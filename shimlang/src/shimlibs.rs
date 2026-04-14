@@ -54,6 +54,42 @@ impl ShimNative for ListIterator {
     }
 }
 
+pub(crate) struct StringIterator {
+    pub(crate) str_val: ShimValue,
+    pub(crate) idx: usize,
+}
+
+impl ShimNative for StringIterator {
+    fn get_attr(&self, self_as_val: &ShimValue, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
+        if ident == b"next" {
+            fn shim_str_iter_next(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+                if args.args.len() != 1 {
+                    return Err(format!("Can't provide positional args to StringIterator.next()"));
+                }
+
+                let itr: &mut StringIterator = args.args[0].as_native(interpreter)?;
+                let b = {
+                    let s = itr.str_val.string(interpreter)?;
+                    if itr.idx >= s.len() {
+                        return Ok(ShimValue::None);
+                    }
+                    s[itr.idx]
+                };
+                itr.idx += 1;
+                Ok(interpreter.mem.alloc_str(&[b]))
+            }
+
+            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_str_iter_next))
+        } else {
+            Err(format!("Can't get_attr {} on {}", debug_u8s(ident), type_name::<Self>()))
+        }
+    }
+
+    fn gc_vals(&self) -> Vec<ShimValue> {
+        vec![self.str_val]
+    }
+}
+
 pub(crate) struct DictKeysIterator {
     pub(crate) dict: ShimValue,
     pub(crate) idx: usize,
@@ -1613,6 +1649,14 @@ pub(crate) fn shim_list_iter(
     Ok(interpreter
         .mem
         .alloc_native(ListIterator { lst: obj, idx: 0 }))
+}
+
+pub(crate) fn shim_str_iter(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let obj = unpacker.required(b"obj")?;
+    unpacker.end()?;
+
+    Ok(interpreter.mem.alloc_native(StringIterator { str_val: obj, idx: 0 }))
 }
 
 pub(crate) fn shim_list_clear(

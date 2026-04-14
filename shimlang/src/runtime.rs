@@ -1011,6 +1011,7 @@ impl ShimValue {
                 let func = match ident {
                     b"len" => shim_str_len,
                     b"split" => shim_str_split,
+                    b"iter" => shim_str_iter,
                     _ => return Err(format!("No ident {:?} on str", debug_u8s(ident))),
                 };
                 Ok(ResolvedAttr::NativeMethod(*self, func))
@@ -1603,7 +1604,26 @@ impl ShimValue {
     }
 
     fn div(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
-        numeric_op!(self / other, interpreter, b"div")
+        match (self, other) {
+            (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Float((*a as f32) / (*b as f32))),
+            (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Float(*a / *b)),
+            (ShimValue::Integer(a), ShimValue::Float(b)) => Ok(ShimValue::Float((*a as f32) / *b)),
+            (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(ShimValue::Float(*a / (*b as f32))),
+            (ShimValue::Struct(..), _) => {
+                if let Some(result) = self.try_struct_override(interpreter, b"div", other) {
+                    result
+                } else {
+                    Err(format!(
+                        "Operation '/' not supported between {} and {}",
+                        self.to_string_mem(&interpreter.mem), other.to_string_mem(&interpreter.mem)
+                    ))
+                }
+            },
+            (a, b) => Err(format!(
+                "Operation '/' not supported between {} and {}",
+                a.to_string_mem(&interpreter.mem), b.to_string_mem(&interpreter.mem)
+            )),
+        }
     }
 
     fn modulus(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
