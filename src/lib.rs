@@ -2,7 +2,7 @@
 
 #[macro_use]
 use gl;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::rc::Rc;
 use gl::types::*;
@@ -309,7 +309,7 @@ pub struct State {
 
     keys: KeyState,
 
-    frame_captures: Vec<GLuint>,
+    frame_captures: VecDeque<GLuint>,
     frame_capture_shader: Rc<ShaderProgram>,
     texture_shader: Rc<ShaderProgram>,
     screen_quad_shader: Rc<ShaderProgram>,
@@ -837,7 +837,7 @@ const fn compile_time_checks() {
     assert!(2 + 2 == 4);
 }
 
-fn draw_frame_captures(frame_captures: &[GLuint], frame_capture_shader: &Rc<ShaderProgram>, ctx: &mut HashMap<String, ShaderValue>) {
+fn draw_frame_captures(frame_captures: &VecDeque<GLuint>, frame_capture_shader: &Rc<ShaderProgram>, ctx: &mut HashMap<String, ShaderValue>) {
     for (idx, frame_texture) in frame_captures.iter().enumerate() {
         if (idx as isize) < frame_captures.len() as isize - 10 {
             continue;
@@ -1302,7 +1302,7 @@ fn init_state() -> State {
     let default_shader_program = create_default_shader();
     log_opengl_errors!();
 
-    let frame_captures = Vec::new();
+    let frame_captures = VecDeque::new();
 
     let frame_capture_shader = ShaderProgram::create(
         ShaderBuilder::new()
@@ -1587,16 +1587,15 @@ fn frame(state: &mut State, delta: f32) {
         {
             let _zone = zone_scoped!("capture frame");
             const MAX_FRAME_CAPTURES: usize = 1000;
-            if state.frame_captures.len() >= MAX_FRAME_CAPTURES {
-                let texture = state.frame_captures.remove(0);
+            let texture = if state.frame_captures.len() >= MAX_FRAME_CAPTURES {
+                let texture = state.frame_captures.pop_front().unwrap();
                 capture_frame_texture_reuse(display_w, display_h, texture);
-                state.test_mesh.uniform_override.insert("texture1".to_string(), gpu::ShaderValue::Sampler2D(texture));
-                state.frame_captures.push(texture);
+                texture
             } else {
-                let texture: GLuint = capture_frame_texture(display_w, display_h);
-                state.test_mesh.uniform_override.insert("texture1".to_string(), gpu::ShaderValue::Sampler2D(texture));
-                state.frame_captures.push(texture);
-            }
+                capture_frame_texture(display_w, display_h)
+            };
+            state.test_mesh.uniform_override.insert("texture1".to_string(), gpu::ShaderValue::Sampler2D(texture));
+            state.frame_captures.push_back(texture);
         }
 
         gl::Disable(gl::DEPTH_TEST);
