@@ -2,7 +2,7 @@
 
 #[macro_use]
 use gl;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::rc::Rc;
 use gl::types::*;
@@ -309,8 +309,10 @@ pub struct State {
 
     keys: KeyState,
 
-    // TODO: Keep at less than 1000
-    frame_captures: Vec<GLuint>,
+    frame_captures: VecDeque<GLuint>,
+    frame_capture_shader: Rc<ShaderProgram>,
+    frame_capture_mesh: StaticMesh,
+    frame_capture_fbo: GLuint,
     texture_shader: Rc<ShaderProgram>,
     screen_quad_shader: Rc<ShaderProgram>,
     screen_quad_mesh: StaticMesh,
@@ -837,37 +839,7 @@ const fn compile_time_checks() {
     assert!(2 + 2 == 4);
 }
 
-fn draw_frame_captures(frame_captures: &[GLuint], ctx: &mut HashMap<String, ShaderValue>) {
-    let texture_shader = ShaderProgram::create(
-        ShaderBuilder::new()
-            .with_input(ShaderSymbol::new(ShaderDataType::Vec3, "aPos"))
-            .with_input(ShaderSymbol::new(ShaderDataType::Vec2, "aUV"))
-            .with_output(ShaderSymbol::new(ShaderDataType::Vec2, "uv"))
-            .with_uniform(ShaderSymbol::new(ShaderDataType::Float, "x"))
-            .with_uniform(ShaderSymbol::new(ShaderDataType::Float, "y"))
-            .with_uniform(ShaderSymbol::new(ShaderDataType::Float, "w"))
-            .with_uniform(ShaderSymbol::new(ShaderDataType::Float, "h"))
-            .with_code(
-                r#"
-                    void main() {
-                        gl_Position = vec4(aPos.x*w, aPos.y*h, aPos.z, 1.0) + vec4(x, y, 0.0, 0.0);
-                        uv = aUV;
-                    }
-                "#.to_string()
-            ).build_vertex_shader().unwrap(),
-        ShaderBuilder::new()
-            .with_input(ShaderSymbol::new(ShaderDataType::Vec2, "uv"))
-            .with_output(ShaderSymbol::new(ShaderDataType::Vec4, "FragColor"))
-            .with_uniform(ShaderSymbol::new(ShaderDataType::Sampler2D, "texture1"))
-            .with_code(
-                r#"
-                    void main() {
-                        FragColor = texture(texture1, uv);
-                    }
-                "#.to_string()
-            ).build_fragment_shader().unwrap()
-        ).expect("Could not build texture shader");
-    let texture_shader = Rc::new(texture_shader);
+fn draw_frame_captures(frame_captures: &VecDeque<GLuint>, frame_capture_mesh: &mut StaticMesh, ctx: &mut HashMap<String, ShaderValue>) {
     for (idx, frame_texture) in frame_captures.iter().enumerate() {
         if (idx as isize) < frame_captures.len() as isize - 10 {
             continue;
@@ -875,32 +847,31 @@ fn draw_frame_captures(frame_captures: &[GLuint], ctx: &mut HashMap<String, Shad
         let local_idx = (idx + 10 - frame_captures.len()) as f32;
         let pos = local_idx / 5.0f32 - 0.9f32;
 
-        let screen_capture_mesh = quad_mesh();
-        let mut screen_capture_static_mesh = StaticMesh::create(
-            texture_shader.clone(),
-            Rc::new(Mesh::create(&screen_capture_mesh).unwrap()),
-        ).expect("Can't create the frame mesh");
-        screen_capture_static_mesh.uniform_override.insert("texture1".to_string(), ShaderValue::Sampler2D(*frame_texture));
-        screen_capture_static_mesh.uniform_override.insert("x".to_string(), ShaderValue::Float(pos));
-        screen_capture_static_mesh.uniform_override.insert("y".to_string(), ShaderValue::Float(0.1));
-        screen_capture_static_mesh.uniform_override.insert("w".to_string(), ShaderValue::Float(0.1));
-        screen_capture_static_mesh.uniform_override.insert("h".to_string(), ShaderValue::Float(0.1));
-        screen_capture_static_mesh.draw(ctx);
+        frame_capture_mesh.uniform_override.insert("texture1".to_string(), ShaderValue::Sampler2D(*frame_texture));
+        frame_capture_mesh.uniform_override.insert("x".to_string(), ShaderValue::Float(pos));
+        frame_capture_mesh.uniform_override.insert("y".to_string(), ShaderValue::Float(0.1));
+        frame_capture_mesh.uniform_override.insert("w".to_string(), ShaderValue::Float(0.1));
+        frame_capture_mesh.uniform_override.insert("h".to_string(), ShaderValue::Float(0.1));
+        frame_capture_mesh.draw(ctx);
     }
 }
 
-fn capture_frame_texture(resolution_x: i32, resolution_y: i32) -> u32 {
-    let mut fbo: GLuint = 0;
-    let mut texture: GLuint = 0;
+fn capture_frame_texture(resolution_x: i32, resolution_y: i32, fbo: GLuint, existing_texture: Option<GLuint>) -> u32 {
+    let texture = match existing_texture {
+        Some(t) => t,
+        None => {
+            let mut texture: GLuint = 0;
+            unsafe {
+                gl::GenTextures(1, &mut texture as *mut u32);
+                gl::BindTexture(gl::TEXTURE_2D, texture);
+                gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as i32);
+                gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as i32);
+                gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA as i32, 128, 128, 0, gl::RGBA, gl::UNSIGNED_BYTE, std::ptr::null_mut());
+            }
+            texture
+        }
+    };
     unsafe {
-        gl::GenTextures(1, &mut texture as *mut u32);
-        gl::GenFramebuffers(1, &mut fbo as *mut u32);
-
-        gl::BindTexture(gl::TEXTURE_2D, texture);
-        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as i32);
-        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as i32);
-        gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA as i32, 128, 128, 0, gl::RGBA, gl::UNSIGNED_BYTE, std::ptr::null_mut());
-
         gl::BindFramebuffer(gl::FRAMEBUFFER, fbo);
         gl::FramebufferTexture2D(gl::FRAMEBUFFER, gl::COLOR_ATTACHMENT0, gl::TEXTURE_2D, texture, 0);
 
@@ -1314,7 +1285,48 @@ fn init_state() -> State {
     let default_shader_program = create_default_shader();
     log_opengl_errors!();
 
-    let frame_captures = Vec::new();
+    let frame_captures = VecDeque::new();
+
+    let frame_capture_shader = ShaderProgram::create(
+        ShaderBuilder::new()
+            .with_input(ShaderSymbol::new(ShaderDataType::Vec3, "aPos"))
+            .with_input(ShaderSymbol::new(ShaderDataType::Vec2, "aUV"))
+            .with_output(ShaderSymbol::new(ShaderDataType::Vec2, "uv"))
+            .with_uniform(ShaderSymbol::new(ShaderDataType::Float, "x"))
+            .with_uniform(ShaderSymbol::new(ShaderDataType::Float, "y"))
+            .with_uniform(ShaderSymbol::new(ShaderDataType::Float, "w"))
+            .with_uniform(ShaderSymbol::new(ShaderDataType::Float, "h"))
+            .with_code(
+                r#"
+                    void main() {
+                        gl_Position = vec4(aPos.x*w, aPos.y*h, aPos.z, 1.0) + vec4(x, y, 0.0, 0.0);
+                        uv = aUV;
+                    }
+                "#.to_string()
+            ).build_vertex_shader().unwrap(),
+        ShaderBuilder::new()
+            .with_input(ShaderSymbol::new(ShaderDataType::Vec2, "uv"))
+            .with_output(ShaderSymbol::new(ShaderDataType::Vec4, "FragColor"))
+            .with_uniform(ShaderSymbol::new(ShaderDataType::Sampler2D, "texture1"))
+            .with_code(
+                r#"
+                    void main() {
+                        FragColor = texture(texture1, uv);
+                    }
+                "#.to_string()
+            ).build_fragment_shader().unwrap()
+        ).expect("Could not build frame capture shader");
+    let frame_capture_shader = Rc::new(frame_capture_shader);
+
+    let frame_capture_mesh = StaticMesh::create(
+        frame_capture_shader.clone(),
+        Rc::new(Mesh::create(&quad_mesh()).unwrap()),
+    ).expect("Can't create the frame capture mesh");
+
+    let mut frame_capture_fbo: GLuint = 0;
+    unsafe {
+        gl::GenFramebuffers(1, &mut frame_capture_fbo as *mut u32);
+    }
 
     let default_texture = gen_cpu_texture(128, 128, |x, y| [0xff, 0xff, 0xff, 0xff]);
 
@@ -1343,6 +1355,9 @@ fn init_state() -> State {
         keys,
         meshes,
         frame_captures,
+        frame_capture_shader,
+        frame_capture_mesh,
+        frame_capture_fbo,
         texture_shader,
         screen_quad_shader,
         screen_quad_mesh,
@@ -1566,13 +1581,19 @@ fn frame(state: &mut State, delta: f32) {
 
         {
             let _zone = zone_scoped!("capture frame");
-            let texture: GLuint = capture_frame_texture(display_w, display_h);
+            const MAX_FRAME_CAPTURES: usize = 1000;
+            let existing_texture = if state.frame_captures.len() >= MAX_FRAME_CAPTURES {
+                Some(state.frame_captures.pop_front().unwrap())
+            } else {
+                None
+            };
+            let texture = capture_frame_texture(display_w, display_h, state.frame_capture_fbo, existing_texture);
             state.test_mesh.uniform_override.insert("texture1".to_string(), gpu::ShaderValue::Sampler2D(texture));
-            state.frame_captures.push(texture);
+            state.frame_captures.push_back(texture);
         }
 
         gl::Disable(gl::DEPTH_TEST);
-        draw_frame_captures(&state.frame_captures, &mut ctx);
+        draw_frame_captures(&state.frame_captures, &mut state.frame_capture_mesh, &mut ctx);
 
         gl::Enable(gl::BLEND);
         gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
