@@ -2111,6 +2111,273 @@ pub(crate) fn shim_try_float(interpreter: &mut Interpreter, args: &ArgBundle) ->
     Ok(result.unwrap_or(ShimValue::None))
 }
 
+pub(crate) fn shim_sqrt(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"self")?;
+    unpacker.end()?;
+    let f = match value {
+        ShimValue::Integer(i) => i as f32,
+        ShimValue::Float(f) => f,
+        _ => return Err(format!("sqrt: expected int or float, got {value:?}")),
+    };
+    Ok(ShimValue::Float(f.sqrt()))
+}
+
+pub(crate) fn shim_pow(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let base = unpacker.required(b"self")?;
+    let exp = unpacker.required(b"exp")?;
+    unpacker.end()?;
+    match (base, exp) {
+        (ShimValue::Integer(b), ShimValue::Integer(e)) => {
+            if e >= 0 {
+                Ok(ShimValue::Integer(b.pow(e as u32)))
+            } else {
+                Ok(ShimValue::Float((b as f32).powi(e)))
+            }
+        }
+        (ShimValue::Integer(b), ShimValue::Float(e)) => Ok(ShimValue::Float((b as f32).powf(e))),
+        (ShimValue::Float(b), ShimValue::Integer(e)) => Ok(ShimValue::Float(b.powi(e))),
+        (ShimValue::Float(b), ShimValue::Float(e)) => Ok(ShimValue::Float(b.powf(e))),
+        _ => Err(format!("pow: expected int or float arguments")),
+    }
+}
+
+pub(crate) fn shim_round(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"self")?;
+    unpacker.end()?;
+    match value {
+        ShimValue::Integer(i) => Ok(ShimValue::Integer(i)),
+        ShimValue::Float(f) => Ok(ShimValue::Integer(f.round() as i32)),
+        _ => Err(format!("round: expected int or float")),
+    }
+}
+
+pub(crate) fn shim_ceil(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"self")?;
+    unpacker.end()?;
+    match value {
+        ShimValue::Integer(i) => Ok(ShimValue::Integer(i)),
+        ShimValue::Float(f) => Ok(ShimValue::Integer(f.ceil() as i32)),
+        _ => Err(format!("ceil: expected int or float")),
+    }
+}
+
+pub(crate) fn shim_floor(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"self")?;
+    unpacker.end()?;
+    match value {
+        ShimValue::Integer(i) => Ok(ShimValue::Integer(i)),
+        ShimValue::Float(f) => Ok(ShimValue::Integer(f.floor() as i32)),
+        _ => Err(format!("floor: expected int or float")),
+    }
+}
+
+pub(crate) fn shim_signum(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"self")?;
+    unpacker.end()?;
+    match value {
+        ShimValue::Integer(i) => Ok(ShimValue::Integer(i.signum())),
+        ShimValue::Float(f) => Ok(ShimValue::Integer(f.signum() as i32)),
+        _ => Err(format!("signum: expected int or float")),
+    }
+}
+
+pub(crate) fn shim_recip(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"self")?;
+    unpacker.end()?;
+    let f = match value {
+        ShimValue::Integer(i) => i as f32,
+        ShimValue::Float(f) => f,
+        _ => return Err(format!("recip: expected int or float")),
+    };
+    Ok(ShimValue::Float(f.recip()))
+}
+
+pub(crate) fn shim_frac(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"self")?;
+    unpacker.end()?;
+    let f = match value {
+        ShimValue::Integer(_) => return Ok(ShimValue::Float(0.0)),
+        ShimValue::Float(f) => f,
+        _ => return Err(format!("frac: expected int or float")),
+    };
+    Ok(ShimValue::Float(f.fract()))
+}
+
+pub(crate) fn shim_trunc(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"self")?;
+    unpacker.end()?;
+    match value {
+        ShimValue::Integer(i) => Ok(ShimValue::Integer(i)),
+        ShimValue::Float(f) => Ok(ShimValue::Float(f.trunc())),
+        _ => Err(format!("trunc: expected int or float")),
+    }
+}
+
+pub(crate) fn shim_sin(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"self")?;
+    unpacker.end()?;
+    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("sin: expected int or float")) };
+    Ok(ShimValue::Float(f.sin()))
+}
+
+pub(crate) fn shim_cos(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"self")?;
+    unpacker.end()?;
+    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("cos: expected int or float")) };
+    Ok(ShimValue::Float(f.cos()))
+}
+
+pub(crate) fn shim_tan(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"self")?;
+    unpacker.end()?;
+    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("tan: expected int or float")) };
+    Ok(ShimValue::Float(f.tan()))
+}
+
+pub(crate) fn shim_asin(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"self")?;
+    unpacker.end()?;
+    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("asin: expected int or float")) };
+    Ok(ShimValue::Float(f.asin()))
+}
+
+pub(crate) fn shim_acos(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"self")?;
+    unpacker.end()?;
+    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("acos: expected int or float")) };
+    Ok(ShimValue::Float(f.acos()))
+}
+
+pub(crate) fn shim_atan(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"self")?;
+    unpacker.end()?;
+    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("atan: expected int or float")) };
+    Ok(ShimValue::Float(f.atan()))
+}
+
+pub(crate) fn shim_atan2(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"self")?;
+    let other = unpacker.required(b"other")?;
+    unpacker.end()?;
+    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("atan2: expected int or float")) };
+    let g = match other { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("atan2: expected int or float")) };
+    Ok(ShimValue::Float(f.atan2(g)))
+}
+
+pub(crate) fn shim_sinh(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"self")?;
+    unpacker.end()?;
+    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("sinh: expected int or float")) };
+    Ok(ShimValue::Float(f.sinh()))
+}
+
+pub(crate) fn shim_cosh(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"self")?;
+    unpacker.end()?;
+    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("cosh: expected int or float")) };
+    Ok(ShimValue::Float(f.cosh()))
+}
+
+pub(crate) fn shim_tanh(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"self")?;
+    unpacker.end()?;
+    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("tanh: expected int or float")) };
+    Ok(ShimValue::Float(f.tanh()))
+}
+
+pub(crate) fn shim_asinh(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"self")?;
+    unpacker.end()?;
+    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("asinh: expected int or float")) };
+    Ok(ShimValue::Float(f.asinh()))
+}
+
+pub(crate) fn shim_acosh(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"self")?;
+    unpacker.end()?;
+    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("acosh: expected int or float")) };
+    Ok(ShimValue::Float(f.acosh()))
+}
+
+pub(crate) fn shim_atanh(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"self")?;
+    unpacker.end()?;
+    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("atanh: expected int or float")) };
+    Ok(ShimValue::Float(f.atanh()))
+}
+
+pub(crate) fn shim_log2(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"self")?;
+    unpacker.end()?;
+    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("log2: expected int or float")) };
+    Ok(ShimValue::Float(f.log2()))
+}
+
+pub(crate) fn shim_log10(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"self")?;
+    unpacker.end()?;
+    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("log10: expected int or float")) };
+    Ok(ShimValue::Float(f.log10()))
+}
+
+pub(crate) fn shim_ln(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"self")?;
+    unpacker.end()?;
+    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("ln: expected int or float")) };
+    Ok(ShimValue::Float(f.ln()))
+}
+
+pub(crate) fn shim_log(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"self")?;
+    let base = unpacker.required(b"base")?;
+    unpacker.end()?;
+    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("log: expected int or float")) };
+    let b = match base { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("log: base must be int or float")) };
+    Ok(ShimValue::Float(f.log(b)))
+}
+
+pub(crate) fn shim_to_degrees(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"self")?;
+    unpacker.end()?;
+    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("to_degrees: expected int or float")) };
+    Ok(ShimValue::Float(f.to_degrees()))
+}
+
+pub(crate) fn shim_to_radians(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"self")?;
+    unpacker.end()?;
+    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("to_radians: expected int or float")) };
+    Ok(ShimValue::Float(f.to_radians()))
+}
+
 /// Clamp function that's generic over any comparable type.
 /// Prefers returning the original value when value == min or value == max
 pub(crate) fn shim_clamp(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
