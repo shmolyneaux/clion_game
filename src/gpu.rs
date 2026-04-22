@@ -1,6 +1,189 @@
 #![allow(unused_variables, unused_mut, unused_imports)]
 
 use crate::*;
+use crate::log;
+use crate::mesh_gen::box_mesh;
+
+#[macro_export]
+macro_rules! log_opengl_errors {
+    () => {
+        unsafe {
+            loop {
+                let err = {
+                    let _zone = zone_scoped!("gl::GetError()");
+                    gl::GetError()
+                };
+                match err {
+                    gl::NO_ERROR => break,
+                    gl::INVALID_ENUM => log(format!("[{}:{}] OpenGL Error INVALID_ENUM: An unacceptable value is specified for an enumerated argument.", file!(), line!())),
+                    gl::INVALID_VALUE => log(format!("[{}:{}] OpenGL Error INVALID_VALUE: A numeric argument is out of range.", file!(), line!())),
+                    gl::INVALID_OPERATION => log(format!("[{}:{}] OpenGL Error INVALID_OPERATION: The specified operation is not allowed in the current state.", file!(), line!())),
+                    gl::INVALID_FRAMEBUFFER_OPERATION => log(format!("[{}:{}] OpenGL Error INVALID_FRAMEBUFFER_OPERATION: The framebuffer object is not complete.", file!(), line!())),
+                    gl::OUT_OF_MEMORY => log(format!("[{}:{}] OpenGL Error OUT_OF_MEMORY: Not enough memory to execute the command.", file!(), line!())),
+                    gl::STACK_UNDERFLOW => log(format!("[{}:{}] OpenGL Error STACK_UNDERFLOW: Stack underflow detected.", file!(), line!())),
+                    gl::STACK_OVERFLOW => log(format!("[{}:{}] OpenGL Error STACK_OVERFLOW: Stack overflow detected.", file!(), line!())),
+                    _ => log(format!("[{}:{}] OpenGL Error: Unknown error code {}", file!(), line!(), err)),
+                }
+            }
+        }
+    };
+}
+
+pub fn gen_cpu_texture(width: u32, height: u32, f: impl Fn(u32, u32) -> [u8; 4]) -> GLuint {
+    let mut my_data: Vec<u8> = vec![0u8; (width * height * 4) as usize];
+
+    for x in 0..width {
+        for y in 0..height {
+            let [r, g, b, a] = f(x, y);
+            my_data[((y * width + x) * 4) as usize] = r;
+            my_data[((y * width + x) * 4 + 1) as usize] = g;
+            my_data[((y * width + x) * 4 + 2) as usize] = b;
+            my_data[((y * width + x) * 4 + 3) as usize] = a;
+        }
+    }
+
+    texture_from_rgba(width, height, &my_data)
+}
+
+pub fn texture_from_rgba(width: u32, height: u32, rgba_bytes: &[u8]) -> GLuint {
+    let mut texture: GLuint = 0;
+    unsafe {
+        gl::GenTextures(1, &mut texture as *mut u32);
+        gl::BindTexture(gl::TEXTURE_2D, texture);
+
+        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE as i32);
+        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE as i32);
+        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32);
+        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32);
+
+        gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA as i32, width as i32, height as i32, 0, gl::RGBA, gl::UNSIGNED_BYTE, rgba_bytes.as_ptr().cast());
+        gl::GenerateMipmap(gl::TEXTURE_2D);
+    }
+
+    texture
+}
+
+pub fn capture_frame_texture(resolution_x: i32, resolution_y: i32, fbo: GLuint, existing_texture: Option<GLuint>) -> u32 {
+    let texture = match existing_texture {
+        Some(t) => t,
+        None => {
+            let mut texture: GLuint = 0;
+            unsafe {
+                gl::GenTextures(1, &mut texture as *mut u32);
+                gl::BindTexture(gl::TEXTURE_2D, texture);
+                gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as i32);
+                gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as i32);
+                gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA as i32, 128, 128, 0, gl::RGBA, gl::UNSIGNED_BYTE, std::ptr::null_mut());
+            }
+            texture
+        }
+    };
+    unsafe {
+        gl::BindFramebuffer(gl::FRAMEBUFFER, fbo);
+        gl::FramebufferTexture2D(gl::FRAMEBUFFER, gl::COLOR_ATTACHMENT0, gl::TEXTURE_2D, texture, 0);
+
+        gl::BindFramebuffer(gl::READ_FRAMEBUFFER, 0);
+        gl::BindFramebuffer(gl::DRAW_FRAMEBUFFER, fbo);
+        gl::BlitFramebuffer(0, 0, resolution_x, resolution_y, 0, 0, 128, 128, gl::COLOR_BUFFER_BIT, gl::NEAREST);
+
+        gl::BindFramebuffer(gl::DRAW_FRAMEBUFFER, 0);
+    }
+
+    texture
+}
+
+fn fbo_test_mesh(size: Vec3) -> MeshDataRaw {
+    let mut my_box = box_mesh(Vec3::new(2.0, 2.0, 2.0));
+    let len = my_box.verts.get("aPos").unwrap().len();
+
+    let mut uvs = vec![Vec2::new(0.0, 0.0); len];
+    match my_box.verts.get("aPos").unwrap() {
+        VertVec::Vec3(positions) => {
+            for (uv, pos) in uvs.iter_mut().zip(positions.iter()) {
+                uv.x = pos.x;
+                uv.y = pos.y;
+            }
+        },
+        _ => panic!("Why is aPos not a Vec3?"),
+    }
+    my_box.verts.insert("aUV".to_string(), VertVec::Vec2(uvs));
+
+    let mut color = vec![Vec3::new(1.0, 0.0, 1.0); len];
+    for (idx, vert_color) in color.iter_mut().enumerate() {
+        vert_color.x = idx as f32 / len as f32;
+        vert_color.y = idx as f32 / len as f32;
+        vert_color.z = idx as f32 / len as f32;
+    }
+    my_box.verts.insert("aColor".to_string(), VertVec::Vec3(color));
+
+    my_box
+}
+
+pub fn gen_fbo_texture(code: &str) -> u32 {
+    let texture_shader = ShaderProgram::create(
+        ShaderBuilder::new()
+            .with_input(ShaderSymbol::new(ShaderDataType::Vec3, "aPos"))
+            .with_input(ShaderSymbol::new(ShaderDataType::Vec2, "aUV"))
+            .with_output(ShaderSymbol::new(ShaderDataType::Vec2, "uv"))
+            .with_code(
+                r#"
+                    void main() {
+                        gl_Position = vec4(aPos, 1.0);
+                        uv = aUV;
+                    }
+                "#.to_string()
+            ).build_vertex_shader().unwrap(),
+        ShaderBuilder::new()
+            .with_input(ShaderSymbol::new(ShaderDataType::Vec2, "uv"))
+            .with_output(ShaderSymbol::new(ShaderDataType::Vec4, "FragColor"))
+            .with_code(code.to_string())
+            .build_fragment_shader().unwrap()
+        ).expect("Could not build texture shader");
+    let texture_shader = Rc::new(texture_shader);
+
+    println!("Creating test mesh");
+    let mut test_mesh = StaticMesh::create(
+        texture_shader.clone(),
+        Rc::new(
+            Mesh::create(
+                &fbo_test_mesh(Vec3::new(1.0, 1.0, 1.0))
+            ).unwrap()),
+    ).expect("Can't create the test mesh");
+
+    let mut fbo: GLuint = 0;
+    let mut texture: GLuint = 0;
+
+    unsafe {
+        gl::GenFramebuffers(1, &mut fbo as *mut u32);
+        gl::BindFramebuffer(gl::FRAMEBUFFER, fbo);
+
+        gl::GenTextures(1, &mut texture as *mut u32);
+        gl::BindTexture(gl::TEXTURE_2D, texture);
+        gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGB as i32, 128, 128, 0, gl::RGB, gl::UNSIGNED_BYTE, std::ptr::null_mut());
+
+        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32);
+        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32);
+
+        gl::FramebufferTexture2D(gl::FRAMEBUFFER, gl::COLOR_ATTACHMENT0, gl::TEXTURE_2D, texture, 0);
+
+        if gl::CheckFramebufferStatus(gl::FRAMEBUFFER) != gl::FRAMEBUFFER_COMPLETE {
+            log("Error: Framebuffer is not complete!");
+        }
+
+        gl::BindFramebuffer(gl::FRAMEBUFFER, fbo);
+        gl::Viewport(0, 0, 128, 128);
+
+        gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
+
+        test_mesh.draw(&mut HashMap::new());
+
+        gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
+    }
+
+    log(format!("Created FBO texture {}", texture));
+
+    texture
+}
 
 pub static END_PRIMITIVE: u32 = 0xFFFF_FFFF;
 

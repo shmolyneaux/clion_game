@@ -45,7 +45,7 @@ macro_rules! zone_scoped {
     }};
 }
 
-#[cfg(feature = "tracy-enable")]
+#[cfg(all(feature = "tracy-enable", not(test)))]
 unsafe extern "C" {
     pub fn tracy_zone_begin_n(name: *const c_char, active: c_int) -> TracyCZoneCtx;
     pub fn tracy_zone_begin_ns(name: *const c_char, depth: c_int, active: c_int) -> TracyCZoneCtx;
@@ -60,12 +60,12 @@ unsafe extern "C" {
     pub unsafe fn ___tracy_emit_zone_end(ctx: TracyCZoneCtx);
 }
 
-#[cfg(not(target_arch = "x86_64"))]
+#[cfg(all(not(target_arch = "x86_64"), not(test)))]
 pub unsafe fn ___tracy_emit_zone_begin(_loc: *const ___tracy_source_location_data, _active: i32) -> TracyCZoneCtx { TracyCZoneCtx {id: 0, active: 0} }
-#[cfg(not(target_arch = "x86_64"))]
+#[cfg(all(not(target_arch = "x86_64"), not(test)))]
 pub unsafe fn ___tracy_emit_zone_end(_ctx: TracyCZoneCtx) {}
 
-#[cfg(not(feature = "tracy-enable"))]
+#[cfg(any(not(feature = "tracy-enable"), test))]
 mod stubs {
     use crate::*;
     pub unsafe fn tracy_zone_begin_n(_name: *const c_char, _active: c_int) -> TracyCZoneCtx { TracyCZoneCtx {id: 0, active: 0} }
@@ -79,5 +79,5 @@ mod stubs {
     pub unsafe fn ___tracy_emit_zone_end(_ctx: TracyCZoneCtx) {}
 }
 
-#[cfg(not(feature = "tracy-enable"))]
+#[cfg(any(not(feature = "tracy-enable"), test))]
 pub use stubs::*;
