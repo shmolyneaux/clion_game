@@ -31,6 +31,8 @@ pub(crate) struct EnvScope {
     pub(crate) parent: u24,
     // Depth of this scope in the chain (root is 1)
     depth: u32,
+    // Tracks whether the data for the scope can be freed when popped
+    captures: bool,
 }
 
 // Default capacity when a scope's data block is first allocated (in u64 words).
@@ -38,23 +40,25 @@ pub(crate) struct EnvScope {
 const ENV_SCOPE_DEFAULT_CAPACITY: u32 = 16;
 
 impl EnvScope {
-    fn new() -> Self {
+    fn new(captures: bool) -> Self {
         Self {
             data: 0.into(),
             capacity: 0,
             used: 0,
             parent: 0.into(),
             depth: 1,
+            captures,
         }
     }
 
-    fn new_with_parent(parent_pos: u24, parent_depth: u32) -> Self {
+    fn new_with_parent(parent_pos: u24, parent_depth: u32, captures: bool) -> Self {
         Self {
             data: 0.into(),
             capacity: 0,
             used: 0,
             parent: parent_pos,
             depth: parent_depth + 1,
+            captures,
         }
     }
 
@@ -183,7 +187,7 @@ pub struct Environment {
 impl Environment {
     pub fn new(mem: &mut MMU) -> Self {
         // Allocate an EnvScope wrapper (data block allocated lazily on first insert)
-        let scope_pos = mem.alloc_and_set(EnvScope::new(), "EnvScope");
+        let scope_pos = mem.alloc_and_set(EnvScope::new(true), "EnvScope Base");
 
         Self {
             current_scope: scope_pos.into(),
@@ -338,7 +342,7 @@ impl Environment {
         self.get(interpreter, key).is_some()
     }
 
-    fn push_scope(&mut self, mem: &mut MMU) {
+    fn push_scope(&mut self, mem: &mut MMU, captures: bool) {
         // Get current scope depth
         let current_depth = if self.current_scope == 0 {
             0
@@ -352,15 +356,15 @@ impl Environment {
         // Allocate a new EnvScope with parent pointing to current scope
         // (data block allocated lazily on first insert)
         let scope_pos = mem.alloc_and_set(
-            EnvScope::new_with_parent(self.current_scope.into(), current_depth),
-            "EnvScope"
+            EnvScope::new_with_parent(self.current_scope.into(), current_depth, captures),
+            "EnvScope with parent"
         );
         
         // Update current scope to the new one
         self.current_scope = scope_pos.into();
     }
 
-    fn pop_scope(&mut self, mem: &MMU) -> Result<(), String> {
+    fn pop_scope(&mut self, mem: &mut MMU) -> Result<(), String> {
         if self.current_scope == 0 {
             return Err(format!("Ran out of scopes to pop!"));
         }
@@ -375,8 +379,19 @@ impl Environment {
         if parent == 0 {
             return Err(format!("Cannot pop root scope!"));
         }
+
+        // Free the data used by the scope immediately if we know
+        // its not captured by anything. This substantially reduces
+        // memory pressure between GC's
+        if !scope.captures {
+            // Free the data used by the EnvScope
+            mem.free(scope.data, u24::from(scope.capacity));
+            // Free the EnvScope struct
+            mem.free_obj::<EnvScope>(u24::from(self.current_scope));
+        }
         
         self.current_scope = parent;
+
         Ok(())
     }
     
@@ -1819,6 +1834,7 @@ impl Interpreter {
         env: &mut Environment,
     ) -> Result<ShimValue, String> {
         let _zone = zone_scoped!("Execute Bytecode");
+        let initial_scope = env.current_scope;
         let mut pc = *mod_pc;
         // These are values that are operated on. Expressions push and pop to
         // this stack, return values go on this stack etc.
@@ -1879,7 +1895,6 @@ impl Interpreter {
                             loop_info = Vec::new();
                             // Restore the captured environment and push a new scope for function locals
                             env.current_scope = captured_scope;
-                            env.push_scope(&mut self.mem);
                             pc = new_pc as usize;
                             continue;
                         }
@@ -2002,7 +2017,7 @@ impl Interpreter {
                     let (_, end_pc, scope_count) =
                         loop_info.last().expect("break should have loop info");
                     while env.scope_depth(&self.mem) > *scope_count {
-                        env.pop_scope(&self.mem).unwrap();
+                        env.pop_scope(&mut self.mem).unwrap();
                     }
                     pc = *end_pc;
                     continue;
@@ -2011,7 +2026,7 @@ impl Interpreter {
                     let (start_pc, _, scope_count) =
                         loop_info.last().expect("continue should have loop info");
                     while env.scope_depth(&self.mem) > *scope_count {
-                        env.pop_scope(&self.mem).unwrap();
+                        env.pop_scope(&mut self.mem).unwrap();
                     }
                     pc = *start_pc;
                     continue;
@@ -2276,7 +2291,6 @@ impl Interpreter {
                             loop_info = Vec::new();
                             // Restore the captured environment and push a new scope for function locals
                             env.current_scope = captured_scope;
-                            env.push_scope(&mut self.mem);
                             pc = new_pc as usize;
                             continue;
                         }
@@ -2327,7 +2341,6 @@ impl Interpreter {
                             loop_info = Vec::new();
                             // Restore the captured environment and push a new scope for function locals
                             env.current_scope = captured_scope;
-                            env.push_scope(&mut self.mem);
                             pc = new_pc as usize;
                             continue;
                         }
@@ -2335,10 +2348,13 @@ impl Interpreter {
                     pc += 3 + ident_len as usize;
                 }
                 val if val == ByteCode::StartScope as u8 => {
-                    env.push_scope(&mut self.mem);
+                    env.push_scope(&mut self.mem, false);
+                }
+                val if val == ByteCode::StartCapturedScope as u8 => {
+                    env.push_scope(&mut self.mem, true);
                 }
                 val if val == ByteCode::EndScope as u8 => {
-                    env.pop_scope(&self.mem)?;
+                    env.pop_scope(&mut self.mem)?;
                 }
                 val if val == ByteCode::Return as u8 => {
                     if stack_frame.is_empty() {
@@ -2349,6 +2365,13 @@ impl Interpreter {
                         // discard any leftover values (e.g. for-loop iterators),
                         // and return the value.
                         let return_value = stack.pop().expect("return value on stack");
+
+                        // Pop any scopes that were opened during this call but not
+                        // closed (e.g. the function's own StartScope, or inner
+                        // block scopes left open by an early return).
+                        while env.current_scope != initial_scope {
+                            env.pop_scope(&mut self.mem).unwrap();
+                        }
 
                         // TODO: we should supply `pc` as a `&mut usize`, but
                         // that requires changing far too much code here that
@@ -2377,7 +2400,7 @@ impl Interpreter {
                     stack.truncate(stack_depth);
                     stack.push(return_value);
                     while env.scope_depth(&self.mem) > scope_count {
-                        env.pop_scope(&self.mem).unwrap();
+                        env.pop_scope(&mut self.mem).unwrap();
                     }
                     // Restore the caller's environment scope
                     env.current_scope = caller_scope;
@@ -2632,7 +2655,7 @@ mod tests {
         let mut env = Environment::new(&mut interpreter.mem);
 
         env.insert_new(&mut interpreter, b"root_var".to_vec(), ShimValue::Integer(10));
-        env.push_scope(&mut interpreter.mem);
+        env.push_scope(&mut interpreter.mem, false);
         env.insert_new(&mut interpreter, b"child_var".to_vec(), ShimValue::Integer(20));
 
         // Can see child var

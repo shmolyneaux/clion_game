@@ -68,10 +68,39 @@ pub enum BinaryOp {
     Range(Box<ExprNode>, Box<ExprNode>),
 }
 
+impl BinaryOp {
+    pub(crate) fn exprs(&self) -> (&ExprNode, &ExprNode) {
+        match self {
+            BinaryOp::Add(a, b) => (a, b),
+            BinaryOp::Subtract(a, b) => (a, b),
+            BinaryOp::Multiply(a, b) => (a, b),
+            BinaryOp::Divide(a, b) => (a, b),
+            BinaryOp::Equal(a, b) => (a, b),
+            BinaryOp::NotEqual(a, b) => (a, b),
+            BinaryOp::GT(a, b) => (a, b),
+            BinaryOp::GTE(a, b) => (a, b),
+            BinaryOp::LT(a, b) => (a, b),
+            BinaryOp::LTE(a, b) => (a, b),
+            BinaryOp::Modulus(a, b) => (a, b),
+            BinaryOp::In(a, b) => (a, b),
+            BinaryOp::Range(a, b) => (a, b),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum BooleanOp {
     And(Box<ExprNode>, Box<ExprNode>),
     Or(Box<ExprNode>, Box<ExprNode>),
+}
+
+impl BooleanOp {
+    pub(crate) fn exprs(&self) -> (&ExprNode, &ExprNode) {
+        match self {
+            BooleanOp::And(a, b) => (a, b),
+            BooleanOp::Or(a, b) => (a, b),
+        }
+    }
 }
 
 #[derive(Debug)]

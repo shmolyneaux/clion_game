@@ -53,6 +53,7 @@ pub(crate) enum ByteCode {
     GetAttr,
     SetAttr,
     StartScope,
+    StartCapturedScope,
     EndScope,
     LoopStart,
     LoopEnd,
@@ -104,8 +105,12 @@ pub fn compile_fn_body_inner(
     body: &Block,
     fn_span: Span,
 ) -> Result<Vec<(u8, Span)>, String> {
+    let mut asm = if block_captures_env(body) {
+        vec![(ByteCode::StartCapturedScope as u8, fn_span)]
+    } else {
+        vec![(ByteCode::StartScope as u8, fn_span)]
+    };
 
-    let mut asm = Vec::new();
     asm.push((ByteCode::UnpackArgs as u8, fn_span));
     asm.push((
         pos_args_required.len() as u8,
@@ -703,6 +708,170 @@ pub fn compile_block_inner(block: &Block, is_expr: bool, block_span: Span, asm: 
     Ok(())
 }
 
+pub fn statement_captures_env(stmt: &Statement) -> bool {
+    match stmt {
+        Statement::Fn(..) => true,
+        Statement::Struct(..) => true,
+        Statement::Let(_ident, expr) => {
+            expression_captures_env(&expr.data)
+        },
+        Statement::Assignment(_ident, expr) => {
+            expression_captures_env(&expr.data)
+        },
+        Statement::AttributeAssignment(obj, _ident, expr) => {
+            expression_captures_env(&obj.data)
+            || expression_captures_env(&expr.data)
+        },
+        Statement::IndexAssignment(obj, index_expr, expr) => {
+            expression_captures_env(&obj.data)
+            || expression_captures_env(&index_expr.data)
+            || expression_captures_env(&expr.data)
+        },
+        Statement::CompoundAssignment(_ident, _op, expr) => {
+            expression_captures_env(&expr.data)
+        },
+        Statement::CompoundAttributeAssignment(obj, _ident, _op, expr) => {
+            expression_captures_env(&obj.data)
+            || expression_captures_env(&expr.data)
+        },
+        Statement::CompoundIndexAssignment(obj, index_expr, _op, expr) => {
+            expression_captures_env(&obj.data)
+            || expression_captures_env(&index_expr.data)
+            || expression_captures_env(&expr.data)
+        },
+        Statement::If(cond, if_block, else_block) => {
+            expression_captures_env(&cond.data)
+            || block_captures_env(if_block)
+            || block_captures_env(else_block)
+        },
+        Statement::For(_ident, expr, block) => {
+            expression_captures_env(&expr.data)
+            || block_captures_env(block)
+        },
+        Statement::While(cond, block) => {
+            expression_captures_env(&cond.data)
+            || block_captures_env(block)
+        },
+        Statement::Break => false,
+        Statement::Continue => false,
+        Statement::Expression(expr) => {
+            expression_captures_env(&expr.data)
+        },
+        Statement::Return(expr) => {
+            match expr {
+                Some(expr) => expression_captures_env(&expr.data),
+                None => false
+            }
+        },
+    }
+}
+
+pub fn expression_captures_env(input_expr: &Expression) -> bool {
+    match input_expr {
+        Expression::Primary(Primary::None) => {
+            false
+        },
+        Expression::Primary(Primary::Integer(_)) => {
+            false
+        },
+        Expression::Primary(Primary::Float(_)) => {
+            false
+        },
+        Expression::Primary(Primary::Identifier(_)) => {
+            false
+        },
+        Expression::Primary(Primary::Bool(_)) => {
+            false
+        },
+        Expression::Primary(Primary::String(_)) => {
+            false
+        },
+        Expression::Primary(Primary::List(lst)) => {
+            for expr in lst.iter() {
+                if expression_captures_env(&expr.data) {
+                    return true;
+                }
+            }
+            false
+        },
+        Expression::Primary(Primary::Expression(expr)) => {
+            expression_captures_env(&expr.data)
+        },
+        Expression::BooleanOp(op) => {
+            let exprs = op.exprs();
+            expression_captures_env(&exprs.0.data)
+            || expression_captures_env(&exprs.1.data)
+        },
+        Expression::BinaryOp(op) => {
+            let exprs = op.exprs();
+            expression_captures_env(&exprs.0.data)
+            || expression_captures_env(&exprs.1.data)
+        },
+        Expression::UnaryOp(op) => {
+            match op {
+                UnaryOp::Not(expr) => {
+                    expression_captures_env(&expr.data)
+                },
+                UnaryOp::Negate(expr) => {
+                    expression_captures_env(&expr.data)
+                },
+            }
+        },
+        Expression::Stringify(expr) => {
+            expression_captures_env(&expr.data)
+        }
+        Expression::Call(func, args, kwargs) => {
+            if expression_captures_env(&func.data) {
+                return true;
+            }
+            for arg_expr in args.iter() {
+                if expression_captures_env(&arg_expr.data) {
+                    return true;
+                }
+            }
+            for (_ident, kwarg_expr) in kwargs.iter() {
+                if expression_captures_env(&kwarg_expr.data) {
+                    return true;
+                }
+            }
+            false
+        }
+        Expression::Index(obj, index) => {
+            expression_captures_env(&obj.data)
+            || expression_captures_env(&index.data)
+        }
+        Expression::Attribute(obj, _attr) => {
+            expression_captures_env(&obj.data)
+        }
+        Expression::Block(block) => {
+            block_captures_env(block)
+        }
+        Expression::If(cond, if_block, else_block) => {
+            expression_captures_env(&cond.data)
+            || block_captures_env(if_block)
+            || block_captures_env(else_block)
+        }
+        Expression::Fn(..) => {
+            true
+        }
+    }
+}
+
+pub fn block_captures_env(block: &Block) -> bool {
+    for stmt in block.stmts.iter() {
+        if statement_captures_env(&stmt.data) {
+            return true;
+        }
+    }
+    if let Some(last_expr) = &block.last_expr {
+        if expression_captures_env(&last_expr.data) {
+            return true;
+        }
+    }
+
+    false
+}
+
 pub fn compile_block(block: &Block, is_expr: bool, block_span: Span) -> Result<Vec<(u8, Span)>, String> {
     let mut asm = Vec::new();
 
@@ -739,7 +908,20 @@ pub fn compile_block(block: &Block, is_expr: bool, block_span: Span) -> Result<V
     }
 
     if needs_new_scope {
-        asm.push((ByteCode::StartScope as u8, block_span));
+        // When a block starts a new Environment is created. However,
+        // when the block ends the Environment only needs to stick
+        // around in memory if it's captured by a Struct/fn. We can free
+        // it immediately (or re-use it) if there are no function
+        // declarations or struct declarations inside the block.
+        //
+        // Even that's a bit pessimistic since it's not the whole
+        // environment (with parents) that needs to be kept and some
+        // function declarations don't need to capture their environment.
+        if block_captures_env(block) {
+            asm.push((ByteCode::StartCapturedScope as u8, block_span));
+        } else {
+            asm.push((ByteCode::StartScope as u8, block_span));
+        }
     }
 
     compile_block_inner(block, is_expr, block_span, &mut asm)?;
@@ -1268,6 +1450,8 @@ pub fn format_asm(bytes: &[u8]) -> String {
             out.push_str("stringify");
         } else if *b == ByteCode::StartScope as u8 {
             out.push_str("start_scope");
+        } else if *b == ByteCode::StartCapturedScope as u8 {
+            out.push_str("start_captured_scope");
         } else if *b == ByteCode::EndScope as u8 {
             out.push_str("end_scope");
         } else if *b == ByteCode::Return as u8 {

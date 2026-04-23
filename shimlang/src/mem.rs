@@ -361,7 +361,7 @@ impl MMU {
     }
 
     pub fn free(&mut self, pos: u24, size: u24) {
-        if u32::from(size) == 0 || u32::from(size) == 0 {
+        if u32::from(pos) == 0 || u32::from(size) == 0 {
             return;
         }
 
@@ -421,6 +421,12 @@ impl MMU {
         } else {
             panic!("Mis-sized free overlaps with idx block!");
         }
+    }
+
+    /** DOES NOT DROP T, but nothing in the MMU should need to drop **/
+    pub fn free_obj<T>(&mut self, pos: u24) {
+        let word_count: u24 = (std::mem::size_of::<T>() as u32).div_ceil(8).into();
+        self.free(pos, word_count);
     }
 
     // MMU methods that depend on runtime types (ShimValue, ShimDict, ShimList, ShimFn, etc.)
