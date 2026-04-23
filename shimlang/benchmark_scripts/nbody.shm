@@ -144,4 +144,4 @@ fn main(n, ref="sun") {
     report_energy();
 }
 
-main(50000)
+main(500000);

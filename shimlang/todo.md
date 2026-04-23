@@ -1,3 +1,8 @@
+# MAJOR
+- Type annotations
+- AOT compilation
+
+# MINOR
 - Tuple
 - Tuple unpacking
 - String methods
@@ -22,8 +27,6 @@
 - Runtime type checking
 - Static type checking
 - Add value type for strings 6 bytes or less
-- Remove use of Box for native values
-  - It can be the type id (which gives us the size), followed by that number of bytes
 - How do we time-travel resources provided by external systems?
   - Examples
     - Models
