@@ -27,7 +27,7 @@ impl Default for Config {
 
 #[allow(non_camel_case_types)]
 #[derive(Hash, Eq, PartialOrd, Ord, Copy, Clone, PartialEq)]
-#[repr(packed)]
+#[repr(Rust, packed)]
 pub struct u24(pub(crate) [u8; 3]);
 
 impl std::fmt::Debug for u24 {
@@ -245,8 +245,8 @@ impl MMU {
         // as a "null" / "no scope" sentinel by consumers.
         let free_list = vec![FreeBlock::new(1u32.into(), word_count - u24::from(1u32))];
         Self {
-            mem: mem,
-            free_list: free_list,
+            mem,
+            free_list,
             native_type_ids: HashMap::new(),
             native_type_registry: Vec::new(),
         }
@@ -260,14 +260,14 @@ impl MMU {
 
     pub(crate) unsafe fn get<T: 'static>(&self, word: u24) -> &T {
         unsafe {
-            let ptr: *const T = std::mem::transmute(&self.mem[usize::from(word)]);
+            let ptr: *const T = &self.mem[usize::from(word)] as *const u64 as *const T;
             &*ptr
         }
     }
 
     pub(crate) unsafe fn get_mut<T>(&mut self, word: u24) -> &mut T {
         unsafe {
-            let ptr: *mut T = std::mem::transmute(&mut self.mem[usize::from(word)]);
+            let ptr: *mut T = &mut self.mem[usize::from(word)] as *mut u64 as *mut T;
             &mut *ptr
         }
     }
@@ -276,7 +276,7 @@ impl MMU {
         let word_count: u24 = (std::mem::size_of::<T>() as u32).div_ceil(8).into();
         let position = alloc!(self, word_count, _debug_name);
         unsafe {
-            let ptr: *mut T = std::mem::transmute(&mut self.mem[usize::from(position)]);
+            let ptr: *mut T = &mut self.mem[usize::from(position)] as *mut u64 as *mut T;
             ptr.write(value);
         }
         position
@@ -387,39 +387,41 @@ impl MMU {
         //   2. joins the previous idx and this idx
         //   3. sits between the previous idx and this idx
         //   4. needs to be joined to the start of this idx
-        if idx != 0 {
-            if pos == self.free_list[idx - 1].end() {
-                // Case 1 or 2
-                // Since the position matches the end of the previous
-                // block we need to join with it
-                if pos + size < self.free_list[idx].pos {
-                    // Case 1
-                    // It's not long enough to reach the idx block, just
-                    // add the sizes
+        if idx != 0 && pos == self.free_list[idx - 1].end() {
+            // Case 1 or 2
+            // Since the position matches the end of the previous
+            // block we need to join with it
+            match (pos + size).cmp(&self.free_list[idx].pos) {
+                std::cmp::Ordering::Less => {
+                    // Case 1: not long enough to reach the idx block, just add the sizes
                     self.free_list[idx - 1].size += size;
                     return;
-                } else if pos + size == self.free_list[idx].pos {
+                }
+                std::cmp::Ordering::Equal => {
                     // Case 2
                     self.free_list[idx - 1].size =
                         self.free_list[idx].end() - self.free_list[idx - 1].pos;
                     self.free_list.remove(idx);
                     return;
-                } else {
+                }
+                std::cmp::Ordering::Greater => {
                     panic!("Mis-sized free does not fit in gap!");
                 }
             }
         }
-        if pos + size < self.free_list[idx].pos {
-            // Case 3
-            self.free_list.insert(idx, FreeBlock::new(pos, size));
-            return;
-        } else if pos + size == self.free_list[idx].pos {
-            // Case 4
-            self.free_list[idx].pos = pos;
-            self.free_list[idx].size += size;
-            return;
-        } else {
-            panic!("Mis-sized free overlaps with idx block!");
+        match (pos + size).cmp(&self.free_list[idx].pos) {
+            std::cmp::Ordering::Less => {
+                // Case 3
+                self.free_list.insert(idx, FreeBlock::new(pos, size));
+            }
+            std::cmp::Ordering::Equal => {
+                // Case 4
+                self.free_list[idx].pos = pos;
+                self.free_list[idx].size += size;
+            }
+            std::cmp::Ordering::Greater => {
+                panic!("Mis-sized free overlaps with idx block!");
+            }
         }
     }
 
@@ -444,7 +446,7 @@ impl MMU {
         let word_count: u24 = (std::mem::size_of::<ShimDict>() as u32).div_ceil(8).into();
         let position = alloc!(self, word_count, "Dict");
         unsafe {
-            let ptr: *mut ShimDict = std::mem::transmute(&mut self.mem[usize::from(position)]);
+            let ptr: *mut ShimDict = &mut self.mem[usize::from(position)] as *mut u64 as *mut ShimDict;
             ptr.write(ShimDict::new());
         }
         position
@@ -458,7 +460,7 @@ impl MMU {
         let word_count: u24 = (std::mem::size_of::<ShimList>() as u32).div_ceil(8).into();
         let position = alloc!(self, word_count, "List");
         unsafe {
-            let ptr: *mut ShimList = std::mem::transmute(&mut self.mem[usize::from(position)]);
+            let ptr: *mut ShimList = &mut self.mem[usize::from(position)] as *mut u64 as *mut ShimList;
             ptr.write(ShimList::new());
         }
         position
@@ -476,7 +478,7 @@ impl MMU {
         let name_pos = self.alloc_str_raw(name);
 
         unsafe {
-            let ptr: *mut ShimFn = std::mem::transmute(&mut self.mem[usize::from(position)]);
+            let ptr: *mut ShimFn = &mut self.mem[usize::from(position)] as *mut u64 as *mut ShimFn;
             ptr.write(ShimFn {
                 pc,
                 name_len: name.len() as u16,
@@ -519,7 +521,7 @@ impl MMU {
         let word_count: u24 = (std::mem::size_of::<T>() as u32).div_ceil(8).into();
         let position = alloc!(self, word_count, "Native");
         unsafe {
-            let ptr: *mut T = std::mem::transmute(&mut self.mem[usize::from(position)]);
+            let ptr: *mut T = &mut self.mem[usize::from(position)] as *mut u64 as *mut T;
             ptr.write(val);
         }
         ShimValue::Native(u24::from(type_idx), position)
@@ -536,10 +538,11 @@ impl MMU {
     pub fn alloc_bound_native_fn(&mut self, obj: &ShimValue, func: NativeFn) -> ShimValue {
         let position = alloc!(self, 2u32.into(), "Bound Native Fn");
         unsafe {
-            let obj_ptr: *mut ShimValue = std::mem::transmute(&mut self.mem[usize::from(position)]);
+            let obj_ptr: *mut ShimValue =
+                &mut self.mem[usize::from(position)] as *mut u64 as *mut ShimValue;
             obj_ptr.write(*obj);
             let fn_ptr: *mut NativeFn =
-                std::mem::transmute(&mut self.mem[usize::from(position) + 1]);
+                &mut self.mem[usize::from(position) + 1] as *mut u64 as *mut NativeFn;
             fn_ptr.write(func);
 
             ShimValue::BoundNativeMethod(position)
@@ -601,7 +604,7 @@ impl MemDescriptor {
                     }
                     s.push_str(&val.to_string_mem(mem));
                 }
-                s.push_str(")");
+                s.push(')');
                 s
             }
         }
@@ -699,18 +702,16 @@ impl Bitmask {
                     }
                 }
                 let mut shifted_word = word >> bit_offset;
-                for i in (bit_offset as usize)..64 {
+                for i in bit_offset..64 {
                     let is_zero = (shifted_word & 1) == 0;
 
                     if is_zero {
-                        if start_of_run == None {
+                        if start_of_run.is_none() {
                             start_of_run = Some(idx * 64 + i);
                         }
-                    } else {
-                        if let Some(start) = start_of_run {
-                            ranges.push(start..idx * 64 + i);
-                            start_of_run = None;
-                        }
+                    } else if let Some(start) = start_of_run {
+                        ranges.push(start..idx * 64 + i);
+                        start_of_run = None;
                     }
                     shifted_word >>= 1;
                 }
@@ -811,7 +812,7 @@ impl<'a> GC<'a> {
                         let offset = offset as usize;
                         #[cfg(feature = "gc_debug")]
                         let desc = {
-                            let contents = s.string_from_mem(&self.mem).unwrap();
+                            let contents = s.string_from_mem(self.mem).unwrap();
                             MemDescriptor::other(
                                 pos,
                                 (offset + len).div_ceil(8),
@@ -915,7 +916,7 @@ impl<'a> GC<'a> {
                         if self.mask.is_set(pos) {
                             continue;
                         }
-                        let def: &StructDef = self.mem.get(def_pos.into());
+                        let def: &StructDef = self.mem.get(def_pos);
 
                         #[cfg(feature = "gc_debug")]
                         let desc = {
@@ -935,7 +936,7 @@ impl<'a> GC<'a> {
                             // Push the members
                             vals.push(ShimValue::from_u64(self.mem.mem[idx]));
                         }
-                        vals.push(ShimValue::StructDef(def_pos.into()));
+                        vals.push(ShimValue::StructDef(def_pos));
                     }
                     ShimValue::NativeFn(pos) => {
                         let pos: usize = pos.into();
@@ -1038,13 +1039,13 @@ impl<'a> GC<'a> {
                         let end = start + scope.capacity as usize;
                         #[cfg(feature = "gc_debug")]
                         let scope_description =
-                            MemDescriptor::env_data(start, end, &scope.to_string(&self.mem));
+                            MemDescriptor::env_data(start, end, &scope.to_string(self.mem));
                         for bit in start..end {
                             mark_bit!(self.mask, bit, scope_description);
                         }
 
                         // Walk the contiguous data block and collect values
-                        let bytes = scope.raw_bytes(&self.mem);
+                        let bytes = scope.raw_bytes(self.mem);
                         let mut off = 0usize;
                         while off < bytes.len() {
                             let key_len = bytes[off] as usize;

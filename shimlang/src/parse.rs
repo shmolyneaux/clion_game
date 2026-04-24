@@ -58,9 +58,9 @@ pub enum BinaryOp {
     Equal(Box<ExprNode>, Box<ExprNode>),
     NotEqual(Box<ExprNode>, Box<ExprNode>),
     GT(Box<ExprNode>, Box<ExprNode>),
-    GTE(Box<ExprNode>, Box<ExprNode>),
+    Gte(Box<ExprNode>, Box<ExprNode>),
     LT(Box<ExprNode>, Box<ExprNode>),
-    LTE(Box<ExprNode>, Box<ExprNode>),
+    Lte(Box<ExprNode>, Box<ExprNode>),
     Modulus(Box<ExprNode>, Box<ExprNode>),
     In(Box<ExprNode>, Box<ExprNode>),
     Range(Box<ExprNode>, Box<ExprNode>),
@@ -76,9 +76,9 @@ impl BinaryOp {
             BinaryOp::Equal(a, b) => (a, b),
             BinaryOp::NotEqual(a, b) => (a, b),
             BinaryOp::GT(a, b) => (a, b),
-            BinaryOp::GTE(a, b) => (a, b),
+            BinaryOp::Gte(a, b) => (a, b),
             BinaryOp::LT(a, b) => (a, b),
-            BinaryOp::LTE(a, b) => (a, b),
+            BinaryOp::Lte(a, b) => (a, b),
             BinaryOp::Modulus(a, b) => (a, b),
             BinaryOp::In(a, b) => (a, b),
             BinaryOp::Range(a, b) => (a, b),
@@ -284,7 +284,7 @@ pub fn parse_primary(tokens: &mut TokenStream) -> Result<ExprNode, String> {
     };
     Ok(Node {
         data: expr,
-        span: span,
+        span,
     })
 }
 
@@ -326,6 +326,7 @@ pub fn parse_arguments(
     Ok(args)
 }
 
+#[allow(clippy::type_complexity)]
 pub fn parse_fn_arguments(
     tokens: &mut TokenStream,
     closing_token: Token,
@@ -345,14 +346,12 @@ pub fn parse_fn_arguments(
                 kwargs.push((ident, parse_expression(tokens)?));
             } else {
                 return Err(
-                    tokens.format_peek_err(&format!("Expected ident before `=` in fn args"))
+                    tokens.format_peek_err("Expected ident before `=` in fn args")
                 );
             }
         } else {
-            if kwargs.len() > 0 {
-                return Err(tokens.format_peek_err(&format!(
-                    "Positional arguments can't appear after keyword arguments"
-                )));
+            if !kwargs.is_empty() {
+                return Err(tokens.format_peek_err("Positional arguments can't appear after keyword arguments"));
             }
             args.push(expr);
         }
@@ -443,7 +442,7 @@ pub fn parse_logical_or(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                         Box::new(expr),
                         Box::new(parse_logical_and(tokens)?),
                     )),
-                    span: span,
+                    span,
                 };
             }
             _ => return Ok(expr),
@@ -464,7 +463,7 @@ pub fn parse_logical_and(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                         Box::new(expr),
                         Box::new(parse_range(tokens)?),
                     )),
-                    span: span,
+                    span,
                 };
             }
             _ => return Ok(expr),
@@ -485,7 +484,7 @@ pub fn parse_range(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                         Box::new(expr),
                         Box::new(parse_equality(tokens)?),
                     )),
-                    span: span,
+                    span,
                 };
             }
             _ => return Ok(expr),
@@ -506,17 +505,17 @@ pub fn parse_comparison(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                         Box::new(expr),
                         Box::new(parse_term(tokens)?),
                     )),
-                    span: span,
+                    span,
                 };
             }
-            Token::GTE => {
+            Token::Gte => {
                 tokens.advance()?;
                 expr = Node {
-                    data: Expression::BinaryOp(BinaryOp::GTE(
+                    data: Expression::BinaryOp(BinaryOp::Gte(
                         Box::new(expr),
                         Box::new(parse_term(tokens)?),
                     )),
-                    span: span,
+                    span,
                 };
             }
             Token::LT => {
@@ -526,17 +525,17 @@ pub fn parse_comparison(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                         Box::new(expr),
                         Box::new(parse_term(tokens)?),
                     )),
-                    span: span,
+                    span,
                 };
             }
-            Token::LTE => {
+            Token::Lte => {
                 tokens.advance()?;
                 expr = Node {
-                    data: Expression::BinaryOp(BinaryOp::LTE(
+                    data: Expression::BinaryOp(BinaryOp::Lte(
                         Box::new(expr),
                         Box::new(parse_term(tokens)?),
                     )),
-                    span: span,
+                    span,
                 };
             }
             Token::In => {
@@ -546,7 +545,7 @@ pub fn parse_comparison(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                         Box::new(expr),
                         Box::new(parse_term(tokens)?),
                     )),
-                    span: span,
+                    span,
                 };
             }
             _ => return Ok(expr),
@@ -567,7 +566,7 @@ pub fn parse_factor(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                         Box::new(expr),
                         Box::new(parse_unary(tokens)?),
                     )),
-                    span: span,
+                    span,
                 };
             }
             Token::Slash => {
@@ -577,7 +576,7 @@ pub fn parse_factor(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                         Box::new(expr),
                         Box::new(parse_unary(tokens)?),
                     )),
-                    span: span,
+                    span,
                 };
             }
             Token::Percent => {
@@ -587,7 +586,7 @@ pub fn parse_factor(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                         Box::new(expr),
                         Box::new(parse_unary(tokens)?),
                     )),
-                    span: span,
+                    span,
                 };
             }
             _ => return Ok(expr),
@@ -608,7 +607,7 @@ pub fn parse_equality(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                         Box::new(expr),
                         Box::new(parse_comparison(tokens)?),
                     )),
-                    span: span,
+                    span,
                 };
             }
             Token::BangEqual => {
@@ -618,7 +617,7 @@ pub fn parse_equality(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                         Box::new(expr),
                         Box::new(parse_comparison(tokens)?),
                     )),
-                    span: span,
+                    span,
                 };
             }
             _ => return Ok(expr),
@@ -639,7 +638,7 @@ pub fn parse_term(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                         Box::new(expr),
                         Box::new(parse_factor(tokens)?),
                     )),
-                    span: span,
+                    span,
                 };
             }
             Token::Minus => {
@@ -649,7 +648,7 @@ pub fn parse_term(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                         Box::new(expr),
                         Box::new(parse_factor(tokens)?),
                     )),
-                    span: span,
+                    span,
                 };
             }
             _ => return Ok(expr),
@@ -666,7 +665,7 @@ pub fn parse_unary(tokens: &mut TokenStream) -> Result<ExprNode, String> {
             let expr = parse_unary(tokens)?;
             Ok(Node {
                 data: Expression::UnaryOp(UnaryOp::Not(Box::new(expr))),
-                span: span,
+                span,
             })
         }
         Token::Minus => {
@@ -674,7 +673,7 @@ pub fn parse_unary(tokens: &mut TokenStream) -> Result<ExprNode, String> {
             let expr = parse_unary(tokens)?;
             Ok(Node {
                 data: Expression::UnaryOp(UnaryOp::Negate(Box::new(expr))),
-                span: span,
+                span,
             })
         }
         _ => parse_call(tokens),
@@ -729,7 +728,7 @@ pub fn parse_expression(tokens: &mut TokenStream) -> Result<ExprNode, String> {
 pub fn parse_ast(tokens: &mut TokenStream) -> Result<Ast, String> {
     let block = parse_block_inner(tokens)?;
     Ok(Ast {
-        block: block,
+        block,
         script: tokens.script.clone(),
     })
 }
@@ -768,9 +767,9 @@ pub fn parse_function(tokens: &mut TokenStream) -> Result<Fn, String> {
             tokens.advance()?;
             Some(parse_expression(tokens)?)
         } else {
-            if optional_params.len() > 0 {
+            if !optional_params.is_empty() {
                 return Err(
-                    tokens.format_peek_err(&format!("No required arguments after optional"))
+                    tokens.format_peek_err("No required arguments after optional")
                 );
             }
             None
@@ -792,10 +791,10 @@ pub fn parse_function(tokens: &mut TokenStream) -> Result<Fn, String> {
     let body = parse_block(tokens)?;
 
     Ok(Fn {
-        ident: ident,
+        ident,
         pos_args_required: params,
         pos_args_optional: optional_params,
-        body: body,
+        body,
     })
 }
 
@@ -946,9 +945,7 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
                             optional_members.push((ident.clone(), expr));
                         } else {
                             if !optional_members.is_empty() {
-                                return Err(tokens.format_peek_err(&format!(
-                                    "Required members not allowed after optional members"
-                                )));
+                                return Err(tokens.format_peek_err("Required members not allowed after optional members"));
                             }
                             members.push(ident.clone());
                         }

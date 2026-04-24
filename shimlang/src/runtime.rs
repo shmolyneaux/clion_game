@@ -425,7 +425,7 @@ impl Environment {
 
     fn pop_scope(&mut self, mem: &mut MMU) -> Result<(), String> {
         if self.current_scope == 0 {
-            return Err(format!("Ran out of scopes to pop!"));
+            return Err("Ran out of scopes to pop!".to_string());
         }
 
         // Get the current EnvScope
@@ -434,7 +434,7 @@ impl Environment {
         // Move to parent scope
         let parent: u32 = scope.parent.into();
         if parent == 0 {
-            return Err(format!("Cannot pop root scope!"));
+            return Err("Cannot pop root scope!".to_string());
         }
 
         // Free the data used by the scope immediately if we know
@@ -510,11 +510,11 @@ const _: () = {
 
 pub trait ShimNative: 'static {
     fn to_string(&self, _interpreter: &mut Interpreter) -> String {
-        format!("{}", type_name::<Self>())
+        type_name::<Self>().to_string()
     }
 
     fn to_string_mem(&self, _mem: &MMU) -> String {
-        format!("{}", type_name::<Self>())
+        type_name::<Self>().to_string()
     }
 
     fn get_attr(
@@ -617,6 +617,12 @@ pub struct ArgBundle {
     pub kwargs: Vec<(Ident, ShimValue)>,
 }
 
+impl Default for ArgBundle {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ArgBundle {
     pub fn new() -> Self {
         Self {
@@ -666,7 +672,7 @@ impl<'a> ArgUnpacker<'a> {
             .ok_or_else(|| format!("Missing required argument: '{}'", debug_u8s(name)))?
         {
             ShimValue::List(position) => unsafe {
-                Ok(std::mem::transmute(
+                Ok(std::mem::transmute::<&mut u64, &mut ShimList>(
                     &mut interpreter.mem.mem[usize::from(position)],
                 ))
             },
@@ -823,11 +829,7 @@ impl ShimValue {
     }
 
     pub fn is_uninitialized(&self) -> bool {
-        if let ShimValue::Uninitialized = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, ShimValue::Uninitialized)
     }
 
     pub fn is_none(&self) -> bool {
@@ -838,7 +840,7 @@ impl ShimValue {
         let hashcode: u64 = match self {
             ShimValue::Integer(i) => fnv1a_hash(&i.to_be_bytes()),
             ShimValue::Float(f) => fnv1a_hash(&f.to_be_bytes()),
-            ShimValue::String(..) => fnv1a_hash(&self.string(interpreter).unwrap().to_vec()),
+            ShimValue::String(..) => fnv1a_hash(self.string(interpreter).unwrap()),
             // We might want to salt these to reduce collisions with other type,
             // but I expect there is a fairly trivial difference in performance
             // and would imply heterogenous dicts.
@@ -873,7 +875,7 @@ impl ShimValue {
                 }
                 Ok(unsafe {
                     let ptr: *mut T =
-                        std::mem::transmute(&mut interpreter.mem.mem[usize::from(*position)]);
+                        &mut interpreter.mem.mem[usize::from(*position)] as *mut u64 as *mut T;
                     &mut *ptr
                 })
             }
@@ -890,7 +892,7 @@ impl ShimValue {
         args: &mut ArgBundle,
     ) -> Result<CallResult, String> {
         match self {
-            ShimValue::None => Err(format!("Can't call None as a function")),
+            ShimValue::None => Err("Can't call None as a function".to_string()),
             ShimValue::Fn(fn_pos) => {
                 let shim_fn: &ShimFn = unsafe { interpreter.mem.get(*fn_pos) };
                 Ok(CallResult::PC(shim_fn.pc, shim_fn.captured_scope))
@@ -922,7 +924,7 @@ impl ShimValue {
                         let shim_fn: &ShimFn = unsafe { interpreter.mem.get(fn_pos) };
                         return Ok(CallResult::PC(shim_fn.pc, shim_fn.captured_scope));
                     } else {
-                        return Err(format!("INTERNAL: no __init__ on StructDef"));
+                        return Err("INTERNAL: no __init__ on StructDef".to_string());
                     }
                 }
 
@@ -1194,7 +1196,7 @@ impl ShimValue {
                 };
                 Ok(dict)
             }
-            _ => Err(format!("Not a dict")),
+            _ => Err("Not a dict".to_string()),
         }
     }
 
@@ -1205,27 +1207,27 @@ impl ShimValue {
                     unsafe { std::mem::transmute(&interpreter.mem.mem[usize::from(*position)]) };
                 Ok(dict)
             }
-            _ => Err(format!("Not a dict")),
+            _ => Err("Not a dict".to_string()),
         }
     }
 
     pub(crate) fn list_mut(&self, interpreter: &mut Interpreter) -> Result<&mut ShimList, String> {
         match self {
             ShimValue::List(position) => unsafe {
-                Ok(std::mem::transmute(
+                Ok(std::mem::transmute::<&mut u64, &mut ShimList>(
                     &mut interpreter.mem.mem[usize::from(*position)],
                 ))
             },
-            _ => Err(format!("Not a list")),
+            _ => Err("Not a list".to_string()),
         }
     }
 
     pub(crate) fn list_from_mem(&self, mem: &MMU) -> Result<&ShimList, String> {
         match self {
             ShimValue::List(position) => unsafe {
-                Ok(std::mem::transmute(&mem.mem[usize::from(*position)]))
+                Ok(std::mem::transmute::<&u64, &ShimList>(&mem.mem[usize::from(*position)]))
             },
-            _ => Err(format!("Not a list")),
+            _ => Err("Not a list".to_string()),
         }
     }
 
@@ -1245,7 +1247,7 @@ impl ShimValue {
                     Ok(std::mem::transmute::<(*const (), *const ()), &dyn ShimNative>(fat_ptr))
                 }
             }
-            _ => Err(format!("Not a native")),
+            _ => Err("Not a native".to_string()),
         }
     }
 
@@ -1268,7 +1270,7 @@ impl ShimValue {
                     >(fat_ptr))
                 }
             }
-            _ => Err(format!("Not a native")),
+            _ => Err("Not a native".to_string()),
         }
     }
 
@@ -1297,7 +1299,7 @@ impl ShimValue {
                 };
                 Ok(bytes)
             }
-            _ => Err(format!("Not a string")),
+            _ => Err("Not a string".to_string()),
         }
     }
 
@@ -1308,7 +1310,7 @@ impl ShimValue {
     pub fn integer(&self) -> Result<i32, String> {
         match self {
             ShimValue::Integer(i) => Ok(*i),
-            _ => Err(format!("Not an integer")),
+            _ => Err("Not an integer".to_string()),
         }
     }
 
@@ -1323,9 +1325,9 @@ impl ShimValue {
                 let index: isize = if index < -len || index >= len {
                     return Err(format!("Index {} is out of bounds", index));
                 } else if index < 0 {
-                    len + index as isize
+                    len + index
                 } else {
-                    index as isize
+                    index
                 };
 
                 let b: u8 = val[index as usize];
@@ -1380,14 +1382,14 @@ impl ShimValue {
         }
     }
 
-    fn to_shimvalue_string(&self, interpreter: &mut Interpreter) -> ShimValue {
+    fn to_shimvalue_string(self, interpreter: &mut Interpreter) -> ShimValue {
         let s = self.to_string(interpreter);
         interpreter.mem.alloc_str(&s.into_bytes())
     }
 
     pub fn to_string_mem(&self, mem: &MMU) -> String {
         match self {
-            ShimValue::Uninitialized => format!("Uninitialized"),
+            ShimValue::Uninitialized => "Uninitialized".to_string(),
             ShimValue::None => "None".to_string(),
             ShimValue::Integer(i) => i.to_string(),
             ShimValue::Float(f) => format_float(*f),
@@ -1401,13 +1403,13 @@ impl ShimValue {
                 let mut out = "[".to_string();
                 for idx in 0..lst.len() {
                     if idx != 0 {
-                        out.push_str(",");
-                        out.push_str(" ");
+                        out.push(',');
+                        out.push(' ');
                     }
                     let item = lst.get(mem, idx as isize).unwrap();
                     out.push_str(&item.to_string_mem(mem));
                 }
-                out.push_str("]");
+                out.push(']');
 
                 out
             }
@@ -1440,7 +1442,7 @@ impl ShimValue {
                         }
                         out.push_str(attr_name);
                         out.push('=');
-                        out.push_str(&&val.to_string_mem(mem));
+                        out.push_str(&val.to_string_mem(mem));
                     }
 
                     out.push(')');
@@ -1665,10 +1667,10 @@ impl ShimValue {
                     ptr
                 };
 
-                if let Ok(_) = dict.get(interpreter, *some_key) {
-                    return Ok(ShimValue::Bool(true));
+                if dict.get(interpreter, *some_key).is_ok() {
+                    Ok(ShimValue::Bool(true))
                 } else {
-                    return Ok(ShimValue::Bool(false));
+                    Ok(ShimValue::Bool(false))
                 }
             }
             ShimValue::List(_) => {
@@ -1813,12 +1815,12 @@ impl ShimValue {
         }
     }
 
-    pub(crate) fn to_u64(&self) -> u64 {
+    pub(crate) fn to_u64(self) -> u64 {
         unsafe {
             let mut tmp: u64 = 0;
             // Copy raw bytes of e into tmp
             std::ptr::copy_nonoverlapping(
-                self as *const Self as *const u8,
+                &self as *const Self as *const u8,
                 &mut tmp as *mut u64 as *mut u8,
                 size_of::<Self>(),
             );
@@ -1826,14 +1828,16 @@ impl ShimValue {
         }
     }
 
-    pub(crate) fn to_bytes(&self) -> [u8; 8] {
-        unsafe { std::mem::transmute(*self) }
+    pub(crate) fn to_bytes(self) -> [u8; 8] {
+        unsafe { std::mem::transmute(self) }
     }
 
     pub(crate) fn from_bytes(bytes: [u8; 8]) -> Self {
         unsafe { std::mem::transmute(bytes) }
     }
 
+    /// # Safety
+    /// `data` must contain a valid bit pattern for `ShimValue`.
     pub unsafe fn from_u64(data: u64) -> Self {
         unsafe {
             let mut tmp: Self = std::mem::zeroed(); // Will be overwritten
@@ -1912,7 +1916,7 @@ impl Interpreter {
                             match loc {
                                 StructAttribute::MemberInstanceOffset(offset) => {
                                     let val: ShimValue = *self.mem.get(pos + *offset as u32 + 1);
-                                    println!("                - {} = {:?}", debug_u8s(&attr), val);
+                                    println!("                - {} = {:?}", debug_u8s(attr), val);
                                 }
                                 StructAttribute::MethodDef(_) => (),
                             };
@@ -1923,10 +1927,10 @@ impl Interpreter {
                         for (attr, loc) in def.lookup.iter() {
                             match loc {
                                 StructAttribute::MemberInstanceOffset(_) => {
-                                    println!("                - {}", debug_u8s(&attr));
+                                    println!("                - {}", debug_u8s(attr));
                                 }
                                 StructAttribute::MethodDef(_) => {
-                                    println!("                - {}()", debug_u8s(&attr));
+                                    println!("                - {}()", debug_u8s(attr));
                                 }
                             };
                         }
@@ -1952,13 +1956,12 @@ impl Interpreter {
             let _scope: &EnvScope = self.mem.get(u24::from(env.current_scope));
         }
 
-        let mut roots: Vec<ShimValue> = Vec::new();
-        roots.push(ShimValue::Environment(u24::from(env.current_scope)));
+        let roots = vec![ShimValue::Environment(u24::from(env.current_scope))];
 
         // Now create GC and process roots
         let mut gc = {
             let _zone = zone_scoped!("Init GC");
-            GC::new(&mut self.mem)
+            GC::new(&self.mem)
         };
         gc.mark(roots);
         self.mem.free_list = gc.sweep();
@@ -2019,6 +2022,7 @@ impl Interpreter {
 
         // This is the (PC, loop_info, scope_count, caller_scope, fn_optional_param_names,
         // fn_optional_param_name_idx, stack_depth) call stack
+        #[allow(clippy::type_complexity)]
         let mut stack_frame: Vec<(
             // PC
             usize,
@@ -2121,9 +2125,9 @@ impl Interpreter {
                         format_script_err(self.program.spans[pc], &self.program.script, &err_str)
                     })?);
                 }
-                val if val == ByteCode::GTE as u8 => {
-                    let b = stack.pop().expect("Operand for ByteCode::GTE");
-                    let a = stack.pop().expect("Operand for ByteCode::GTE");
+                val if val == ByteCode::Gte as u8 => {
+                    let b = stack.pop().expect("Operand for ByteCode::Gte");
+                    let a = stack.pop().expect("Operand for ByteCode::Gte");
                     stack.push(a.gte(self, &b).map_err(|err_str| {
                         format_script_err(self.program.spans[pc], &self.program.script, &err_str)
                     })?);
@@ -2135,9 +2139,9 @@ impl Interpreter {
                         format_script_err(self.program.spans[pc], &self.program.script, &err_str)
                     })?);
                 }
-                val if val == ByteCode::LTE as u8 => {
-                    let b = stack.pop().expect("Operand for ByteCode::LTE");
-                    let a = stack.pop().expect("Operand for ByteCode::LTE");
+                val if val == ByteCode::Lte as u8 => {
+                    let b = stack.pop().expect("Operand for ByteCode::Lte");
+                    let a = stack.pop().expect("Operand for ByteCode::Lte");
                     stack.push(a.lte(self, &b).map_err(|err_str| {
                         format_script_err(self.program.spans[pc], &self.program.script, &err_str)
                     })?);
@@ -2152,8 +2156,8 @@ impl Interpreter {
                     let start = stack.pop().expect("Operand for ByteCode::Range");
 
                     let range = RangeNative {
-                        start: start,
-                        end: end,
+                        start,
+                        end,
                     };
                     stack.push(self.mem.alloc_native(range));
                 }
@@ -2308,9 +2312,7 @@ impl Interpreter {
                             continue;
                         }
                         None => {
-                            return Err(format!(
-                                "Expected UnpackArgs to set indent that doesn't exist!"
-                            ));
+                            return Err("Expected UnpackArgs to set indent that doesn't exist!".to_string());
                         }
                     }
                     pc += 2;
@@ -2337,7 +2339,7 @@ impl Interpreter {
                 }
                 val if val == ByteCode::LiteralString as u8 => {
                     let str_len = bytes[pc + 1] as usize;
-                    let contents = &bytes[pc + 2..pc + 2 + str_len as usize];
+                    let contents = &bytes[pc + 2..pc + 2 + str_len];
 
                     stack.push(self.mem.alloc_str(contents));
                     pc += 1 + str_len;
@@ -2345,14 +2347,14 @@ impl Interpreter {
                 val if val == ByteCode::VariableDeclaration as u8 => {
                     let val = stack.pop().expect("Value for declaration");
                     let ident_len = bytes[pc + 1] as usize;
-                    let ident = &bytes[pc + 2..pc + 2 + ident_len as usize];
+                    let ident = &bytes[pc + 2..pc + 2 + ident_len];
                     env.insert_new(self, ident.to_vec(), val);
                     pc += 1 + ident_len;
                 }
                 val if val == ByteCode::Assignment as u8 => {
                     let val = stack.pop().expect("Value for assignment");
                     let ident_len = bytes[pc + 1] as usize;
-                    let ident = &bytes[pc + 2..pc + 2 + ident_len as usize];
+                    let ident = &bytes[pc + 2..pc + 2 + ident_len];
 
                     if !env.contains_key(self, ident) {
                         return Err(format_script_err(
@@ -2367,7 +2369,7 @@ impl Interpreter {
                 }
                 val if val == ByteCode::VariableLoad as u8 => {
                     let ident_len = bytes[pc + 1] as usize;
-                    let ident = &bytes[pc + 2..pc + 2 + ident_len as usize];
+                    let ident = &bytes[pc + 2..pc + 2 + ident_len];
                     if let Some(value) = env.get(self, ident) {
                         stack.push(value);
                     } else {
@@ -2381,7 +2383,7 @@ impl Interpreter {
                 }
                 val if val == ByteCode::GetAttr as u8 => {
                     let ident_len = bytes[pc + 1] as usize;
-                    let ident = &bytes[pc + 2..pc + 2 + ident_len as usize];
+                    let ident = &bytes[pc + 2..pc + 2 + ident_len];
 
                     let obj = stack.pop().expect("val to access");
 
@@ -2402,7 +2404,7 @@ impl Interpreter {
                 }
                 val if val == ByteCode::SetAttr as u8 => {
                     let ident_len = bytes[pc + 1] as usize;
-                    let ident = &bytes[pc + 2..pc + 2 + ident_len as usize];
+                    let ident = &bytes[pc + 2..pc + 2 + ident_len];
 
                     let val = stack.pop().expect("val to assign");
                     let obj = stack.pop().expect("obj to set");
@@ -2700,7 +2702,7 @@ impl Interpreter {
 
                     unsafe {
                         let ptr: *mut StructDef =
-                            std::mem::transmute(&mut self.mem.mem[usize::from(pos)]);
+                            &mut self.mem.mem[usize::from(pos)] as *mut u64 as *mut StructDef;
                         ptr.write(StructDef {
                             name,
                             member_count,
@@ -2723,7 +2725,7 @@ impl Interpreter {
         }
 
         *mod_pc = pc;
-        if stack.len() > 0 {
+        if !stack.is_empty() {
             Ok(stack.pop().unwrap())
         } else {
             Ok(ShimValue::Uninitialized)
@@ -2731,8 +2733,7 @@ impl Interpreter {
     }
 
     pub fn describe_memory(&self, env: &Environment) -> HashMap<usize, MemDescriptor> {
-        let mut roots: Vec<ShimValue> = Vec::new();
-        roots.push(ShimValue::Environment(u24::from(env.current_scope)));
+        let roots = vec![ShimValue::Environment(u24::from(env.current_scope))];
 
         // Now create GC and process roots
         let mut gc = {
@@ -2866,7 +2867,7 @@ mod tests {
         }
 
         // Pop scope and child var is gone
-        env.pop_scope(&interpreter.mem).unwrap();
+        env.pop_scope(&mut interpreter.mem).unwrap();
         assert!(env.get(&mut interpreter, b"child_var").is_none());
         match env.get(&mut interpreter, b"root_var").unwrap() {
             ShimValue::Integer(10) => {}

@@ -1,4 +1,5 @@
 use crate::parse::Span;
+use std::fmt;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Token {
@@ -30,9 +31,9 @@ pub enum Token {
     DEqual,
     BangEqual,
     GT,
-    GTE,
+    Gte,
     LT,
-    LTE,
+    Lte,
     Percent,
     PlusEqual,
     MinusEqual,
@@ -57,13 +58,13 @@ pub enum Token {
     EOF,
 }
 
-impl Token {
-    pub(crate) fn to_string(&self) -> String {
+impl fmt::Display for Token {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Token::LSquare => "[".to_string(),
-            Token::LCurly => "{".to_string(),
-            Token::LBracket => "(".to_string(),
-            _ => format!("{self:?}"),
+            Token::LSquare => write!(f, "["),
+            Token::LCurly => write!(f, "{{"),
+            Token::LBracket => write!(f, "("),
+            _ => write!(f, "{self:?}"),
         }
     }
 }
@@ -167,7 +168,7 @@ pub(crate) fn format_script_err(span: Span, script: &[u8], msg: &str) -> String 
                 lineno_size = gutter_size - 4
             ));
             if !line.ends_with("\n") {
-                out.push_str("\n");
+                out.push('\n');
             }
 
             if lineno_0 == first_line {
@@ -196,6 +197,7 @@ pub(crate) fn format_script_err(span: Span, script: &[u8], msg: &str) -> String 
         ));
         out.push_str(&format!("{gutter_pad} |\n"));
 
+        #[allow(clippy::needless_range_loop)]
         for lineno_0 in first_line..=last_line {
             let lineno = lineno_0 + 1;
             let line_info = &script_lines[lineno_0];
@@ -215,7 +217,7 @@ pub(crate) fn format_script_err(span: Span, script: &[u8], msg: &str) -> String 
                 lineno_size = lineno_width,
             ));
             if !line.ends_with("\n") {
-                out.push_str("\n");
+                out.push('\n');
             }
         }
 
@@ -423,7 +425,7 @@ pub fn lex_number(text: &mut &[u8]) -> Result<Token, String> {
                     return Ok(token);
                 }
                 if found_decimal {
-                    return Err(format!("Found multiple decimals in number"));
+                    return Err("Found multiple decimals in number".to_string());
                 }
                 found_decimal = true;
             }
@@ -467,11 +469,11 @@ pub fn lex_number(text: &mut &[u8]) -> Result<Token, String> {
 
 pub fn lex_multiline_comment_end_idx(text: &[u8]) -> Result<usize, String> {
     if text.len() < 4 {
-        return Err(format!("Text not long enough to finish multiline comment"));
+        return Err("Text not long enough to finish multiline comment".to_string());
     }
 
     if text[..2] != *b"/*" {
-        return Err(format!("Multiline comment does not start with `/*`"));
+        return Err("Multiline comment does not start with `/*`".to_string());
     }
 
     let mut depth = 1;
@@ -495,9 +497,7 @@ pub fn lex_multiline_comment_end_idx(text: &[u8]) -> Result<usize, String> {
         }
         idx += 1;
     }
-    Err(format!(
-        "Not enough text remaining to close multiline comment"
-    ))
+    Err("Not enough text remaining to close multiline comment".to_string())
 }
 
 pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
@@ -534,8 +534,6 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
                     tokens.push(Token::Break);
                 } else if ident == b"continue" {
                     tokens.push(Token::Continue);
-                } else if ident == b"in" {
-                    tokens.push(Token::In);
                 } else if ident == b"struct" {
                     tokens.push(Token::Struct);
                 } else if ident == b"return" {
@@ -585,7 +583,7 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
                                 end: (original_text.len() - text.len() + 1) as u32,
                             },
                             original_text,
-                            &format!("Brace {} does not match {}", b.to_string(), c as char),
+                            &format!("Brace {b} does not match {}", c as char),
                         ));
                     }
                     None => {
@@ -595,7 +593,7 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
                                 end: (original_text.len() - text.len() + 1) as u32,
                             },
                             original_text,
-                            &format!("No braces remaining on stack!"),
+                            "No braces remaining on stack!",
                         ));
                     }
                 }
@@ -611,7 +609,7 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
                                 end: (original_text.len() - text.len() + 1) as u32,
                             },
                             original_text,
-                            &format!("Brace {} does not match {}", b.to_string(), c as char),
+                            &format!("Brace {b} does not match {}", c as char),
                         ));
                     }
                     None => {
@@ -621,7 +619,7 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
                                 end: (original_text.len() - text.len() + 1) as u32,
                             },
                             original_text,
-                            &format!("No braces remaining on stack!"),
+                            "No braces remaining on stack!",
                         ));
                     }
                 }
@@ -647,7 +645,7 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
                             end: (original_text.len() - text.len() + 1) as u32,
                         },
                         original_text,
-                        &format!("Brace {} does not match {}", b.to_string(), c as char),
+                        &format!("Brace {b} does not match {}", c as char),
                     ));
                 }
                 None => {
@@ -657,7 +655,7 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
                             end: (original_text.len() - text.len() + 1) as u32,
                         },
                         original_text,
-                        &format!("No braces remaining on stack!"),
+                        "No braces remaining on stack!",
                     ));
                 }
             },
@@ -693,15 +691,12 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
                         if text.is_empty() {
                             break;
                         }
-                        match text[0] {
-                            b'\n' => break,
-                            _ => (),
-                        }
+                        if text[0] == b'\n' { break }
                     }
                     // NOTE: no token to push since this is a comment
                 }
                 b'*' => {
-                    let idx = lex_multiline_comment_end_idx(&text)?;
+                    let idx = lex_multiline_comment_end_idx(text)?;
                     text = &text[(idx - 1)..];
                 }
                 b'=' => {
@@ -728,14 +723,14 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
             b'>' => match text[1] {
                 b'=' => {
                     text = &text[1..];
-                    tokens.push(Token::GTE);
+                    tokens.push(Token::Gte);
                 }
                 _ => tokens.push(Token::GT),
             },
             b'<' => match text[1] {
                 b'=' => {
                     text = &text[1..];
-                    tokens.push(Token::LTE);
+                    tokens.push(Token::Lte);
                 }
                 _ => tokens.push(Token::LT),
             },
@@ -774,7 +769,7 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
     assert_eq!(tokens.len(), spans.len(),);
     Ok(TokenStream {
         idx: 0,
-        tokens: tokens,
+        tokens,
         token_spans: spans,
         script: starting_text.to_vec(),
     })

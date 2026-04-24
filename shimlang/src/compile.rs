@@ -28,9 +28,9 @@ pub(crate) enum ByteCode {
     Divide,
     Modulus,
     GT,
-    GTE,
+    Gte,
     LT,
-    LTE,
+    Lte,
     In,
     Not,
     Negate,
@@ -88,8 +88,8 @@ pub fn compile_ast(ast: &Ast) -> Result<Program, String> {
     compile_block_inner(&ast.block, true, ast_span, &mut program)?;
     let (bytecode, spans): (Vec<u8>, Vec<Span>) = program.into_iter().unzip();
     Ok(Program {
-        bytecode: bytecode,
-        spans: spans,
+        bytecode,
+        spans,
         script: ast.script.clone(),
     })
 }
@@ -103,8 +103,8 @@ pub fn u8s_to_u16(val: [u8; 2]) -> u16 {
 }
 
 pub fn compile_fn_body_inner(
-    pos_args_required: &Vec<Vec<u8>>,
-    pos_args_optional: &Vec<(Vec<u8>, ExprNode)>,
+    pos_args_required: &[Vec<u8>],
+    pos_args_optional: &[(Vec<u8>, ExprNode)],
     body: &Block,
     fn_span: Span,
 ) -> Result<Vec<(u8, Span)>, String> {
@@ -154,7 +154,7 @@ pub fn compile_fn_body_inner(
     }
 
     for stmt in body.stmts.iter() {
-        asm.extend(compile_statement(&stmt)?);
+        asm.extend(compile_statement(stmt)?);
     }
 
     if let Some(expr) = &body.last_expr {
@@ -162,10 +162,7 @@ pub fn compile_fn_body_inner(
         asm.extend(compile_return(&val, expr.span)?);
     } else {
         let needs_implicit_return = if body.stmts.len() > 1 {
-            match &body.stmts[body.stmts.len() - 1].data {
-                Statement::Return(_) => false,
-                _ => true,
-            }
+            !matches!(&body.stmts[body.stmts.len() - 1].data, Statement::Return(_))
         } else {
             true
         };
@@ -187,8 +184,8 @@ pub fn compile_fn_body_inner(
 }
 
 pub fn compile_fn_expression(
-    pos_args_required: &Vec<Vec<u8>>,
-    pos_args_optional: &Vec<(Vec<u8>, ExprNode)>,
+    pos_args_required: &[Vec<u8>],
+    pos_args_optional: &[(Vec<u8>, ExprNode)],
     body: &Block,
     fn_span: Span,
 ) -> Result<Vec<(u8, Span)>, String> {
@@ -221,7 +218,7 @@ pub fn compile_fn(func: &Fn, fn_span: Span) -> Result<Vec<(u8, Span)>, String> {
     let ident = if let Some(ident) = &func.ident {
         ident
     } else {
-        return Err(format!("No ident for function declaration!"));
+        return Err("No ident for function declaration!".to_string());
     };
 
     let mut asm = compile_fn_expression(
@@ -286,7 +283,7 @@ pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, S
                 ident.len().try_into().expect("Ident len should into u8"),
                 expr.span,
             ));
-            for b in ident.into_iter() {
+            for b in ident.iter() {
                 expr_asm.push((*b, expr.span));
             }
 
@@ -299,7 +296,7 @@ pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, S
                 ident.len().try_into().expect("Ident len should into u8"),
                 expr.span,
             ));
-            for b in ident.into_iter() {
+            for b in ident.iter() {
                 expr_asm.push((*b, expr.span));
             }
 
@@ -313,7 +310,7 @@ pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, S
                 ident.len().try_into().expect("Ident len should into u8"),
                 expr.span,
             ));
-            for b in ident.into_iter() {
+            for b in ident.iter() {
                 expr_asm.push((*b, expr.span));
             }
 
@@ -422,7 +419,7 @@ pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, S
                     .expect("Struct name len should into u8"),
                 stmt_span,
             ));
-            for b in ident.into_iter() {
+            for b in ident.iter() {
                 asm.push((*b, stmt_span));
             }
 
@@ -440,7 +437,7 @@ pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, S
                         .expect("Member ident len should into u8"),
                     stmt_span,
                 ));
-                for b in member.into_iter() {
+                for b in member.iter() {
                     asm.push((*b, stmt_span));
                 }
             }
@@ -453,6 +450,7 @@ pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, S
                 })
                 .collect();
 
+            #[allow(clippy::type_complexity)]
             let mut method_defs: Vec<(&[u8], Vec<(u8, Span)>)> = Vec::new();
             method_defs.push((
                 b"__init__",
@@ -480,9 +478,9 @@ pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, S
                 let ident = if let Some(ident) = &method.ident {
                     ident
                 } else {
-                    return Err(format!("Method does not have ident!"));
+                    return Err("Method does not have ident!".to_string());
                 };
-                method_defs.push((&ident, compile_fn_body(method, stmt_span)?));
+                method_defs.push((ident, compile_fn_body(method, stmt_span)?));
             }
 
             let mut jump_asm_idx = Vec::new();
@@ -497,7 +495,7 @@ pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, S
                         .expect("Method ident len should into u8"),
                     stmt_span,
                 ));
-                for b in ident.into_iter() {
+                for b in ident.iter() {
                     asm.push((*b, stmt_span));
                 }
             }
@@ -520,7 +518,7 @@ pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, S
                 stmt_span,
             ));
 
-            for b in ident.into_iter() {
+            for b in ident.iter() {
                 asm.push((*b, stmt_span));
             }
 
@@ -675,10 +673,10 @@ pub fn compile_block_inner(
     asm: &mut Vec<(u8, Span)>,
 ) -> Result<(), String> {
     for stmt in block.stmts.iter() {
-        asm.extend(compile_statement(&stmt)?);
+        asm.extend(compile_statement(stmt)?);
     }
     if let Some(last_expr) = &block.last_expr {
-        asm.extend(compile_expression(&last_expr)?);
+        asm.extend(compile_expression(last_expr)?);
     } else {
         asm.push((ByteCode::LiteralNone as u8, block_span));
     }
@@ -950,7 +948,7 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
                 ident.len().try_into().expect("Ident len should into u8"),
                 expr.span,
             ));
-            for b in ident.into_iter() {
+            for b in ident.iter() {
                 res.push((*b, expr.span));
             }
             Ok(res)
@@ -959,7 +957,7 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
             let mut res = Vec::new();
             res.push((ByteCode::LiteralString as u8, expr.span));
             res.push((s.len().try_into().expect("Ident should into u8"), expr.span));
-            for b in s.into_iter() {
+            for b in s.iter() {
                 res.push((*b, expr.span));
             }
             Ok(res)
@@ -967,7 +965,7 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
         Expression::Primary(Primary::List(items)) => {
             let mut res = Vec::new();
             for expr in items {
-                res.extend(compile_expression(&expr)?);
+                res.extend(compile_expression(expr)?);
             }
             res.push((ByteCode::CreateList as u8, expr.span));
             let len: u16 = items.len().try_into().expect("List should fit into u16");
@@ -975,9 +973,9 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
             res.push(((len & 0xff) as u8, expr.span));
             Ok(res)
         }
-        Expression::Primary(Primary::Expression(expr)) => compile_expression(&expr),
+        Expression::Primary(Primary::Expression(expr)) => compile_expression(expr),
         Expression::BooleanOp(BooleanOp::And(a, b)) => {
-            let mut asm = compile_expression(&a)?;
+            let mut asm = compile_expression(a)?;
             asm.push((ByteCode::Copy as u8, span));
 
             let short_circuit_idx = asm.len();
@@ -988,7 +986,7 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
             // Since the result of a is truthy we get rid of it and return the result of b
             asm.push((ByteCode::Pop as u8, span));
 
-            asm.extend(compile_expression(&b)?);
+            asm.extend(compile_expression(b)?);
 
             let short_circuit_offset = u16_to_u8s(asm.len() as u16 - short_circuit_idx as u16);
             asm[short_circuit_idx + 1].0 = short_circuit_offset[0];
@@ -997,7 +995,7 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
             Ok(asm)
         }
         Expression::BooleanOp(BooleanOp::Or(a, b)) => {
-            let mut asm = compile_expression(&a)?;
+            let mut asm = compile_expression(a)?;
             asm.push((ByteCode::Copy as u8, span));
 
             let short_circuit_idx = asm.len();
@@ -1008,7 +1006,7 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
             // Since the result of a is falsy we get rid of it and return the result of b
             asm.push((ByteCode::Pop as u8, span));
 
-            asm.extend(compile_expression(&b)?);
+            asm.extend(compile_expression(b)?);
 
             let short_circuit_offset = u16_to_u8s(asm.len() as u16 - short_circuit_idx as u16);
             asm[short_circuit_idx + 1].0 = short_circuit_offset[0];
@@ -1026,14 +1024,14 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
                 BinaryOp::Modulus(a, b) => (ByteCode::Modulus, a, b),
                 BinaryOp::Divide(a, b) => (ByteCode::Divide, a, b),
                 BinaryOp::GT(a, b) => (ByteCode::GT, a, b),
-                BinaryOp::GTE(a, b) => (ByteCode::GTE, a, b),
+                BinaryOp::Gte(a, b) => (ByteCode::Gte, a, b),
                 BinaryOp::LT(a, b) => (ByteCode::LT, a, b),
-                BinaryOp::LTE(a, b) => (ByteCode::LTE, a, b),
+                BinaryOp::Lte(a, b) => (ByteCode::Lte, a, b),
                 BinaryOp::In(a, b) => (ByteCode::In, a, b),
                 BinaryOp::Range(a, b) => (ByteCode::Range, a, b),
             };
-            let mut res = compile_expression(&a)?;
-            res.extend(compile_expression(&b)?);
+            let mut res = compile_expression(a)?;
+            res.extend(compile_expression(b)?);
             res.push((opcode as u8, expr.span));
             Ok(res)
         }
@@ -1042,17 +1040,17 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
                 UnaryOp::Not(a) => (ByteCode::Not, a),
                 UnaryOp::Negate(a) => (ByteCode::Negate, a),
             };
-            let mut res = compile_expression(&a)?;
+            let mut res = compile_expression(a)?;
             res.push((opcode as u8, expr.span));
             Ok(res)
         }
         Expression::Stringify(expr) => {
-            let mut asm = compile_expression(&expr)?;
+            let mut asm = compile_expression(expr)?;
             asm.push((ByteCode::Stringify as u8, expr.span));
             Ok(asm)
         }
         Expression::Index(obj_expr, index_expr) => {
-            let mut asm = compile_expression(&obj_expr)?;
+            let mut asm = compile_expression(obj_expr)?;
             asm.extend(compile_expression(index_expr)?);
             asm.push((ByteCode::Index as u8, expr.span));
 
@@ -1070,7 +1068,7 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
                 // Instead of allocating for a BoundMethod, it executes ShimValue::call_attr
 
                 // Get the object
-                let mut res = compile_expression(&obj_expr)?;
+                let mut res = compile_expression(obj_expr)?;
 
                 // Get the args
                 for arg_expr in args.iter() {
@@ -1084,7 +1082,7 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
                         ident.len().try_into().expect("Ident should into u8"),
                         kwarg_expr.span,
                     ));
-                    for b in ident.into_iter() {
+                    for b in ident.iter() {
                         res.push((*b, kwarg_expr.span));
                     }
 
@@ -1107,13 +1105,13 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
                         .expect("Ident len should into u8"),
                     span,
                 ));
-                for b in attr_ident.into_iter() {
+                for b in attr_ident.iter() {
                     res.push((*b, span));
                 }
                 Ok(res)
             } else {
                 // First we evaluate the thing that needs to be called
-                let mut res = compile_expression(&expr)?;
+                let mut res = compile_expression(expr)?;
 
                 // Then we evaluate each argument
                 for arg_expr in args.iter() {
@@ -1126,7 +1124,7 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
                         ident.len().try_into().expect("Ident should into u8"),
                         kwarg_expr.span,
                     ));
-                    for b in ident.into_iter() {
+                    for b in ident.iter() {
                         res.push((*b, kwarg_expr.span));
                     }
 
@@ -1140,13 +1138,13 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
             }
         }
         Expression::Attribute(expr, ident) => {
-            let mut res = compile_expression(&expr)?;
+            let mut res = compile_expression(expr)?;
             res.push((ByteCode::GetAttr as u8, span));
             res.push((
                 ident.len().try_into().expect("Ident len should into u8"),
                 span,
             ));
-            for b in ident.into_iter() {
+            for b in ident.iter() {
                 res.push((*b, span));
             }
             Ok(res)
@@ -1222,11 +1220,11 @@ pub fn format_asm(bytes: &[u8]) -> String {
             out.push_str("Not");
         } else if *b == ByteCode::GT as u8 {
             out.push_str("GT");
-        } else if *b == ByteCode::GTE as u8 {
+        } else if *b == ByteCode::Gte as u8 {
             out.push_str("GTE");
         } else if *b == ByteCode::LT as u8 {
             out.push_str("LT");
-        } else if *b == ByteCode::LTE as u8 {
+        } else if *b == ByteCode::Lte as u8 {
             out.push_str("LTE");
         } else if *b == ByteCode::In as u8 {
             out.push_str("In");

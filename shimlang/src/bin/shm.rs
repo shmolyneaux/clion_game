@@ -6,22 +6,18 @@ use std::process::ExitCode;
 use std::io;
 use std::io::Write;
 
-use shimlang;
 use shimlang::*;
 
 #[derive(Debug, PartialEq)]
+#[derive(Default)]
 enum Command {
     Parse,
+    #[default]
     Execute,
     Spans,
     Compile,
 }
 
-impl Default for Command {
-    fn default() -> Self {
-        Command::Execute
-    }
-}
 
 #[derive(Debug, Default)]
 struct Args {
@@ -114,7 +110,7 @@ fn run() -> Result<(), String> {
 
         match std::str::from_utf8(&contents) {
             Ok(_) => (),
-            Err(e) => return Err((format!("Script is not utf8 {:?}", e)).into()),
+            Err(e) => return Err(format!("Script is not utf8 {:?}", e)),
         }
 
         match args.command {
@@ -123,7 +119,7 @@ fn run() -> Result<(), String> {
                     Ok(ast) => ast,
                     Err(msg) => {
                         eprintln!("Parse Error:\n{msg}");
-                        return Err((format!("Failed to parse script")).into());
+                        return Err("Failed to parse script".to_string());
                     }
                 };
                 let program = shimlang::compile_ast(&ast)?;
@@ -142,7 +138,7 @@ fn run() -> Result<(), String> {
                     }
                     Err(msg) => {
                         eprintln!("{msg}");
-                        return Err((format!("")).into());
+                        return Err(String::new());
                     }
                 };
             }
@@ -151,7 +147,7 @@ fn run() -> Result<(), String> {
                     Ok(program) => program,
                     Err(msg) => {
                         eprintln!("Parse Error:\n{msg}");
-                        return Err((format!("Failed to parse script")).into());
+                        return Err("Failed to parse script".to_string());
                     }
                 };
             }
@@ -170,7 +166,7 @@ fn run() -> Result<(), String> {
                     Ok(ast) => ast,
                     Err(msg) => {
                         eprintln!("Parse Error:\n{msg}");
-                        return Err((format!("Failed to parse script")).into());
+                        return Err("Failed to parse script".to_string());
                     }
                 };
                 let program = shimlang::compile_ast(&ast)?;
@@ -199,7 +195,7 @@ fn run() -> Result<(), String> {
                 Ok(ast) => ast,
                 Err(msg) => {
                     eprintln!("{msg}");
-                    return Err((format!("")).into());
+                    return Err(String::new());
                 }
             };
             let program = shimlang::compile_ast(&ast)?;
@@ -216,7 +212,7 @@ fn run() -> Result<(), String> {
                 }
                 Err(msg) => {
                     eprintln!("{msg}");
-                    return Err((format!("")).into());
+                    return Err(String::new());
                 }
             };
         }
@@ -229,7 +225,7 @@ fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(msg) => {
-            if msg != "" {
+            if !msg.is_empty() {
                 eprintln!("{msg}");
             }
             ExitCode::from(1)

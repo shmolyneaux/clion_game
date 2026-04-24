@@ -4,7 +4,6 @@
  */
 use std::process::ExitCode;
 
-use shimlang;
 use shimlang::*;
 
 fn run() -> Result<(), String> {
@@ -31,11 +30,11 @@ fn run() -> Result<(), String> {
         print("done");
     "#;
 
-    let ast = match shimlang::ast_from_text(&contents) {
+    let ast = match shimlang::ast_from_text(contents) {
         Ok(ast) => ast,
         Err(msg) => {
             eprintln!("Parse Error:\n{msg}");
-            return Err((format!("Failed to parse script")).into());
+            return Err("Failed to parse script".to_string());
         }
     };
     let program = shimlang::compile_ast(&ast)?;
@@ -50,7 +49,7 @@ fn run() -> Result<(), String> {
             }
             Err(msg) => {
                 eprintln!("{msg}");
-                return Err((format!("")).into());
+                return Err(String::new());
             }
         };
     }
@@ -62,7 +61,7 @@ fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(msg) => {
-            if msg != "" {
+            if !msg.is_empty() {
                 eprintln!("{msg}");
             }
             ExitCode::from(1)

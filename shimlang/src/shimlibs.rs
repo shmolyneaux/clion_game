@@ -22,9 +22,7 @@ impl ShimNative for ListIterator {
                 args: &ArgBundle,
             ) -> Result<ShimValue, String> {
                 if args.args.len() != 1 {
-                    return Err(format!(
-                        "Can't provide positional args to ListIterator.next()"
-                    ));
+                    return Err("Can't provide positional args to ListIterator.next()".to_string());
                 }
 
                 let itr: &mut ListIterator = args.args[0].as_native(interpreter)?;
@@ -32,7 +30,7 @@ impl ShimNative for ListIterator {
                 if itr.idx >= lst.len() {
                     Ok(ShimValue::None)
                 } else {
-                    let result = lst.get(&mut interpreter.mem, itr.idx as isize)?;
+                    let result = lst.get(&interpreter.mem, itr.idx as isize)?;
                     itr.idx += 1;
 
                     Ok(result)
@@ -73,9 +71,7 @@ impl ShimNative for DictKeysIterator {
                 args: &ArgBundle,
             ) -> Result<ShimValue, String> {
                 if args.args.len() != 1 {
-                    return Err(format!(
-                        "Can't provide positional args to DictKeysIterator.next()"
-                    ));
+                    return Err("Can't provide positional args to DictKeysIterator.next()".to_string());
                 }
 
                 let itr: &mut DictKeysIterator = args.args[0].as_native(interpreter)?;
@@ -143,9 +139,7 @@ impl ShimNative for DictValuesIterator {
                 args: &ArgBundle,
             ) -> Result<ShimValue, String> {
                 if args.args.len() != 1 {
-                    return Err(format!(
-                        "Can't provide positional args to DictValuesIterator.next()"
-                    ));
+                    return Err("Can't provide positional args to DictValuesIterator.next()".to_string());
                 }
 
                 let itr: &mut DictValuesIterator = args.args[0].as_native(interpreter)?;
@@ -242,9 +236,7 @@ impl ShimNative for DictItemsIterator {
                 args: &ArgBundle,
             ) -> Result<ShimValue, String> {
                 if args.args.len() != 1 {
-                    return Err(format!(
-                        "Can't provide positional args to DictItemsIterator.next()"
-                    ));
+                    return Err("Can't provide positional args to DictItemsIterator.next()".to_string());
                 }
 
                 let itr: &mut DictItemsIterator = args.args[0].as_native(interpreter)?;
@@ -340,20 +332,16 @@ impl ShimNative for RangeNative {
                 let range: &RangeNative = obj.as_native(interpreter)?;
 
                 // Check for zero step
-                let is_zero = match step {
-                    ShimValue::Integer(0) => true,
-                    ShimValue::Float(f) if f == 0.0 => true,
-                    _ => false,
-                };
+                let is_zero = matches!(step, ShimValue::Integer(0) | ShimValue::Float(0.0));
 
                 if is_zero {
-                    return Err(format!("Step cannot be zero"));
+                    return Err("Step cannot be zero".to_string());
                 }
 
                 let iterator = RangeIterator {
                     current: range.start,
                     end: range.end,
-                    step: step,
+                    step,
                 };
                 Ok(interpreter.mem.alloc_native(iterator))
             }
@@ -415,9 +403,7 @@ impl ShimNative for RangeIterator {
                 args: &ArgBundle,
             ) -> Result<ShimValue, String> {
                 if args.args.len() != 1 {
-                    return Err(format!(
-                        "Can't provide positional args to RangeIterator.next()"
-                    ));
+                    return Err("Can't provide positional args to RangeIterator.next()".to_string());
                 }
 
                 let itr: &mut RangeIterator = args.args[0].as_native(interpreter)?;
@@ -427,20 +413,20 @@ impl ShimNative for RangeIterator {
                 // For negative steps: iterate while current > end
                 let step_is_positive = match itr.step.gt(interpreter, &ShimValue::Integer(0))? {
                     ShimValue::Bool(b) => b,
-                    _ => return Err(format!("Step comparison failed")),
+                    _ => return Err("Step comparison failed".to_string()),
                 };
 
                 let has_more = if step_is_positive {
                     // current < end
                     match itr.current.lt(interpreter, &itr.end)? {
                         ShimValue::Bool(b) => b,
-                        _ => return Err(format!("Range comparison failed")),
+                        _ => return Err("Range comparison failed".to_string()),
                     }
                 } else {
                     // current > end
                     match itr.current.gt(interpreter, &itr.end)? {
                         ShimValue::Bool(b) => b,
-                        _ => return Err(format!("Range comparison failed")),
+                        _ => return Err("Range comparison failed".to_string()),
                     }
                 };
 
@@ -757,8 +743,7 @@ impl ShimDict {
         let new_entries = self.entries_mut(interpreter);
 
         let mut write_idx = 0;
-        for read_idx in 0..old_entries.len() {
-            let entry = old_entries[read_idx];
+        for &entry in old_entries {
             if entry.is_valid() {
                 new_entries[write_idx] = entry;
                 new_entries[write_idx].is_valid();
@@ -872,7 +857,7 @@ impl ShimDict {
     }
 
     fn mask(&self) -> usize {
-        (self.index_size() - 1) as usize
+        self.index_size() - 1
     }
 
     fn probe_entry_realloc(&self, interpreter: &Interpreter, longhash: u32) -> usize {
@@ -929,20 +914,20 @@ impl ShimDict {
         // Linear probe for now
         for _ in 0..self.index_size() {
             if indices.is_unset(idx) {
-                if freeslot == None {
+                if freeslot.is_none() {
                     freeslot = Some(idx);
                 }
                 break;
             } else if indices.is_tombstone(idx) {
-                if freeslot == None {
+                if freeslot.is_none() {
                     freeslot = Some(idx);
                 }
             } else {
                 // Hash matches, let's check the entry and see if the key matches
                 let entry_idx = indices.get(idx);
-                let entry = self.get_entry_mut(interpreter, entry_idx as usize);
+                let entry = self.get_entry_mut(interpreter, entry_idx);
                 if key.equal_inner(interpreter, &entry.key)? {
-                    return Ok(DictSlot::Occupied(idx as usize, entry));
+                    return Ok(DictSlot::Occupied(idx, entry));
                 }
                 // Otherwise continue probing
             }
@@ -1061,7 +1046,7 @@ impl ShimDict {
     fn entries_mut(&self, interpreter: &mut Interpreter) -> &'static mut [DictEntry] {
         unsafe {
             let u64_slice = &mut interpreter.mem.mem[usize::from(self.entries)
-                ..usize::from(self.entries) + 3 * (self.capacity() as usize)];
+                ..usize::from(self.entries) + 3 * self.capacity()];
             std::slice::from_raw_parts_mut(
                 u64_slice.as_mut_ptr() as *mut DictEntry,
                 u64_slice.len() / 3,
@@ -1073,6 +1058,7 @@ impl ShimDict {
         unsafe { std::mem::transmute(&interpreter.mem.mem[usize::from(self.entries) + 3 * idx]) }
     }
 
+    #[allow(clippy::mut_from_ref)]
     fn get_entry_mut(&self, interpreter: &mut Interpreter, idx: usize) -> &mut DictEntry {
         unsafe {
             std::mem::transmute(&mut interpreter.mem.mem[usize::from(self.entries) + 3 * idx])
@@ -1167,6 +1153,12 @@ const _: () = {
     assert!(std::mem::size_of::<ShimList>() == 8);
 };
 
+impl Default for ShimList {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ShimList {
     pub fn new() -> Self {
         Self {
@@ -1252,8 +1244,8 @@ pub(crate) fn shim_dict(
     interpreter: &mut Interpreter,
     args: &ArgBundle,
 ) -> Result<ShimValue, String> {
-    if args.args.len() != 0 {
-        return Err(format!("Can't provide positional args to dict()"));
+    if !args.args.is_empty() {
+        return Err("Can't provide positional args to dict()".to_string());
     }
 
     let retval = interpreter.mem.alloc_dict();
@@ -1277,8 +1269,8 @@ pub(crate) fn shim_range(
     unpacker.end()?;
 
     let range = RangeNative {
-        start: start,
-        end: end,
+        start,
+        end,
     };
     Ok(interpreter.mem.alloc_native(range))
 }
@@ -1304,7 +1296,7 @@ pub(crate) fn shim_assert(
     args: &ArgBundle,
 ) -> Result<ShimValue, String> {
     if !args.kwargs.is_empty() {
-        return Err(format!("Assert doesn't take keyword arguments"));
+        return Err("Assert doesn't take keyword arguments".to_string());
     }
     if args.len() > 2 {
         return Err(format!("Assert got more than two arguments! {:?}", args));
@@ -1334,7 +1326,7 @@ pub(crate) fn shim_panic(
         if idx != 0 {
             out.push(' ');
         }
-        out.push_str(&format!("{}", arg.to_string(interpreter)));
+        out.push_str(&arg.to_string(interpreter));
     }
 
     out.push('\n');
@@ -1422,9 +1414,7 @@ pub(crate) fn compare_values(
                 Ok(Ordering::Equal)
             } else if x.is_nan() {
                 Ok(Ordering::Greater)
-            } else if y.is_nan() {
-                Ok(Ordering::Less)
-            } else if x < y {
+            } else if y.is_nan() || x < y {
                 Ok(Ordering::Less)
             } else if x > y {
                 Ok(Ordering::Greater)
@@ -1455,7 +1445,7 @@ pub(crate) fn compare_values(
         (ShimValue::String(..), ShimValue::String(..)) => {
             let str_a = a.string(interpreter)?;
             let str_b = b.string(interpreter)?;
-            Ok(str_a.cmp(&str_b))
+            Ok(str_a.cmp(str_b))
         }
         (ShimValue::Bool(x), ShimValue::Bool(y)) => Ok(x.cmp(y)),
         (ShimValue::None, ShimValue::None) => Ok(Ordering::Equal),
@@ -1531,12 +1521,12 @@ pub(crate) fn shim_list_filter(
                 CallResult::ReturnValue(val) => val,
                 CallResult::PC(pc, captured_scope) => {
                     let mut new_env = Environment::with_scope(captured_scope);
-                    let val = interpreter.execute_bytecode_extended(
+                    
+                    interpreter.execute_bytecode_extended(
                         &mut (pc as usize),
                         args,
                         &mut new_env,
-                    )?;
-                    val
+                    )?
                 }
             }
         } else {
@@ -1571,12 +1561,12 @@ pub(crate) fn shim_list_map(
             CallResult::ReturnValue(val) => val,
             CallResult::PC(pc, captured_scope) => {
                 let mut new_env = Environment::with_scope(captured_scope);
-                let val = interpreter.execute_bytecode_extended(
+                
+                interpreter.execute_bytecode_extended(
                     &mut (pc as usize),
                     args,
                     &mut new_env,
-                )?;
-                val
+                )?
             }
         };
         new_lst.push(&mut interpreter.mem, output);
@@ -2423,7 +2413,7 @@ pub(crate) fn shim_pow(
         (ShimValue::Integer(b), ShimValue::Float(e)) => Ok(ShimValue::Float((b as f32).powf(e))),
         (ShimValue::Float(b), ShimValue::Integer(e)) => Ok(ShimValue::Float(b.powi(e))),
         (ShimValue::Float(b), ShimValue::Float(e)) => Ok(ShimValue::Float(b.powf(e))),
-        _ => Err(format!("pow: expected int or float arguments")),
+        _ => Err("pow: expected int or float arguments".to_string()),
     }
 }
 
@@ -2437,7 +2427,7 @@ pub(crate) fn shim_round(
     match value {
         ShimValue::Integer(i) => Ok(ShimValue::Integer(i)),
         ShimValue::Float(f) => Ok(ShimValue::Integer(f.round() as i32)),
-        _ => Err(format!("round: expected int or float")),
+        _ => Err("round: expected int or float".to_string()),
     }
 }
 
@@ -2451,7 +2441,7 @@ pub(crate) fn shim_ceil(
     match value {
         ShimValue::Integer(i) => Ok(ShimValue::Integer(i)),
         ShimValue::Float(f) => Ok(ShimValue::Integer(f.ceil() as i32)),
-        _ => Err(format!("ceil: expected int or float")),
+        _ => Err("ceil: expected int or float".to_string()),
     }
 }
 
@@ -2465,7 +2455,7 @@ pub(crate) fn shim_floor(
     match value {
         ShimValue::Integer(i) => Ok(ShimValue::Integer(i)),
         ShimValue::Float(f) => Ok(ShimValue::Integer(f.floor() as i32)),
-        _ => Err(format!("floor: expected int or float")),
+        _ => Err("floor: expected int or float".to_string()),
     }
 }
 
@@ -2479,7 +2469,7 @@ pub(crate) fn shim_signum(
     match value {
         ShimValue::Integer(i) => Ok(ShimValue::Integer(i.signum())),
         ShimValue::Float(f) => Ok(ShimValue::Integer(f.signum() as i32)),
-        _ => Err(format!("signum: expected int or float")),
+        _ => Err("signum: expected int or float".to_string()),
     }
 }
 
@@ -2493,7 +2483,7 @@ pub(crate) fn shim_recip(
     let f = match value {
         ShimValue::Integer(i) => i as f32,
         ShimValue::Float(f) => f,
-        _ => return Err(format!("recip: expected int or float")),
+        _ => return Err("recip: expected int or float".to_string()),
     };
     Ok(ShimValue::Float(f.recip()))
 }
@@ -2508,7 +2498,7 @@ pub(crate) fn shim_frac(
     let f = match value {
         ShimValue::Integer(_) => return Ok(ShimValue::Float(0.0)),
         ShimValue::Float(f) => f,
-        _ => return Err(format!("frac: expected int or float")),
+        _ => return Err("frac: expected int or float".to_string()),
     };
     Ok(ShimValue::Float(f.fract()))
 }
@@ -2523,7 +2513,7 @@ pub(crate) fn shim_trunc(
     match value {
         ShimValue::Integer(i) => Ok(ShimValue::Integer(i)),
         ShimValue::Float(f) => Ok(ShimValue::Float(f.trunc())),
-        _ => Err(format!("trunc: expected int or float")),
+        _ => Err("trunc: expected int or float".to_string()),
     }
 }
 
@@ -2537,7 +2527,7 @@ pub(crate) fn shim_sin(
     let f = match value {
         ShimValue::Integer(i) => i as f32,
         ShimValue::Float(f) => f,
-        _ => return Err(format!("sin: expected int or float")),
+        _ => return Err("sin: expected int or float".to_string()),
     };
     Ok(ShimValue::Float(f.sin()))
 }
@@ -2552,7 +2542,7 @@ pub(crate) fn shim_cos(
     let f = match value {
         ShimValue::Integer(i) => i as f32,
         ShimValue::Float(f) => f,
-        _ => return Err(format!("cos: expected int or float")),
+        _ => return Err("cos: expected int or float".to_string()),
     };
     Ok(ShimValue::Float(f.cos()))
 }
@@ -2567,7 +2557,7 @@ pub(crate) fn shim_tan(
     let f = match value {
         ShimValue::Integer(i) => i as f32,
         ShimValue::Float(f) => f,
-        _ => return Err(format!("tan: expected int or float")),
+        _ => return Err("tan: expected int or float".to_string()),
     };
     Ok(ShimValue::Float(f.tan()))
 }
@@ -2582,7 +2572,7 @@ pub(crate) fn shim_asin(
     let f = match value {
         ShimValue::Integer(i) => i as f32,
         ShimValue::Float(f) => f,
-        _ => return Err(format!("asin: expected int or float")),
+        _ => return Err("asin: expected int or float".to_string()),
     };
     Ok(ShimValue::Float(f.asin()))
 }
@@ -2597,7 +2587,7 @@ pub(crate) fn shim_acos(
     let f = match value {
         ShimValue::Integer(i) => i as f32,
         ShimValue::Float(f) => f,
-        _ => return Err(format!("acos: expected int or float")),
+        _ => return Err("acos: expected int or float".to_string()),
     };
     Ok(ShimValue::Float(f.acos()))
 }
@@ -2612,7 +2602,7 @@ pub(crate) fn shim_atan(
     let f = match value {
         ShimValue::Integer(i) => i as f32,
         ShimValue::Float(f) => f,
-        _ => return Err(format!("atan: expected int or float")),
+        _ => return Err("atan: expected int or float".to_string()),
     };
     Ok(ShimValue::Float(f.atan()))
 }
@@ -2628,12 +2618,12 @@ pub(crate) fn shim_atan2(
     let f = match value {
         ShimValue::Integer(i) => i as f32,
         ShimValue::Float(f) => f,
-        _ => return Err(format!("atan2: expected int or float")),
+        _ => return Err("atan2: expected int or float".to_string()),
     };
     let g = match other {
         ShimValue::Integer(i) => i as f32,
         ShimValue::Float(f) => f,
-        _ => return Err(format!("atan2: expected int or float")),
+        _ => return Err("atan2: expected int or float".to_string()),
     };
     Ok(ShimValue::Float(f.atan2(g)))
 }
@@ -2648,7 +2638,7 @@ pub(crate) fn shim_sinh(
     let f = match value {
         ShimValue::Integer(i) => i as f32,
         ShimValue::Float(f) => f,
-        _ => return Err(format!("sinh: expected int or float")),
+        _ => return Err("sinh: expected int or float".to_string()),
     };
     Ok(ShimValue::Float(f.sinh()))
 }
@@ -2663,7 +2653,7 @@ pub(crate) fn shim_cosh(
     let f = match value {
         ShimValue::Integer(i) => i as f32,
         ShimValue::Float(f) => f,
-        _ => return Err(format!("cosh: expected int or float")),
+        _ => return Err("cosh: expected int or float".to_string()),
     };
     Ok(ShimValue::Float(f.cosh()))
 }
@@ -2678,7 +2668,7 @@ pub(crate) fn shim_tanh(
     let f = match value {
         ShimValue::Integer(i) => i as f32,
         ShimValue::Float(f) => f,
-        _ => return Err(format!("tanh: expected int or float")),
+        _ => return Err("tanh: expected int or float".to_string()),
     };
     Ok(ShimValue::Float(f.tanh()))
 }
@@ -2693,7 +2683,7 @@ pub(crate) fn shim_asinh(
     let f = match value {
         ShimValue::Integer(i) => i as f32,
         ShimValue::Float(f) => f,
-        _ => return Err(format!("asinh: expected int or float")),
+        _ => return Err("asinh: expected int or float".to_string()),
     };
     Ok(ShimValue::Float(f.asinh()))
 }
@@ -2708,7 +2698,7 @@ pub(crate) fn shim_acosh(
     let f = match value {
         ShimValue::Integer(i) => i as f32,
         ShimValue::Float(f) => f,
-        _ => return Err(format!("acosh: expected int or float")),
+        _ => return Err("acosh: expected int or float".to_string()),
     };
     Ok(ShimValue::Float(f.acosh()))
 }
@@ -2723,7 +2713,7 @@ pub(crate) fn shim_atanh(
     let f = match value {
         ShimValue::Integer(i) => i as f32,
         ShimValue::Float(f) => f,
-        _ => return Err(format!("atanh: expected int or float")),
+        _ => return Err("atanh: expected int or float".to_string()),
     };
     Ok(ShimValue::Float(f.atanh()))
 }
@@ -2738,7 +2728,7 @@ pub(crate) fn shim_log2(
     let f = match value {
         ShimValue::Integer(i) => i as f32,
         ShimValue::Float(f) => f,
-        _ => return Err(format!("log2: expected int or float")),
+        _ => return Err("log2: expected int or float".to_string()),
     };
     Ok(ShimValue::Float(f.log2()))
 }
@@ -2753,7 +2743,7 @@ pub(crate) fn shim_log10(
     let f = match value {
         ShimValue::Integer(i) => i as f32,
         ShimValue::Float(f) => f,
-        _ => return Err(format!("log10: expected int or float")),
+        _ => return Err("log10: expected int or float".to_string()),
     };
     Ok(ShimValue::Float(f.log10()))
 }
@@ -2768,7 +2758,7 @@ pub(crate) fn shim_ln(
     let f = match value {
         ShimValue::Integer(i) => i as f32,
         ShimValue::Float(f) => f,
-        _ => return Err(format!("ln: expected int or float")),
+        _ => return Err("ln: expected int or float".to_string()),
     };
     Ok(ShimValue::Float(f.ln()))
 }
@@ -2784,12 +2774,12 @@ pub(crate) fn shim_log(
     let f = match value {
         ShimValue::Integer(i) => i as f32,
         ShimValue::Float(f) => f,
-        _ => return Err(format!("log: expected int or float")),
+        _ => return Err("log: expected int or float".to_string()),
     };
     let b = match base {
         ShimValue::Integer(i) => i as f32,
         ShimValue::Float(f) => f,
-        _ => return Err(format!("log: base must be int or float")),
+        _ => return Err("log: base must be int or float".to_string()),
     };
     Ok(ShimValue::Float(f.log(b)))
 }
@@ -2804,7 +2794,7 @@ pub(crate) fn shim_to_degrees(
     let f = match value {
         ShimValue::Integer(i) => i as f32,
         ShimValue::Float(f) => f,
-        _ => return Err(format!("to_degrees: expected int or float")),
+        _ => return Err("to_degrees: expected int or float".to_string()),
     };
     Ok(ShimValue::Float(f.to_degrees()))
 }
@@ -2819,7 +2809,7 @@ pub(crate) fn shim_to_radians(
     let f = match value {
         ShimValue::Integer(i) => i as f32,
         ShimValue::Float(f) => f,
-        _ => return Err(format!("to_radians: expected int or float")),
+        _ => return Err("to_radians: expected int or float".to_string()),
     };
     Ok(ShimValue::Float(f.to_radians()))
 }
@@ -2837,16 +2827,10 @@ pub(crate) fn shim_clamp(
     unpacker.end()?;
 
     // If value is less than min, return min
-    match compare_values(interpreter, &value, &min) {
-        Ok(std::cmp::Ordering::Less) => return Ok(min),
-        _ => (),
-    }
+    if let Ok(std::cmp::Ordering::Less) = compare_values(interpreter, &value, &min) { return Ok(min) }
 
     // If value is less than max, return max
-    match compare_values(interpreter, &value, &max) {
-        Ok(std::cmp::Ordering::Greater) => return Ok(max),
-        _ => (),
-    }
+    if let Ok(std::cmp::Ordering::Greater) = compare_values(interpreter, &value, &max) { return Ok(max) }
 
     // Otherwise it's between the range, so we can return the value itself
     Ok(value)
