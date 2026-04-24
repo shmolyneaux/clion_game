@@ -1,47 +1,42 @@
+use glam::{Mat4, Vec2, Vec3};
 use std::collections::HashMap;
-use glam::{Vec2, Vec3, Mat4};
 
-use crate::Primitive;
 use crate::MeshDataRaw;
+use crate::Primitive;
 use crate::VertVec;
 
 pub fn box_mesh(size: Vec3) -> MeshDataRaw {
     let positions = vec![
         // POS X
-        Vec3::new( size.x,  size.y,  size.z)/2.0f32,
-        Vec3::new( size.x,  size.y, -size.z)/2.0f32,
-        Vec3::new( size.x, -size.y,  size.z)/2.0f32,
-        Vec3::new( size.x, -size.y, -size.z)/2.0f32,
-
+        Vec3::new(size.x, size.y, size.z) / 2.0f32,
+        Vec3::new(size.x, size.y, -size.z) / 2.0f32,
+        Vec3::new(size.x, -size.y, size.z) / 2.0f32,
+        Vec3::new(size.x, -size.y, -size.z) / 2.0f32,
         // NEG X
-        Vec3::new(-size.x,  size.y,  size.z)/2.0f32,
-        Vec3::new(-size.x,  size.y, -size.z)/2.0f32,
-        Vec3::new(-size.x, -size.y,  size.z)/2.0f32,
-        Vec3::new(-size.x, -size.y, -size.z)/2.0f32,
-
+        Vec3::new(-size.x, size.y, size.z) / 2.0f32,
+        Vec3::new(-size.x, size.y, -size.z) / 2.0f32,
+        Vec3::new(-size.x, -size.y, size.z) / 2.0f32,
+        Vec3::new(-size.x, -size.y, -size.z) / 2.0f32,
         // POS Y
-        Vec3::new( size.x,  size.y, -size.z)/2.0f32,
-        Vec3::new( size.x,  size.y,  size.z)/2.0f32,
-        Vec3::new(-size.x,  size.y, -size.z)/2.0f32,
-        Vec3::new(-size.x,  size.y,  size.z)/2.0f32,
-
+        Vec3::new(size.x, size.y, -size.z) / 2.0f32,
+        Vec3::new(size.x, size.y, size.z) / 2.0f32,
+        Vec3::new(-size.x, size.y, -size.z) / 2.0f32,
+        Vec3::new(-size.x, size.y, size.z) / 2.0f32,
         // NEG Y
-        Vec3::new( size.x, -size.y, -size.z)/2.0f32,
-        Vec3::new( size.x, -size.y,  size.z)/2.0f32,
-        Vec3::new(-size.x, -size.y, -size.z)/2.0f32,
-        Vec3::new(-size.x, -size.y,  size.z)/2.0f32,
-
+        Vec3::new(size.x, -size.y, -size.z) / 2.0f32,
+        Vec3::new(size.x, -size.y, size.z) / 2.0f32,
+        Vec3::new(-size.x, -size.y, -size.z) / 2.0f32,
+        Vec3::new(-size.x, -size.y, size.z) / 2.0f32,
         // POS Z
-        Vec3::new( size.x, -size.y,  size.z)/2.0f32,
-        Vec3::new( size.x,  size.y,  size.z)/2.0f32,
-        Vec3::new(-size.x, -size.y,  size.z)/2.0f32,
-        Vec3::new(-size.x,  size.y,  size.z)/2.0f32,
-
+        Vec3::new(size.x, -size.y, size.z) / 2.0f32,
+        Vec3::new(size.x, size.y, size.z) / 2.0f32,
+        Vec3::new(-size.x, -size.y, size.z) / 2.0f32,
+        Vec3::new(-size.x, size.y, size.z) / 2.0f32,
         // NEG Z
-        Vec3::new( size.x, -size.y, -size.z)/2.0f32,
-        Vec3::new( size.x,  size.y, -size.z)/2.0f32,
-        Vec3::new(-size.x, -size.y, -size.z)/2.0f32,
-        Vec3::new(-size.x,  size.y, -size.z)/2.0f32,
+        Vec3::new(size.x, -size.y, -size.z) / 2.0f32,
+        Vec3::new(size.x, size.y, -size.z) / 2.0f32,
+        Vec3::new(-size.x, -size.y, -size.z) / 2.0f32,
+        Vec3::new(-size.x, size.y, -size.z) / 2.0f32,
     ];
     let normals = vec![
         Vec3::X,
@@ -71,12 +66,42 @@ pub fn box_mesh(size: Vec3) -> MeshDataRaw {
     ];
 
     let indices = vec![
-        0+0, 0+1, 0+2, 0+1, 0+2, 0+3,
-        4+0, 4+1, 4+2, 4+1, 4+2, 4+3,
-        8+0, 8+1, 8+2, 8+1, 8+2, 8+3,
-       12+0,12+1,12+2,12+1,12+2,12+3,
-       16+0,16+1,16+2,16+1,16+2,16+3,
-       20+0,20+1,20+2,20+1,20+2,20+3,
+        0 + 0,
+        0 + 1,
+        0 + 2,
+        0 + 1,
+        0 + 2,
+        0 + 3,
+        4 + 0,
+        4 + 1,
+        4 + 2,
+        4 + 1,
+        4 + 2,
+        4 + 3,
+        8 + 0,
+        8 + 1,
+        8 + 2,
+        8 + 1,
+        8 + 2,
+        8 + 3,
+        12 + 0,
+        12 + 1,
+        12 + 2,
+        12 + 1,
+        12 + 2,
+        12 + 3,
+        16 + 0,
+        16 + 1,
+        16 + 2,
+        16 + 1,
+        16 + 2,
+        16 + 3,
+        20 + 0,
+        20 + 1,
+        20 + 2,
+        20 + 1,
+        20 + 2,
+        20 + 3,
     ];
 
     assert!(positions.len() == normals.len());
@@ -97,20 +122,18 @@ pub fn box_mesh(size: Vec3) -> MeshDataRaw {
 pub fn screen_quad_mesh(x: u32, y: u32, w: u32, h: u32) -> MeshDataRaw {
     let positions = vec![
         Vec3::new(x as f32, y as f32, 0.0),
-        Vec3::new(x as f32,  (y+h) as f32, 0.0),
-        Vec3::new((x+w) as f32, y as f32, 0.0),
-        Vec3::new((x+w) as f32,  (y+h) as f32, 0.0),
+        Vec3::new(x as f32, (y + h) as f32, 0.0),
+        Vec3::new((x + w) as f32, y as f32, 0.0),
+        Vec3::new((x + w) as f32, (y + h) as f32, 0.0),
     ];
     let uvs = vec![
-        Vec2::new( 0.0, 0.0),
-        Vec2::new( 0.0, 1.0),
-        Vec2::new( 1.0, 0.0),
-        Vec2::new( 1.0, 1.0),
+        Vec2::new(0.0, 0.0),
+        Vec2::new(0.0, 1.0),
+        Vec2::new(1.0, 0.0),
+        Vec2::new(1.0, 1.0),
     ];
 
-    let indices = vec![
-        0+0, 0+1, 0+2, 0+1, 0+2, 0+3,
-    ];
+    let indices = vec![0 + 0, 0 + 1, 0 + 2, 0 + 1, 0 + 2, 0 + 3];
 
     let mut verts = HashMap::new();
     verts.insert("aPos".to_string(), VertVec::Vec3(positions));
@@ -125,24 +148,21 @@ pub fn screen_quad_mesh(x: u32, y: u32, w: u32, h: u32) -> MeshDataRaw {
     }
 }
 
-
 pub fn quad_mesh() -> MeshDataRaw {
     let positions = vec![
-        Vec3::new(-1.0, -1.0, 0.0)*0.9,
-        Vec3::new(-1.0,  1.0, 0.0)*0.9,
-        Vec3::new( 1.0, -1.0, 0.0)*0.9,
-        Vec3::new( 1.0,  1.0, 0.0)*0.9,
+        Vec3::new(-1.0, -1.0, 0.0) * 0.9,
+        Vec3::new(-1.0, 1.0, 0.0) * 0.9,
+        Vec3::new(1.0, -1.0, 0.0) * 0.9,
+        Vec3::new(1.0, 1.0, 0.0) * 0.9,
     ];
     let uvs = vec![
-        Vec2::new( 0.0, 0.0),
-        Vec2::new( 0.0, 1.0),
-        Vec2::new( 1.0, 0.0),
-        Vec2::new( 1.0, 1.0),
+        Vec2::new(0.0, 0.0),
+        Vec2::new(0.0, 1.0),
+        Vec2::new(1.0, 0.0),
+        Vec2::new(1.0, 1.0),
     ];
 
-    let indices = vec![
-        0+0, 0+1, 0+2, 0+1, 0+2, 0+3,
-    ];
+    let indices = vec![0 + 0, 0 + 1, 0 + 2, 0 + 1, 0 + 2, 0 + 3];
 
     let mut verts = HashMap::new();
     verts.insert("aPos".to_string(), VertVec::Vec3(positions));

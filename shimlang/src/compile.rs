@@ -1,5 +1,5 @@
-use crate::parse::*;
 use crate::lex::debug_u8s;
+use crate::parse::*;
 use crate::runtime::ShimValue;
 use crate::runtime::format_float;
 
@@ -81,7 +81,10 @@ pub struct Program {
 
 pub fn compile_ast(ast: &Ast) -> Result<Program, String> {
     let mut program = Vec::new();
-    let ast_span = Span { start: 0, end: ast.script.len() as u32 };
+    let ast_span = Span {
+        start: 0,
+        end: ast.script.len() as u32,
+    };
     compile_block_inner(&ast.block, true, ast_span, &mut program)?;
     let (bytecode, spans): (Vec<u8>, Vec<Span>) = program.into_iter().unzip();
     Ok(Program {
@@ -112,14 +115,8 @@ pub fn compile_fn_body_inner(
     };
 
     asm.push((ByteCode::UnpackArgs as u8, fn_span));
-    asm.push((
-        pos_args_required.len() as u8,
-        fn_span,
-    ));
-    asm.push((
-        pos_args_optional.len() as u8,
-        fn_span,
-    ));
+    asm.push((pos_args_required.len() as u8, fn_span));
+    asm.push((pos_args_optional.len() as u8, fn_span));
 
     for param in pos_args_required.iter() {
         asm.push((
@@ -197,19 +194,13 @@ pub fn compile_fn_expression(
 ) -> Result<Vec<(u8, Span)>, String> {
     // This will be replaced with a relative jump to after the function
     // declaration
-    let mut asm = vec![
-        (ByteCode::Jmp as u8, fn_span),
-        (0, fn_span),
-        (0, fn_span),
-    ];
-    asm.extend(
-        compile_fn_body_inner(
-            pos_args_required,
-            pos_args_optional,
-            body,
-            fn_span,
-        )?
-    );
+    let mut asm = vec![(ByteCode::Jmp as u8, fn_span), (0, fn_span), (0, fn_span)];
+    asm.extend(compile_fn_body_inner(
+        pos_args_required,
+        pos_args_optional,
+        body,
+        fn_span,
+    )?);
 
     // Fix the jump offset at the function declaration now that we know
     // the size of the body
@@ -240,15 +231,9 @@ pub fn compile_fn(func: &Fn, fn_span: Span) -> Result<Vec<(u8, Span)>, String> {
         fn_span,
     )?;
 
+    asm.push((ByteCode::VariableDeclaration as u8, fn_span));
     asm.push((
-        ByteCode::VariableDeclaration as u8,
-        fn_span,
-    ));
-    asm.push((
-        ident
-            .len()
-            .try_into()
-            .expect("Ident len should into u8"),
+        ident.len().try_into().expect("Ident len should into u8"),
         fn_span,
     ));
     for b in ident.iter() {
@@ -409,9 +394,7 @@ pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, S
             asm.push((ByteCode::SetIndex as u8, rhs.span));
             Ok(asm)
         }
-        Statement::Fn(func) => {
-            compile_fn(func, stmt_span)
-        }
+        Statement::Fn(func) => compile_fn(func, stmt_span),
         Statement::Struct(Struct {
             ident,
             members_required,
@@ -423,7 +406,10 @@ pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, S
                 (0, stmt_span),
                 (0, stmt_span),
             ];
-            asm.push(((members_required.len() + members_optional.len()) as u8, stmt_span));
+            asm.push((
+                (members_required.len() + members_optional.len()) as u8,
+                stmt_span,
+            ));
 
             // The +1 is for the constructor
             asm.push(((methods.len() + 1) as u8, stmt_span));
@@ -440,7 +426,11 @@ pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, S
                 asm.push((*b, stmt_span));
             }
 
-            let member_names: Vec<Vec<u8>> = members_required.iter().cloned().chain(members_optional.iter().map(|(x, _)| x.clone())).collect();
+            let member_names: Vec<Vec<u8>> = members_required
+                .iter()
+                .cloned()
+                .chain(members_optional.iter().map(|(x, _)| x.clone()))
+                .collect();
 
             for member in member_names.iter() {
                 asm.push((
@@ -455,45 +445,37 @@ pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, S
                 }
             }
 
-            let arg_list = member_names.into_iter()
+            let arg_list = member_names
+                .into_iter()
                 .map(|name| Node {
-                        data: Expression::Primary(Primary::Identifier(name)),
-                        span: stmt_span,
-                    }
-                )
+                    data: Expression::Primary(Primary::Identifier(name)),
+                    span: stmt_span,
+                })
                 .collect();
 
             let mut method_defs: Vec<(&[u8], Vec<(u8, Span)>)> = Vec::new();
-            method_defs.push(
-                (
-                    b"__init__",
-                    compile_fn_body_inner(
-                        members_required,
-                        members_optional,
-                        &Block {
-                            stmts: Vec::new(),
-                            last_expr: Some(
-                                Box::new(
-                                    Node {
-                                        data: Expression::Call(
-                                            Box::new(
-                                                Node {
-                                                    data: Expression::Primary(Primary::Identifier(ident.clone())),
-                                                    span: stmt_span,
-                                                }
-                                            ),
-                                            arg_list,
-                                            Vec::new()
-                                        ),
-                                        span: stmt_span,
-                                    }
-                                )
+            method_defs.push((
+                b"__init__",
+                compile_fn_body_inner(
+                    members_required,
+                    members_optional,
+                    &Block {
+                        stmts: Vec::new(),
+                        last_expr: Some(Box::new(Node {
+                            data: Expression::Call(
+                                Box::new(Node {
+                                    data: Expression::Primary(Primary::Identifier(ident.clone())),
+                                    span: stmt_span,
+                                }),
+                                arg_list,
+                                Vec::new(),
                             ),
-                        },
-                        stmt_span,
-                    )?
-                )
-            );
+                            span: stmt_span,
+                        })),
+                    },
+                    stmt_span,
+                )?,
+            ));
             for method in methods {
                 let ident = if let Some(ident) = &method.ident {
                     ident
@@ -532,10 +514,7 @@ pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, S
             asm[1].0 = (pc_offset >> 8) as u8;
             asm[2].0 = (pc_offset & 0xff) as u8;
 
-            asm.push((
-                ByteCode::VariableDeclaration as u8,
-                stmt_span,
-            ));
+            asm.push((ByteCode::VariableDeclaration as u8, stmt_span));
             asm.push((
                 ident.len().try_into().expect("Ident len should into u8"),
                 stmt_span,
@@ -590,10 +569,7 @@ pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, S
 
             // Copy the result of .next() so we can later check if it's None
             asm.push((ByteCode::Copy as u8, expr.span));
-            asm.push((
-                ByteCode::VariableDeclaration as u8,
-                stmt_span,
-            ));
+            asm.push((ByteCode::VariableDeclaration as u8, stmt_span));
             asm.push((
                 ident
                     .len()
@@ -692,7 +668,12 @@ pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, S
     }
 }
 
-pub fn compile_block_inner(block: &Block, is_expr: bool, block_span: Span, asm: &mut Vec<(u8, Span)>) -> Result<(), String> {
+pub fn compile_block_inner(
+    block: &Block,
+    is_expr: bool,
+    block_span: Span,
+    asm: &mut Vec<(u8, Span)>,
+) -> Result<(), String> {
     for stmt in block.stmts.iter() {
         asm.extend(compile_statement(&stmt)?);
     }
@@ -712,80 +693,54 @@ pub fn statement_captures_env(stmt: &Statement) -> bool {
     match stmt {
         Statement::Fn(..) => true,
         Statement::Struct(..) => true,
-        Statement::Let(_ident, expr) => {
-            expression_captures_env(&expr.data)
-        },
-        Statement::Assignment(_ident, expr) => {
-            expression_captures_env(&expr.data)
-        },
+        Statement::Let(_ident, expr) => expression_captures_env(&expr.data),
+        Statement::Assignment(_ident, expr) => expression_captures_env(&expr.data),
         Statement::AttributeAssignment(obj, _ident, expr) => {
-            expression_captures_env(&obj.data)
-            || expression_captures_env(&expr.data)
-        },
+            expression_captures_env(&obj.data) || expression_captures_env(&expr.data)
+        }
         Statement::IndexAssignment(obj, index_expr, expr) => {
             expression_captures_env(&obj.data)
-            || expression_captures_env(&index_expr.data)
-            || expression_captures_env(&expr.data)
-        },
-        Statement::CompoundAssignment(_ident, _op, expr) => {
-            expression_captures_env(&expr.data)
-        },
+                || expression_captures_env(&index_expr.data)
+                || expression_captures_env(&expr.data)
+        }
+        Statement::CompoundAssignment(_ident, _op, expr) => expression_captures_env(&expr.data),
         Statement::CompoundAttributeAssignment(obj, _ident, _op, expr) => {
-            expression_captures_env(&obj.data)
-            || expression_captures_env(&expr.data)
-        },
+            expression_captures_env(&obj.data) || expression_captures_env(&expr.data)
+        }
         Statement::CompoundIndexAssignment(obj, index_expr, _op, expr) => {
             expression_captures_env(&obj.data)
-            || expression_captures_env(&index_expr.data)
-            || expression_captures_env(&expr.data)
-        },
+                || expression_captures_env(&index_expr.data)
+                || expression_captures_env(&expr.data)
+        }
         Statement::If(cond, if_block, else_block) => {
             expression_captures_env(&cond.data)
-            || block_captures_env(if_block)
-            || block_captures_env(else_block)
-        },
+                || block_captures_env(if_block)
+                || block_captures_env(else_block)
+        }
         Statement::For(_ident, expr, block) => {
-            expression_captures_env(&expr.data)
-            || block_captures_env(block)
-        },
+            expression_captures_env(&expr.data) || block_captures_env(block)
+        }
         Statement::While(cond, block) => {
-            expression_captures_env(&cond.data)
-            || block_captures_env(block)
-        },
+            expression_captures_env(&cond.data) || block_captures_env(block)
+        }
         Statement::Break => false,
         Statement::Continue => false,
-        Statement::Expression(expr) => {
-            expression_captures_env(&expr.data)
-        },
-        Statement::Return(expr) => {
-            match expr {
-                Some(expr) => expression_captures_env(&expr.data),
-                None => false
-            }
+        Statement::Expression(expr) => expression_captures_env(&expr.data),
+        Statement::Return(expr) => match expr {
+            Some(expr) => expression_captures_env(&expr.data),
+            None => false,
         },
     }
 }
 
 pub fn expression_captures_env(input_expr: &Expression) -> bool {
     match input_expr {
-        Expression::Primary(Primary::None) => {
-            false
-        },
-        Expression::Primary(Primary::Integer(_)) => {
-            false
-        },
-        Expression::Primary(Primary::Float(_)) => {
-            false
-        },
-        Expression::Primary(Primary::Identifier(_)) => {
-            false
-        },
-        Expression::Primary(Primary::Bool(_)) => {
-            false
-        },
-        Expression::Primary(Primary::String(_)) => {
-            false
-        },
+        Expression::Primary(Primary::None) => false,
+        Expression::Primary(Primary::Integer(_)) => false,
+        Expression::Primary(Primary::Float(_)) => false,
+        Expression::Primary(Primary::Identifier(_)) => false,
+        Expression::Primary(Primary::Bool(_)) => false,
+        Expression::Primary(Primary::String(_)) => false,
         Expression::Primary(Primary::List(lst)) => {
             for expr in lst.iter() {
                 if expression_captures_env(&expr.data) {
@@ -793,33 +748,21 @@ pub fn expression_captures_env(input_expr: &Expression) -> bool {
                 }
             }
             false
-        },
-        Expression::Primary(Primary::Expression(expr)) => {
-            expression_captures_env(&expr.data)
-        },
+        }
+        Expression::Primary(Primary::Expression(expr)) => expression_captures_env(&expr.data),
         Expression::BooleanOp(op) => {
             let exprs = op.exprs();
-            expression_captures_env(&exprs.0.data)
-            || expression_captures_env(&exprs.1.data)
-        },
+            expression_captures_env(&exprs.0.data) || expression_captures_env(&exprs.1.data)
+        }
         Expression::BinaryOp(op) => {
             let exprs = op.exprs();
-            expression_captures_env(&exprs.0.data)
-            || expression_captures_env(&exprs.1.data)
-        },
-        Expression::UnaryOp(op) => {
-            match op {
-                UnaryOp::Not(expr) => {
-                    expression_captures_env(&expr.data)
-                },
-                UnaryOp::Negate(expr) => {
-                    expression_captures_env(&expr.data)
-                },
-            }
-        },
-        Expression::Stringify(expr) => {
-            expression_captures_env(&expr.data)
+            expression_captures_env(&exprs.0.data) || expression_captures_env(&exprs.1.data)
         }
+        Expression::UnaryOp(op) => match op {
+            UnaryOp::Not(expr) => expression_captures_env(&expr.data),
+            UnaryOp::Negate(expr) => expression_captures_env(&expr.data),
+        },
+        Expression::Stringify(expr) => expression_captures_env(&expr.data),
         Expression::Call(func, args, kwargs) => {
             if expression_captures_env(&func.data) {
                 return true;
@@ -837,23 +780,16 @@ pub fn expression_captures_env(input_expr: &Expression) -> bool {
             false
         }
         Expression::Index(obj, index) => {
-            expression_captures_env(&obj.data)
-            || expression_captures_env(&index.data)
+            expression_captures_env(&obj.data) || expression_captures_env(&index.data)
         }
-        Expression::Attribute(obj, _attr) => {
-            expression_captures_env(&obj.data)
-        }
-        Expression::Block(block) => {
-            block_captures_env(block)
-        }
+        Expression::Attribute(obj, _attr) => expression_captures_env(&obj.data),
+        Expression::Block(block) => block_captures_env(block),
         Expression::If(cond, if_block, else_block) => {
             expression_captures_env(&cond.data)
-            || block_captures_env(if_block)
-            || block_captures_env(else_block)
+                || block_captures_env(if_block)
+                || block_captures_env(else_block)
         }
-        Expression::Fn(..) => {
-            true
-        }
+        Expression::Fn(..) => true,
     }
 }
 
@@ -872,7 +808,11 @@ pub fn block_captures_env(block: &Block) -> bool {
     false
 }
 
-pub fn compile_block(block: &Block, is_expr: bool, block_span: Span) -> Result<Vec<(u8, Span)>, String> {
+pub fn compile_block(
+    block: &Block,
+    is_expr: bool,
+    block_span: Span,
+) -> Result<Vec<(u8, Span)>, String> {
     let mut asm = Vec::new();
 
     // If we don't define any new variables we don't need the overhead of creating a new scope
@@ -894,7 +834,7 @@ pub fn compile_block(block: &Block, is_expr: bool, block_span: Span) -> Result<V
     // We only need the HeapScope if the scope is captured by a function definition,
     // closure, or struct definition. The vast majority of scopes should be StackScopes.
     // Even further, the HeapScope might only include captured variables
-    
+
     let mut needs_new_scope = false;
     for stmt in &block.stmts {
         let stmt = &stmt.data;
@@ -1161,7 +1101,10 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
                 res.push((args.len() as u8, span));
                 res.push((kwargs.len() as u8, span));
                 res.push((
-                    attr_ident.len().try_into().expect("Ident len should into u8"),
+                    attr_ident
+                        .len()
+                        .try_into()
+                        .expect("Ident len should into u8"),
                     span,
                 ));
                 for b in attr_ident.into_iter() {
@@ -1211,15 +1154,13 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
         Expression::Block(block) => compile_block(block, true, span),
         Expression::If(conditional, if_body, else_body) => {
             compile_if(conditional, if_body, else_body, true, span)
-        },
-        Expression::Fn(func) => {
-            compile_fn_expression(
-                &func.pos_args_required,
-                &func.pos_args_optional,
-                &func.body,
-                span,
-            )
-        },
+        }
+        Expression::Fn(func) => compile_fn_expression(
+            &func.pos_args_required,
+            &func.pos_args_optional,
+            &func.body,
+            span,
+        ),
     }
 }
 
@@ -1238,7 +1179,7 @@ pub fn format_asm(bytes: &[u8]) -> String {
     while idx < bytes.len() {
         let b = &bytes[idx];
         let start_idx = idx;
-        
+
         out.push_str(&format!("{start_idx:4}:  "));
 
         if *b == ByteCode::Jmp as u8 {
@@ -1261,16 +1202,21 @@ pub fn format_asm(bytes: &[u8]) -> String {
             out.push_str(&format!(r#"assign "{}""#, debug_u8s(slice)));
             idx += len + 1;
         } else if *b == ByteCode::Call as u8 {
-            let arg_count = bytes[idx+1] as usize;
-            let kwarg_count = bytes[idx+2] as usize;
+            let arg_count = bytes[idx + 1] as usize;
+            let kwarg_count = bytes[idx + 2] as usize;
             out.push_str(&format!("call args={}  kwargs={}", arg_count, kwarg_count));
             idx += 2;
         } else if *b == ByteCode::AttrCall as u8 {
-            let arg_count = bytes[idx+1] as usize;
-            let kwarg_count = bytes[idx+2] as usize;
+            let arg_count = bytes[idx + 1] as usize;
+            let kwarg_count = bytes[idx + 2] as usize;
             let len = bytes[idx + 3] as usize;
             let slice = &bytes[idx + 4..idx + 4 + len];
-            out.push_str(&format!("attr_call .{} args={}  kwargs={}", debug_u8s(slice), arg_count, kwarg_count));
+            out.push_str(&format!(
+                "attr_call .{} args={}  kwargs={}",
+                debug_u8s(slice),
+                arg_count,
+                kwarg_count
+            ));
             idx += 3 + len;
         } else if *b == ByteCode::Not as u8 {
             out.push_str("Not");
@@ -1327,7 +1273,7 @@ pub fn format_asm(bytes: &[u8]) -> String {
         } else if *b == ByteCode::UnpackArgs as u8 {
             let required_arg_count = bytes[idx + 1] as usize;
             let optional_arg_count = bytes[idx + 2] as usize;
-            
+
             let mut param_names = Vec::new();
             let mut param_idx = idx + 3;
             for _ in 0..(required_arg_count + optional_arg_count) {
@@ -1336,9 +1282,13 @@ pub fn format_asm(bytes: &[u8]) -> String {
                 param_names.push(debug_u8s(param_name).to_string());
                 param_idx += 1 + len;
             }
-            
-            out.push_str(&format!("unpack_args required={} optional={} [{}]", 
-                required_arg_count, optional_arg_count, param_names.join(", ")));
+
+            out.push_str(&format!(
+                "unpack_args required={} optional={} [{}]",
+                required_arg_count,
+                optional_arg_count,
+                param_names.join(", ")
+            ));
             idx = param_idx - 1;
         } else if *b == ByteCode::AssignArg as u8 {
             out.push_str("assign arg");
@@ -1351,14 +1301,14 @@ pub fn format_asm(bytes: &[u8]) -> String {
         } else if *b == ByteCode::CreateStruct as u8 {
             let member_count = bytes[idx + 3];
             let method_count = bytes[idx + 4];
-            
+
             let mut parse_idx = idx + 5;
-            
+
             // Read struct name
             let name_len = bytes[parse_idx];
             let name = &bytes[parse_idx + 1..parse_idx + 1 + name_len as usize];
             parse_idx = parse_idx + 1 + name_len as usize;
-            
+
             // Read member names
             let mut member_names = Vec::new();
             for _ in 0..member_count {
@@ -1367,24 +1317,27 @@ pub fn format_asm(bytes: &[u8]) -> String {
                 member_names.push(debug_u8s(ident).to_string());
                 parse_idx = parse_idx + 1 + ident_len as usize;
             }
-            
+
             // Read method names and PCs
             let mut methods = Vec::new();
             for _ in 0..method_count {
-                let method_pc = idx + ((bytes[parse_idx] as usize) << 8) + bytes[parse_idx + 1] as usize;
+                let method_pc =
+                    idx + ((bytes[parse_idx] as usize) << 8) + bytes[parse_idx + 1] as usize;
                 parse_idx += 2;
-                
+
                 let ident_len = bytes[parse_idx];
                 let ident = &bytes[parse_idx + 1..parse_idx + 1 + ident_len as usize];
                 methods.push(format!("{}@{}", debug_u8s(ident), method_pc));
                 parse_idx = parse_idx + 1 + ident_len as usize;
             }
-            
-            out.push_str(&format!("CreateStruct \"{}\" members=[{}] methods=[{}]", 
-                                  debug_u8s(name), 
-                                  member_names.join(", "),
-                                  methods.join(", ")));
-            
+
+            out.push_str(&format!(
+                "CreateStruct \"{}\" members=[{}] methods=[{}]",
+                debug_u8s(name),
+                member_names.join(", "),
+                methods.join(", ")
+            ));
+
             // Skip to the end of the struct header (not the entire definition)
             // This allows the method bodies to be disassembled normally
             // Note: The outer loop will add 1, so we subtract 1 here
@@ -1400,8 +1353,8 @@ pub fn format_asm(bytes: &[u8]) -> String {
             out.push_str(&format!("set .{}", debug_u8s(slice)));
             idx += len + 1;
         } else if *b == ByteCode::VariableLoad as u8 {
-            let len = bytes[idx+1] as usize;
-            let slice = &bytes[idx+2..idx+2+len];
+            let len = bytes[idx + 1] as usize;
+            let slice = &bytes[idx + 2..idx + 2 + len];
             out.push_str(&format!(r#"load "{}""#, debug_u8s(slice)));
             idx += len + 1;
         } else if *b == ByteCode::Break as u8 {
@@ -1423,8 +1376,8 @@ pub fn format_asm(bytes: &[u8]) -> String {
             out.push_str(&format!("ShimValue {}", val_str));
             idx += 8;
         } else if *b == ByteCode::LiteralString as u8 {
-            let len = bytes[idx+1] as usize;
-            let slice = &bytes[idx+2..idx+2+len];
+            let len = bytes[idx + 1] as usize;
+            let slice = &bytes[idx + 2..idx + 2 + len];
             out.push_str(&format!(r#"String "{}""#, debug_u8s(slice)));
             idx += len + 1;
         } else if *b == ByteCode::LiteralNone as u8 {
@@ -1462,7 +1415,7 @@ pub fn format_asm(bytes: &[u8]) -> String {
             // Unformatted byte (including Pad0-Pad9) - show the decimal value
             out.push_str(&format!("{b:3}  "));
         }
-        
+
         out.push('\n');
         idx += 1;
     }

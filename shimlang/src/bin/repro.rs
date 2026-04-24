@@ -47,7 +47,7 @@ fn run() -> Result<(), String> {
         match interpreter.execute_bytecode_extended(&mut pc, shimlang::ArgBundle::new(), &mut env) {
             Ok(_) => {
                 interpreter.gc(&env);
-            },
+            }
             Err(msg) => {
                 eprintln!("{msg}");
                 return Err((format!("")).into());

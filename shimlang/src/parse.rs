@@ -1,12 +1,11 @@
+use crate::lex::{Token, TokenStream, format_script_err, lex};
 use std::ops::Add;
-use crate::lex::{Token, TokenStream, lex, format_script_err};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Span {
     pub start: u32,
     pub end: u32,
 }
-
 
 impl Add<Span> for Span {
     type Output = Span;
@@ -25,8 +24,7 @@ pub struct Node<T> {
     pub span: Span,
 }
 
-impl<T> Node<T> {
-}
+impl<T> Node<T> {}
 
 // Now redefine your types using the wrapper
 pub type ExprNode = Node<Expression>;
@@ -218,26 +216,21 @@ pub fn parse_primary(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                         let token = tokens.pop()?;
                         match token {
                             Token::String(s) => {
-                                expr = Expression::BinaryOp(
-                                    BinaryOp::Add(
-                                        Box::new(
-                                            Node { data: expr, span }
-                                        ),
-                                        Box::new(
-                                            Node {
-                                                data: Expression::Stringify(Box::new(interp_expr)),
-                                                span,
-                                            }
-                                        ),
-                                    )
-                                );
-                                expr = Expression::BinaryOp(
-                                    BinaryOp::Add(
-                                        Box::new(Node { data: expr, span }),
-                                        Box::new(Node { data: Expression::Primary(Primary::String(s)), span }),
-                                    )
-                                );
-                            },
+                                expr = Expression::BinaryOp(BinaryOp::Add(
+                                    Box::new(Node { data: expr, span }),
+                                    Box::new(Node {
+                                        data: Expression::Stringify(Box::new(interp_expr)),
+                                        span,
+                                    }),
+                                ));
+                                expr = Expression::BinaryOp(BinaryOp::Add(
+                                    Box::new(Node { data: expr, span }),
+                                    Box::new(Node {
+                                        data: Expression::Primary(Primary::String(s)),
+                                        span,
+                                    }),
+                                ));
+                            }
                             token => {
                                 tokens.unadvance()?;
                                 return Err(tokens.format_peek_err(&format!(
@@ -246,13 +239,13 @@ pub fn parse_primary(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                                 )));
                             }
                         }
-                    },
+                    }
                     _ => break,
                 }
             }
 
             expr
-        },
+        }
         Token::Bool(b) => Expression::Primary(Primary::Bool(b)),
         Token::Identifier(s) => Expression::Primary(Primary::Identifier(s)),
         Token::LCurly => {
@@ -701,12 +694,14 @@ pub fn parse_conditional(tokens: &mut TokenStream) -> Result<(Conditional, Span)
             let (elseif, elseif_span) = parse_conditional(tokens)?;
             Block {
                 stmts: Vec::new(),
-                last_expr: Some(
-                    Box::new(ExprNode {
-                        data: Expression::If(Box::new(elseif.conditional), elseif.if_body, elseif.else_body),
-                        span: elseif_span,
-                    })
-                )
+                last_expr: Some(Box::new(ExprNode {
+                    data: Expression::If(
+                        Box::new(elseif.conditional),
+                        elseif.if_body,
+                        elseif.else_body,
+                    ),
+                    span: elseif_span,
+                })),
             }
         } else {
             parse_block(tokens)?
@@ -721,7 +716,10 @@ pub fn parse_conditional(tokens: &mut TokenStream) -> Result<(Conditional, Span)
     // Get the end span (previous token, which is the closing curly)
     let end_span = tokens.previous_span()?;
 
-    Ok((Conditional::new(conditional, if_body, else_body), start_span + end_span))
+    Ok((
+        Conditional::new(conditional, if_body, else_body),
+        start_span + end_span,
+    ))
 }
 
 pub fn parse_expression(tokens: &mut TokenStream) -> Result<ExprNode, String> {
@@ -743,7 +741,7 @@ pub fn parse_function(tokens: &mut TokenStream) -> Result<Fn, String> {
             let ident = ident.clone();
             tokens.advance()?;
             Some(ident)
-        },
+        }
         Token::LBracket => None,
         token => {
             return Err(
@@ -771,7 +769,9 @@ pub fn parse_function(tokens: &mut TokenStream) -> Result<Fn, String> {
             Some(parse_expression(tokens)?)
         } else {
             if optional_params.len() > 0 {
-                return Err(tokens.format_peek_err(&format!("No required arguments after optional")));
+                return Err(
+                    tokens.format_peek_err(&format!("No required arguments after optional"))
+                );
             }
             None
         };
@@ -818,7 +818,8 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
                 Token::Identifier(ident) => ident.clone(),
                 token => {
                     tokens.unadvance()?;
-                    return Err(tokens.format_peek_err(&format!("Expected ident after let, found {:?}", token)));
+                    return Err(tokens
+                        .format_peek_err(&format!("Expected ident after let, found {:?}", token)));
                 }
             };
 
@@ -826,7 +827,10 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
                 Token::Equal => (),
                 token => {
                     tokens.unadvance()?;
-                    return Err(tokens.format_peek_err(&format!("Expected = after `let ident`, found {:?}", token)));
+                    return Err(tokens.format_peek_err(&format!(
+                        "Expected = after `let ident`, found {:?}",
+                        token
+                    )));
                 }
             }
 
@@ -1065,7 +1069,11 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
                             let end_span = tokens.peek_span()?;
                             tokens.consume(Token::Semicolon)?;
                             StatementNode {
-                                data: Statement::AttributeAssignment(*expr, ident.clone(), expr_to_assign),
+                                data: Statement::AttributeAssignment(
+                                    *expr,
+                                    ident.clone(),
+                                    expr_to_assign,
+                                ),
                                 span: start_span + end_span,
                             }
                         }
@@ -1074,7 +1082,11 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
                             let end_span = tokens.peek_span()?;
                             tokens.consume(Token::Semicolon)?;
                             StatementNode {
-                                data: Statement::IndexAssignment(*expr, *index_expr, expr_to_assign),
+                                data: Statement::IndexAssignment(
+                                    *expr,
+                                    *index_expr,
+                                    expr_to_assign,
+                                ),
                                 span: start_span + end_span,
                             }
                         }
@@ -1115,7 +1127,12 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
                             let end_span = tokens.peek_span()?;
                             tokens.consume(Token::Semicolon)?;
                             StatementNode {
-                                data: Statement::CompoundAttributeAssignment(*obj_expr, ident.clone(), op, rhs),
+                                data: Statement::CompoundAttributeAssignment(
+                                    *obj_expr,
+                                    ident.clone(),
+                                    op,
+                                    rhs,
+                                ),
                                 span: start_span + end_span,
                             }
                         }
@@ -1124,7 +1141,12 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
                             let end_span = tokens.peek_span()?;
                             tokens.consume(Token::Semicolon)?;
                             StatementNode {
-                                data: Statement::CompoundIndexAssignment(*obj_expr, *index_expr, op, rhs),
+                                data: Statement::CompoundIndexAssignment(
+                                    *obj_expr,
+                                    *index_expr,
+                                    op,
+                                    rhs,
+                                ),
                                 span: start_span + end_span,
                             }
                         }

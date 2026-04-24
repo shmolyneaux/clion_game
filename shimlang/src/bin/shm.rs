@@ -40,7 +40,9 @@ fn print_help() {
     println!("  [FILE]              Script file to execute (or script content with -c)");
     println!();
     println!("Options:");
-    println!("  -c                  Treat positional argument as script content instead of file path");
+    println!(
+        "  -c                  Treat positional argument as script content instead of file path"
+    );
     println!("  --gc                Run garbage collector after execution");
     println!("  --parse             Parse the script and check syntax without execution");
     println!("  --spans             Display lexical spans (tokens) from the script");
@@ -128,12 +130,16 @@ fn run() -> Result<(), String> {
                 let mut interpreter = shimlang::Interpreter::create(&Config::default(), program);
                 let mut env = shimlang::Environment::new_with_builtins(&mut interpreter);
                 let mut pc = 0;
-                match interpreter.execute_bytecode_extended(&mut pc, shimlang::ArgBundle::new(), &mut env) {
+                match interpreter.execute_bytecode_extended(
+                    &mut pc,
+                    shimlang::ArgBundle::new(),
+                    &mut env,
+                ) {
                     Ok(_) => {
                         if args.gc {
                             interpreter.gc(&env);
                         }
-                    },
+                    }
                     Err(msg) => {
                         eprintln!("{msg}");
                         return Err((format!("")).into());
@@ -190,9 +196,7 @@ fn run() -> Result<(), String> {
                 .expect("Failed to read line");
 
             let ast = match shimlang::ast_from_text(&input.into_bytes()) {
-                Ok(ast) => {
-                    ast
-                },
+                Ok(ast) => ast,
                 Err(msg) => {
                     eprintln!("{msg}");
                     return Err((format!("")).into());
@@ -201,11 +205,15 @@ fn run() -> Result<(), String> {
             let program = shimlang::compile_ast(&ast)?;
 
             interpreter.append_program(program)?;
-            match interpreter.execute_bytecode_extended(&mut pc, shimlang::ArgBundle::new(), &mut env) {
+            match interpreter.execute_bytecode_extended(
+                &mut pc,
+                shimlang::ArgBundle::new(),
+                &mut env,
+            ) {
                 Ok(shimlang::ShimValue::None) => (),
                 Ok(val) => {
                     println!("{}", val.to_string(&mut interpreter));
-                },
+                }
                 Err(msg) => {
                     eprintln!("{msg}");
                     return Err((format!("")).into());

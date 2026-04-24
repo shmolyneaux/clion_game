@@ -1,10 +1,10 @@
-use std::os::raw::c_int;
-use std::ffi::CString;
 use facet::*;
 use facet_reflect::*;
+use std::borrow::Cow;
+use std::ffi::CString;
 use std::fmt;
 use std::fmt::Formatter;
-use std::borrow::Cow;
+use std::os::raw::c_int;
 
 pub type ImGuiWindowFlags = c_int;
 
@@ -21,19 +21,44 @@ pub fn im_col32(r: u32, g: u32, b: u32, a: u32) -> u32 {
 
 #[cfg(not(test))]
 unsafe extern "C" {
-    pub fn igBegin(name: *const core::ffi::c_char, p_open: *mut bool, flags: ImGuiWindowFlags) -> bool;
+    pub fn igBegin(
+        name: *const core::ffi::c_char,
+        p_open: *mut bool,
+        flags: ImGuiWindowFlags,
+    ) -> bool;
     pub fn igEnd();
     pub fn igBeginDisabled();
     pub fn igEndDisabled();
     pub fn igIsItemHovered(flags: i32) -> bool;
     pub fn igSetTooltip(text: *const core::ffi::c_char);
-    pub fn igInputText(label: *const core::ffi::c_char, buffer: *mut core::ffi::c_char, buffer_size: i32, flags: i32) -> bool;
+    pub fn igInputText(
+        label: *const core::ffi::c_char,
+        buffer: *mut core::ffi::c_char,
+        buffer_size: i32,
+        flags: i32,
+    ) -> bool;
     fn igTextC(fmt: *const core::ffi::c_char, ...);
     fn igTextColoredC(r: f32, g: f32, b: f32, a: f32, fmt: *const core::ffi::c_char, ...);
-    pub fn igTextColoredBC(r: f32, g: f32, b: f32, a: f32, br: f32, bg: f32, bb: f32, ba: f32, text: *const core::ffi::c_char);
+    pub fn igTextColoredBC(
+        r: f32,
+        g: f32,
+        b: f32,
+        a: f32,
+        br: f32,
+        bg: f32,
+        bb: f32,
+        ba: f32,
+        text: *const core::ffi::c_char,
+    );
     pub fn igRemoveSpacingH();
     pub fn igButton(label: *const core::ffi::c_char) -> bool;
-    pub fn igSliderFloat(label: *const core::ffi::c_char, v: *mut f32, v_min: f32, v_max: f32, format: *const core::ffi::c_char);
+    pub fn igSliderFloat(
+        label: *const core::ffi::c_char,
+        v: *mut f32,
+        v_min: f32,
+        v_max: f32,
+        format: *const core::ffi::c_char,
+    );
     pub fn igCheckbox(label: *const core::ffi::c_char, value: *mut bool) -> bool;
     pub fn igWantCaptureKeyboard() -> bool;
     pub fn igWantCaptureMouse() -> bool;
@@ -62,12 +87,16 @@ unsafe extern "C" {
 
 pub fn igText(fmt: *const core::ffi::c_char) {
     #[cfg(not(test))]
-    unsafe { igTextC(fmt); }
+    unsafe {
+        igTextC(fmt);
+    }
 }
 
 pub fn igTextColored(r: f32, g: f32, b: f32, a: f32, fmt: *const core::ffi::c_char) {
     #[cfg(not(test))]
-    unsafe { igTextColoredC(r, g, b, a, fmt); }
+    unsafe {
+        igTextColoredC(r, g, b, a, fmt);
+    }
 }
 
 #[cfg(test)]
@@ -75,95 +104,188 @@ mod test_mocks {
     use super::ImGuiWindowFlags;
     use super::ImVec2;
 
-    pub fn igBegin(name: *const core::ffi::c_char, p_open: *mut bool, flags: ImGuiWindowFlags) -> bool {panic!("Can't call igBegin in test context")}
-    pub fn igEnd() {panic!("Can't call igEnd in test context")}
-    pub fn igTextColoredBC(r: f32, g: f32, b: f32, a: f32, br: f32, bg: f32, bb: f32, ba: f32, text: *const core::ffi::c_char) {panic!("Can't call igTextColoredBC in test context")}
+    pub fn igBegin(
+        name: *const core::ffi::c_char,
+        p_open: *mut bool,
+        flags: ImGuiWindowFlags,
+    ) -> bool {
+        panic!("Can't call igBegin in test context")
+    }
+    pub fn igEnd() {
+        panic!("Can't call igEnd in test context")
+    }
+    pub fn igTextColoredBC(
+        r: f32,
+        g: f32,
+        b: f32,
+        a: f32,
+        br: f32,
+        bg: f32,
+        bb: f32,
+        ba: f32,
+        text: *const core::ffi::c_char,
+    ) {
+        panic!("Can't call igTextColoredBC in test context")
+    }
     pub fn igRemoveSpacingH() {}
-    pub fn igBeginDisabled() {panic!("Can't call igBeginDisabled in test context")}
-    pub fn igEndDisabled() {panic!("Can't call igEndDisabled in test context")}
-    pub fn igIsItemHovered(flags: i32) -> bool {panic!("Can't call igIsItemHovered in test context")}
-    pub fn igSetTooltip(text: *const core::ffi::c_char) {panic!("Can't call igSetTooltip in test context")}
-    pub fn igInputText(label: *const core::ffi::c_char, buffer: *mut core::ffi::c_char, buffer_size: i32, flags: i32) -> bool {panic!("Can't call igInputText in test context")}
-    pub fn igButton(label: *const core::ffi::c_char) -> bool {panic!("Can't call igButton in test context")}
-    pub fn igSliderFloat(label: *const core::ffi::c_char, v: *mut f32, v_min: f32, v_max: f32, format: *const core::ffi::c_char) {panic!("Can't call igSliderFloat in test context")}
-    pub fn igCheckbox(label: *const core::ffi::c_char, value: *mut bool) -> bool {panic!("Can't call igCheckbox in test context")}
-    pub fn igWantCaptureKeyboard() -> bool {panic!("Can't call igWantCaptureKeyboard in test context")}
-    pub fn igWantCaptureMouse() -> bool {panic!("Can't call igWantCaptureMouse in test context")}
-    pub fn igTreeNode(label: *const core::ffi::c_char) -> bool {panic!("Can't call igTreeNode in test context")}
-    pub fn igTreePop() {panic!("Can't call igTreePop in test context")}
-    pub fn igSHMNextItemOpenOnce() {panic!("Can't call igSHMNextItemOpenOnce in test context")}
-    pub fn igSameLine() {panic!("Can't call igSameLine in test context")}
-    pub fn igSetKeyboardFocusHere() {panic!("Can't call igSetKeyboardFocusHere in test context")}
-    pub fn igSeparator() {panic!("Can't call igSeparator in test context")}
-    pub fn shmConsoleFooterHeight() -> f32 {panic!("Can't call shmConsoleFooterHeight in test context")}
-    pub fn igBeginTable(label: *const core::ffi::c_char, columns: i32) -> bool {panic!("Can't call igBeginTable in test context")}
-    pub fn igTableSetupColumn(label: *const core::ffi::c_char) {panic!("Can't call igTableSetupColumn in test context")}
-    pub fn igTableHeadersRow() {panic!("Can't call igTableHeadersRow in test context")}
-    pub fn igTableNextRow() {panic!("Can't call igTableNextRow in test context")}
-    pub fn igTableSetColumnIndex(index: i32) {panic!("Can't call igTableSetColumnIndex in test context")}
-    pub fn igEndTable() {panic!("Can't call igEndTable in test context")}
-    pub fn igFrameRate() -> f32 {panic!("Can't call igFrameRate in test context")}
-    pub fn igGetCursorScreenPos(pOut: *mut ImVec2) {panic!("Can't call igGetCursorScreenPos in test context")}
-    pub fn igDrawRectFilled(min: ImVec2, max: ImVec2, col: u32) {panic!("Can't call igDrawRectFilled in test context")}
-    pub fn igDummy(size: ImVec2) {panic!("Can't call igDummy in test context")}
-    pub fn igBeginTooltip() {panic!("Can't call igBeginTooltip in test context")}
-    pub fn igEndTooltip() {panic!("Can't call igEndTooltip in test context")}
-    pub fn igGetMousePos(pOut: *mut ImVec2) {panic!("Can't call igGetMousePos in test context")}
-    pub fn igIsMouseHoveringRect(min: ImVec2, max: ImVec2, clip: bool) -> bool {panic!("Can't call igIsMouseHoveringRect in test context")}
+    pub fn igBeginDisabled() {
+        panic!("Can't call igBeginDisabled in test context")
+    }
+    pub fn igEndDisabled() {
+        panic!("Can't call igEndDisabled in test context")
+    }
+    pub fn igIsItemHovered(flags: i32) -> bool {
+        panic!("Can't call igIsItemHovered in test context")
+    }
+    pub fn igSetTooltip(text: *const core::ffi::c_char) {
+        panic!("Can't call igSetTooltip in test context")
+    }
+    pub fn igInputText(
+        label: *const core::ffi::c_char,
+        buffer: *mut core::ffi::c_char,
+        buffer_size: i32,
+        flags: i32,
+    ) -> bool {
+        panic!("Can't call igInputText in test context")
+    }
+    pub fn igButton(label: *const core::ffi::c_char) -> bool {
+        panic!("Can't call igButton in test context")
+    }
+    pub fn igSliderFloat(
+        label: *const core::ffi::c_char,
+        v: *mut f32,
+        v_min: f32,
+        v_max: f32,
+        format: *const core::ffi::c_char,
+    ) {
+        panic!("Can't call igSliderFloat in test context")
+    }
+    pub fn igCheckbox(label: *const core::ffi::c_char, value: *mut bool) -> bool {
+        panic!("Can't call igCheckbox in test context")
+    }
+    pub fn igWantCaptureKeyboard() -> bool {
+        panic!("Can't call igWantCaptureKeyboard in test context")
+    }
+    pub fn igWantCaptureMouse() -> bool {
+        panic!("Can't call igWantCaptureMouse in test context")
+    }
+    pub fn igTreeNode(label: *const core::ffi::c_char) -> bool {
+        panic!("Can't call igTreeNode in test context")
+    }
+    pub fn igTreePop() {
+        panic!("Can't call igTreePop in test context")
+    }
+    pub fn igSHMNextItemOpenOnce() {
+        panic!("Can't call igSHMNextItemOpenOnce in test context")
+    }
+    pub fn igSameLine() {
+        panic!("Can't call igSameLine in test context")
+    }
+    pub fn igSetKeyboardFocusHere() {
+        panic!("Can't call igSetKeyboardFocusHere in test context")
+    }
+    pub fn igSeparator() {
+        panic!("Can't call igSeparator in test context")
+    }
+    pub fn shmConsoleFooterHeight() -> f32 {
+        panic!("Can't call shmConsoleFooterHeight in test context")
+    }
+    pub fn igBeginTable(label: *const core::ffi::c_char, columns: i32) -> bool {
+        panic!("Can't call igBeginTable in test context")
+    }
+    pub fn igTableSetupColumn(label: *const core::ffi::c_char) {
+        panic!("Can't call igTableSetupColumn in test context")
+    }
+    pub fn igTableHeadersRow() {
+        panic!("Can't call igTableHeadersRow in test context")
+    }
+    pub fn igTableNextRow() {
+        panic!("Can't call igTableNextRow in test context")
+    }
+    pub fn igTableSetColumnIndex(index: i32) {
+        panic!("Can't call igTableSetColumnIndex in test context")
+    }
+    pub fn igEndTable() {
+        panic!("Can't call igEndTable in test context")
+    }
+    pub fn igFrameRate() -> f32 {
+        panic!("Can't call igFrameRate in test context")
+    }
+    pub fn igGetCursorScreenPos(pOut: *mut ImVec2) {
+        panic!("Can't call igGetCursorScreenPos in test context")
+    }
+    pub fn igDrawRectFilled(min: ImVec2, max: ImVec2, col: u32) {
+        panic!("Can't call igDrawRectFilled in test context")
+    }
+    pub fn igDummy(size: ImVec2) {
+        panic!("Can't call igDummy in test context")
+    }
+    pub fn igBeginTooltip() {
+        panic!("Can't call igBeginTooltip in test context")
+    }
+    pub fn igEndTooltip() {
+        panic!("Can't call igEndTooltip in test context")
+    }
+    pub fn igGetMousePos(pOut: *mut ImVec2) {
+        panic!("Can't call igGetMousePos in test context")
+    }
+    pub fn igIsMouseHoveringRect(min: ImVec2, max: ImVec2, clip: bool) -> bool {
+        panic!("Can't call igIsMouseHoveringRect in test context")
+    }
 }
 
 #[cfg(test)]
 pub use test_mocks::*;
 
-pub static IMGUI_WINDOW_FLAGS_NONE: c_int                         = 0;
-pub static IMGUI_WINDOW_FLAGS_NO_TITLE_BAR: c_int                 = 1 << 0;
-pub static IMGUI_WINDOW_FLAGS_NO_RESIZE: c_int                    = 1 << 1;
-pub static IMGUI_WINDOW_FLAGS_NO_MOVE: c_int                      = 1 << 2;
-pub static IMGUI_WINDOW_FLAGS_NO_SCROLLBAR: c_int                 = 1 << 3;
-pub static IMGUI_WINDOW_FLAGS_NO_SCROLL_WITH_MOUSE: c_int         = 1 << 4;
-pub static IMGUI_WINDOW_FLAGS_NO_COLLAPSE: c_int                  = 1 << 5;
-pub static IMGUI_WINDOW_FLAGS_ALWAYS_AUTO_RESIZE: c_int           = 1 << 6;
-pub static IMGUI_WINDOW_FLAGS_NO_BACKGROUND: c_int                = 1 << 7;
-pub static IMGUI_WINDOW_FLAGS_NO_SAVED_SETTINGS: c_int            = 1 << 8;
-pub static IMGUI_WINDOW_FLAGS_NO_MOUSE_INPUTS: c_int              = 1 << 9;
-pub static IMGUI_WINDOW_FLAGS_MENU_BAR: c_int                     = 1 << 10;
-pub static IMGUI_WINDOW_FLAGS_HORIZONTAL_SCROLLBAR: c_int         = 1 << 11;
-pub static IMGUI_WINDOW_FLAGS_NO_FOCUS_ON_APPEARING: c_int        = 1 << 12;
-pub static IMGUI_WINDOW_FLAGS_NO_BRING_TO_FRONT_ON_FOCUS: c_int   = 1 << 13;
-pub static IMGUI_WINDOW_FLAGS_ALWAYS_VERTICAL_SCROLLBAR: c_int    = 1 << 14;
-pub static IMGUI_WINDOW_FLAGS_ALWAYS_HORIZONTAL_SCROLLBAR: c_int  = 1 << 15;
-pub static IMGUI_WINDOW_FLAGS_NO_NAV_INPUTS: c_int                = 1 << 16;
-pub static IMGUI_WINDOW_FLAGS_NO_NAV_FOCUS: c_int                 = 1 << 17;
-pub static IMGUI_WINDOW_FLAGS_UNSAVED_DOCUMENT: c_int             = 1 << 18;
-pub static IMGUI_WINDOW_FLAGS_NO_DOCKING: c_int                   = 1 << 19;
+pub static IMGUI_WINDOW_FLAGS_NONE: c_int = 0;
+pub static IMGUI_WINDOW_FLAGS_NO_TITLE_BAR: c_int = 1 << 0;
+pub static IMGUI_WINDOW_FLAGS_NO_RESIZE: c_int = 1 << 1;
+pub static IMGUI_WINDOW_FLAGS_NO_MOVE: c_int = 1 << 2;
+pub static IMGUI_WINDOW_FLAGS_NO_SCROLLBAR: c_int = 1 << 3;
+pub static IMGUI_WINDOW_FLAGS_NO_SCROLL_WITH_MOUSE: c_int = 1 << 4;
+pub static IMGUI_WINDOW_FLAGS_NO_COLLAPSE: c_int = 1 << 5;
+pub static IMGUI_WINDOW_FLAGS_ALWAYS_AUTO_RESIZE: c_int = 1 << 6;
+pub static IMGUI_WINDOW_FLAGS_NO_BACKGROUND: c_int = 1 << 7;
+pub static IMGUI_WINDOW_FLAGS_NO_SAVED_SETTINGS: c_int = 1 << 8;
+pub static IMGUI_WINDOW_FLAGS_NO_MOUSE_INPUTS: c_int = 1 << 9;
+pub static IMGUI_WINDOW_FLAGS_MENU_BAR: c_int = 1 << 10;
+pub static IMGUI_WINDOW_FLAGS_HORIZONTAL_SCROLLBAR: c_int = 1 << 11;
+pub static IMGUI_WINDOW_FLAGS_NO_FOCUS_ON_APPEARING: c_int = 1 << 12;
+pub static IMGUI_WINDOW_FLAGS_NO_BRING_TO_FRONT_ON_FOCUS: c_int = 1 << 13;
+pub static IMGUI_WINDOW_FLAGS_ALWAYS_VERTICAL_SCROLLBAR: c_int = 1 << 14;
+pub static IMGUI_WINDOW_FLAGS_ALWAYS_HORIZONTAL_SCROLLBAR: c_int = 1 << 15;
+pub static IMGUI_WINDOW_FLAGS_NO_NAV_INPUTS: c_int = 1 << 16;
+pub static IMGUI_WINDOW_FLAGS_NO_NAV_FOCUS: c_int = 1 << 17;
+pub static IMGUI_WINDOW_FLAGS_UNSAVED_DOCUMENT: c_int = 1 << 18;
+pub static IMGUI_WINDOW_FLAGS_NO_DOCKING: c_int = 1 << 19;
 
-pub static IMGUI_HOVERED_FLAGS_ALLOW_WHEN_DISABLED: c_int         = 1 << 10;
+pub static IMGUI_HOVERED_FLAGS_ALLOW_WHEN_DISABLED: c_int = 1 << 10;
 
-pub static IMGUI_INPUT_TEXT_FLAGS_NONE: c_int                = 0;
-pub static IMGUI_INPUT_TEXT_FLAGS_CHARS_DECIMAL: c_int        = 1 << 0;
-pub static IMGUI_INPUT_TEXT_FLAGS_CHARS_HEXADECIMAL: c_int    = 1 << 1;
-pub static IMGUI_INPUT_TEXT_FLAGS_CHARS_SCIENTIFIC: c_int     = 1 << 2;
-pub static IMGUI_INPUT_TEXT_FLAGS_CHARS_UPPERCASE: c_int      = 1 << 3;
-pub static IMGUI_INPUT_TEXT_FLAGS_CHARS_NOBLANK: c_int        = 1 << 4;
-pub static IMGUI_INPUT_TEXT_FLAGS_ALLOW_TAB_INPUT: c_int       = 1 << 5;
-pub static IMGUI_INPUT_TEXT_FLAGS_ENTER_RETURNS_TRUE: c_int    = 1 << 6;
-pub static IMGUI_INPUT_TEXT_FLAGS_ESCAPE_CLEARS_ALL: c_int     = 1 << 7;
+pub static IMGUI_INPUT_TEXT_FLAGS_NONE: c_int = 0;
+pub static IMGUI_INPUT_TEXT_FLAGS_CHARS_DECIMAL: c_int = 1 << 0;
+pub static IMGUI_INPUT_TEXT_FLAGS_CHARS_HEXADECIMAL: c_int = 1 << 1;
+pub static IMGUI_INPUT_TEXT_FLAGS_CHARS_SCIENTIFIC: c_int = 1 << 2;
+pub static IMGUI_INPUT_TEXT_FLAGS_CHARS_UPPERCASE: c_int = 1 << 3;
+pub static IMGUI_INPUT_TEXT_FLAGS_CHARS_NOBLANK: c_int = 1 << 4;
+pub static IMGUI_INPUT_TEXT_FLAGS_ALLOW_TAB_INPUT: c_int = 1 << 5;
+pub static IMGUI_INPUT_TEXT_FLAGS_ENTER_RETURNS_TRUE: c_int = 1 << 6;
+pub static IMGUI_INPUT_TEXT_FLAGS_ESCAPE_CLEARS_ALL: c_int = 1 << 7;
 pub static IMGUI_INPUT_TEXT_FLAGS_CTRL_ENTER_FOR_NEWLINE: c_int = 1 << 8;
-pub static IMGUI_INPUT_TEXT_FLAGS_READONLY: c_int            = 1 << 9;
-pub static IMGUI_INPUT_TEXT_FLAGS_PASSWORD: c_int            = 1 << 10;
-pub static IMGUI_INPUT_TEXT_FLAGS_ALWAYSOVERWRITE: c_int     = 1 << 11;
-pub static IMGUI_INPUT_TEXT_FLAGS_AUTOSELECTALL: c_int       = 1 << 12;
-pub static IMGUI_INPUT_TEXT_FLAGS_PARSEEMPTYREFVAL: c_int    = 1 << 13;
-pub static IMGUI_INPUT_TEXT_FLAGS_DISPLAYEMPTYREFVAL: c_int  = 1 << 14;
-pub static IMGUI_INPUT_TEXT_FLAGS_NOHORIZONTALSCROLL: c_int  = 1 << 15;
-pub static IMGUI_INPUT_TEXT_FLAGS_NOUNDOREDO: c_int          = 1 << 16;
-pub static IMGUI_INPUT_TEXT_FLAGS_ELIDELEFT: c_int           = 1 << 17;
-pub static IMGUI_INPUT_TEXT_FLAGS_CALLBACKCOMPLETION: c_int  = 1 << 18;
-pub static IMGUI_INPUT_TEXT_FLAGS_CALLBACKHISTORY: c_int     = 1 << 19;
-pub static IMGUI_INPUT_TEXT_FLAGS_CALLBACKALWAYS: c_int      = 1 << 20;
-pub static IMGUI_INPUT_TEXT_FLAGS_CALLBACKCHARFILTER: c_int  = 1 << 21;
-pub static IMGUI_INPUT_TEXT_FLAGS_CALLBACKRESIZE: c_int      = 1 << 22;
-pub static IMGUI_INPUT_TEXT_FLAGS_CALLBACKEDIT: c_int        = 1 << 23;
+pub static IMGUI_INPUT_TEXT_FLAGS_READONLY: c_int = 1 << 9;
+pub static IMGUI_INPUT_TEXT_FLAGS_PASSWORD: c_int = 1 << 10;
+pub static IMGUI_INPUT_TEXT_FLAGS_ALWAYSOVERWRITE: c_int = 1 << 11;
+pub static IMGUI_INPUT_TEXT_FLAGS_AUTOSELECTALL: c_int = 1 << 12;
+pub static IMGUI_INPUT_TEXT_FLAGS_PARSEEMPTYREFVAL: c_int = 1 << 13;
+pub static IMGUI_INPUT_TEXT_FLAGS_DISPLAYEMPTYREFVAL: c_int = 1 << 14;
+pub static IMGUI_INPUT_TEXT_FLAGS_NOHORIZONTALSCROLL: c_int = 1 << 15;
+pub static IMGUI_INPUT_TEXT_FLAGS_NOUNDOREDO: c_int = 1 << 16;
+pub static IMGUI_INPUT_TEXT_FLAGS_ELIDELEFT: c_int = 1 << 17;
+pub static IMGUI_INPUT_TEXT_FLAGS_CALLBACKCOMPLETION: c_int = 1 << 18;
+pub static IMGUI_INPUT_TEXT_FLAGS_CALLBACKHISTORY: c_int = 1 << 19;
+pub static IMGUI_INPUT_TEXT_FLAGS_CALLBACKALWAYS: c_int = 1 << 20;
+pub static IMGUI_INPUT_TEXT_FLAGS_CALLBACKCHARFILTER: c_int = 1 << 21;
+pub static IMGUI_INPUT_TEXT_FLAGS_CALLBACKRESIZE: c_int = 1 << 22;
+pub static IMGUI_INPUT_TEXT_FLAGS_CALLBACKEDIT: c_int = 1 << 23;
 
 fn parse_facet_range(s: &str) -> Option<(f32, f32)> {
     let prefix = "range = (";
@@ -201,8 +323,14 @@ fn format_shape_typename(shape: &Shape) -> String {
     let mut output = String::new();
     fmt::write(
         &mut output,
-        format_args!("{}", FormatWrapper { func: shape.vtable.type_name()})
-    ).unwrap();
+        format_args!(
+            "{}",
+            FormatWrapper {
+                func: shape.vtable.type_name()
+            }
+        ),
+    )
+    .unwrap();
     output
 }
 
@@ -211,7 +339,11 @@ pub fn imgui_debug<'a, T: Facet<'a>>(obj: &mut T) {
 
     let mut open = true;
     unsafe {
-        igBegin(c"State".as_ptr(), &mut open as *mut bool, IMGUI_WINDOW_FLAGS_NO_FOCUS_ON_APPEARING);
+        igBegin(
+            c"State".as_ptr(),
+            &mut open as *mut bool,
+            IMGUI_WINDOW_FLAGS_NO_FOCUS_ON_APPEARING,
+        );
         imgui_debug_inner(&poke, &[], "");
         igEnd();
     }
@@ -235,19 +367,36 @@ pub unsafe fn imgui_debug_inner(peek: &Peek, attributes: &[FieldAttribute], path
             }
 
             if readonly {
-                igText(CString::new(format!("{}", peek.get::<bool>().unwrap())).unwrap().as_ptr());
+                igText(
+                    CString::new(format!("{}", peek.get::<bool>().unwrap()))
+                        .unwrap()
+                        .as_ptr(),
+                );
             } else {
                 let ptr = unsafe { peek.data().thin().unwrap().as_ptr::<bool>() as *mut bool };
-                igCheckbox(
-                    CString::new(path).unwrap().as_ptr(),
-                    ptr,
-                );
+                igCheckbox(CString::new(path).unwrap().as_ptr(), ptr);
             }
-        },
-        (Some(ScalarType::Char), _) => igText(CString::new(format!("{}", peek.get::<char>().unwrap())).unwrap().as_ptr()),
-        (Some(ScalarType::Str), _) => igText(CString::new(format!("{}", peek.get::<&str>().unwrap())).unwrap().as_ptr()),
-        (Some(ScalarType::String), _) => igText(CString::new(format!("{}", peek.get::<String>().unwrap())).unwrap().as_ptr()),
-        (Some(ScalarType::CowStr), _) => igText(CString::new(format!("{}", peek.get::<Cow<str>>().unwrap())).unwrap().as_ptr()),
+        }
+        (Some(ScalarType::Char), _) => igText(
+            CString::new(format!("{}", peek.get::<char>().unwrap()))
+                .unwrap()
+                .as_ptr(),
+        ),
+        (Some(ScalarType::Str), _) => igText(
+            CString::new(format!("{}", peek.get::<&str>().unwrap()))
+                .unwrap()
+                .as_ptr(),
+        ),
+        (Some(ScalarType::String), _) => igText(
+            CString::new(format!("{}", peek.get::<String>().unwrap()))
+                .unwrap()
+                .as_ptr(),
+        ),
+        (Some(ScalarType::CowStr), _) => igText(
+            CString::new(format!("{}", peek.get::<Cow<str>>().unwrap()))
+                .unwrap()
+                .as_ptr(),
+        ),
         (Some(ScalarType::F32), _) => {
             let ptr = unsafe { peek.data().thin().unwrap().as_ptr::<f32>() as *mut f32 };
             let mut min = 0.0;
@@ -270,51 +419,94 @@ pub unsafe fn imgui_debug_inner(peek: &Peek, attributes: &[FieldAttribute], path
                 max,
                 c"%.3f".as_ptr(),
             );
-        },
-        (Some(ScalarType::F64), _) => igText(CString::new(format!("{}f64", peek.get::<f64>().unwrap())).unwrap().as_ptr()),
-        (Some(ScalarType::U8), _) => igText(CString::new(format!("{}u8", peek.get::<u8>().unwrap())).unwrap().as_ptr()),
-        (Some(ScalarType::U16), _) => igText(CString::new(format!("{}u16", peek.get::<u16>().unwrap())).unwrap().as_ptr()),
-        (Some(ScalarType::U32), _) => igText(CString::new(format!("{}u32", peek.get::<u32>().unwrap())).unwrap().as_ptr()),
-        (Some(ScalarType::U64), _) => igText(CString::new(format!("{}u64", peek.get::<u64>().unwrap())).unwrap().as_ptr()),
-        (Some(ScalarType::U128), _) => igText(CString::new(format!("{}u128", peek.get::<u128>().unwrap())).unwrap().as_ptr()),
-        (Some(ScalarType::USize), _) => igText(CString::new(format!("{}usize", peek.get::<usize>().unwrap())).unwrap().as_ptr()),
-        (Some(ScalarType::I8), _) => igText(CString::new(format!("{}i8", peek.get::<i8>().unwrap())).unwrap().as_ptr()),
-        (Some(ScalarType::I16), _) => igText(CString::new(format!("{}i16", peek.get::<i16>().unwrap())).unwrap().as_ptr()),
+        }
+        (Some(ScalarType::F64), _) => igText(
+            CString::new(format!("{}f64", peek.get::<f64>().unwrap()))
+                .unwrap()
+                .as_ptr(),
+        ),
+        (Some(ScalarType::U8), _) => igText(
+            CString::new(format!("{}u8", peek.get::<u8>().unwrap()))
+                .unwrap()
+                .as_ptr(),
+        ),
+        (Some(ScalarType::U16), _) => igText(
+            CString::new(format!("{}u16", peek.get::<u16>().unwrap()))
+                .unwrap()
+                .as_ptr(),
+        ),
+        (Some(ScalarType::U32), _) => igText(
+            CString::new(format!("{}u32", peek.get::<u32>().unwrap()))
+                .unwrap()
+                .as_ptr(),
+        ),
+        (Some(ScalarType::U64), _) => igText(
+            CString::new(format!("{}u64", peek.get::<u64>().unwrap()))
+                .unwrap()
+                .as_ptr(),
+        ),
+        (Some(ScalarType::U128), _) => igText(
+            CString::new(format!("{}u128", peek.get::<u128>().unwrap()))
+                .unwrap()
+                .as_ptr(),
+        ),
+        (Some(ScalarType::USize), _) => igText(
+            CString::new(format!("{}usize", peek.get::<usize>().unwrap()))
+                .unwrap()
+                .as_ptr(),
+        ),
+        (Some(ScalarType::I8), _) => igText(
+            CString::new(format!("{}i8", peek.get::<i8>().unwrap()))
+                .unwrap()
+                .as_ptr(),
+        ),
+        (Some(ScalarType::I16), _) => igText(
+            CString::new(format!("{}i16", peek.get::<i16>().unwrap()))
+                .unwrap()
+                .as_ptr(),
+        ),
         (Some(ScalarType::I32), _) => {
             let ptr = unsafe { peek.data().thin().unwrap().as_ptr::<i32>() as *mut i32 };
-            igText(CString::new(format!("{}i32", peek.get::<i32>().unwrap())).unwrap().as_ptr());
-        },
-        (Some(ScalarType::I64), _) => igText(CString::new(format!("{}i64", peek.get::<i64>().unwrap())).unwrap().as_ptr()),
-        (Some(ScalarType::I128), _) => igText(CString::new(format!("{}128", peek.get::<i128>().unwrap())).unwrap().as_ptr()),
-        (Some(ScalarType::ISize), _) => igText(CString::new(format!("{}isize", peek.get::<isize>().unwrap())).unwrap().as_ptr()),
+            igText(
+                CString::new(format!("{}i32", peek.get::<i32>().unwrap()))
+                    .unwrap()
+                    .as_ptr(),
+            );
+        }
+        (Some(ScalarType::I64), _) => igText(
+            CString::new(format!("{}i64", peek.get::<i64>().unwrap()))
+                .unwrap()
+                .as_ptr(),
+        ),
+        (Some(ScalarType::I128), _) => igText(
+            CString::new(format!("{}128", peek.get::<i128>().unwrap()))
+                .unwrap()
+                .as_ptr(),
+        ),
+        (Some(ScalarType::ISize), _) => igText(
+            CString::new(format!("{}isize", peek.get::<isize>().unwrap()))
+                .unwrap()
+                .as_ptr(),
+        ),
         (_, Def::Scalar(def)) => igText(CString::new(format!("Def::Scalar")).unwrap().as_ptr()),
         (_, Def::List(def)) => {
             let shape_typename = format_shape_typename(peek.shape());
             let peek = peek.into_list_like().unwrap();
             if peek.len() == 0 {
                 igText(CString::new(format!("[]")).unwrap().as_ptr());
-            }
-            else {
+            } else {
                 if igTreeNode(
-                    CString::new(
-                        format!(
-                            "{}##{}",
-                            shape_typename,
-                            path,
-                        )
-                    ).unwrap().as_ptr()
+                    CString::new(format!("{}##{}", shape_typename, path,))
+                        .unwrap()
+                        .as_ptr(),
                 ) {
                     for (idx, item) in peek.iter().enumerate() {
-                        imgui_debug_inner(
-                            &item,
-                            &[],
-                            &format!("{}[{}]", path, idx),
-                        );
+                        imgui_debug_inner(&item, &[], &format!("{}[{}]", path, idx));
                     }
                     igTreePop();
                 }
             }
-        },
+        }
         (_, Def::Map(def)) => igText(CString::new(format!("Def::Map")).unwrap().as_ptr()),
         (_, Def::Set(def)) => igText(CString::new(format!("Def::Set")).unwrap().as_ptr()),
         (_, Def::Array(def)) => {
@@ -322,47 +514,41 @@ pub unsafe fn imgui_debug_inner(peek: &Peek, attributes: &[FieldAttribute], path
             let peek = peek.into_list_like().unwrap();
             if peek.len() == 0 {
                 igText(CString::new(format!("[]")).unwrap().as_ptr());
-            }
-            else {
+            } else {
                 if igTreeNode(
-                    CString::new(
-                        format!(
-                            "{}##{}",
-                            shape_typename,
-                            path,
-                        )
-                    ).unwrap().as_ptr()
+                    CString::new(format!("{}##{}", shape_typename, path,))
+                        .unwrap()
+                        .as_ptr(),
                 ) {
                     for (idx, item) in peek.iter().enumerate() {
-                        imgui_debug_inner(
-                            &item,
-                            &[],
-                            &format!("{}[{}]", path, idx),
-                        );
+                        imgui_debug_inner(&item, &[], &format!("{}[{}]", path, idx));
                     }
                     igTreePop();
                 }
             }
-        },
+        }
         (_, Def::Slice(def)) => igText(CString::new(format!("Def::Slice")).unwrap().as_ptr()),
         (_, Def::Option(def)) => igText(CString::new(format!("Def::Option")).unwrap().as_ptr()),
-        (_, Def::SmartPointer(def)) => igText(CString::new(format!("Def::SmartPointer")).unwrap().as_ptr()),
+        (_, Def::SmartPointer(def)) => {
+            igText(CString::new(format!("Def::SmartPointer")).unwrap().as_ptr())
+        }
         (_, Def::Undefined) => {
             let ty = shape.ty;
             match ty {
-                Type::Primitive(ty) => igText(CString::new(format!("Type::Primitive")).unwrap().as_ptr()),
-                Type::Sequence(ty) => igText(CString::new(format!("Type::Sequence")).unwrap().as_ptr()),
+                Type::Primitive(ty) => {
+                    igText(CString::new(format!("Type::Primitive")).unwrap().as_ptr())
+                }
+                Type::Sequence(ty) => {
+                    igText(CString::new(format!("Type::Sequence")).unwrap().as_ptr())
+                }
                 Type::User(UserType::Struct(ty)) => {
                     if path == "" {
                         igSHMNextItemOpenOnce();
                     }
                     if igTreeNode(
-                        CString::new(
-                            format!(
-                                "{}##{}",
-                                format_shape_typename(peek.shape()),
-                                path,
-                            )).unwrap().as_ptr()
+                        CString::new(format!("{}##{}", format_shape_typename(peek.shape()), path,))
+                            .unwrap()
+                            .as_ptr(),
                     ) {
                         let peek = peek.into_struct().unwrap();
 
@@ -391,31 +577,51 @@ pub unsafe fn imgui_debug_inner(peek: &Peek, attributes: &[FieldAttribute], path
                         }
                         igTreePop();
                     }
-                },
-                Type::User(UserType::Enum(ty)) => igText(CString::new(format!("UserType::Enum")).unwrap().as_ptr()),
-                Type::User(UserType::Union(ty)) => igText(CString::new(format!("UserType::Union")).unwrap().as_ptr()),
-                Type::User(UserType::Opaque) => igText(CString::new(format!("UserType::Opaque")).unwrap().as_ptr()),
-                Type::Pointer(ty) => igText(CString::new(format!("Type::Pointer")).unwrap().as_ptr()),
-                _ => igText(CString::new(format!("Can't debug {}", format_shape_typename(peek.shape()))).unwrap().as_ptr()),
+                }
+                Type::User(UserType::Enum(ty)) => {
+                    igText(CString::new(format!("UserType::Enum")).unwrap().as_ptr())
+                }
+                Type::User(UserType::Union(ty)) => {
+                    igText(CString::new(format!("UserType::Union")).unwrap().as_ptr())
+                }
+                Type::User(UserType::Opaque) => {
+                    igText(CString::new(format!("UserType::Opaque")).unwrap().as_ptr())
+                }
+                Type::Pointer(ty) => {
+                    igText(CString::new(format!("Type::Pointer")).unwrap().as_ptr())
+                }
+                _ => igText(
+                    CString::new(format!(
+                        "Can't debug {}",
+                        format_shape_typename(peek.shape())
+                    ))
+                    .unwrap()
+                    .as_ptr(),
+                ),
             }
-        },
-        _ => igText(CString::new(format!("Can't debug {}", format_shape_typename(peek.shape()))).unwrap().as_ptr()),
+        }
+        _ => igText(
+            CString::new(format!(
+                "Can't debug {}",
+                format_shape_typename(peek.shape())
+            ))
+            .unwrap()
+            .as_ptr(),
+        ),
     }
 }
 
 pub fn draw_log_window() {
-    crate::DEBUG_LOG.with_borrow(|logs| {
-        unsafe {
-            let mut open = true;
-            igBegin(
-                c"Rust Log Window".as_ptr(),
-                &mut open as *mut bool,
-                IMGUI_WINDOW_FLAGS_NO_FOCUS_ON_APPEARING,
-            );
-            for line in logs.iter() {
-                igText(line.as_ptr());
-            }
-            igEnd();
+    crate::DEBUG_LOG.with_borrow(|logs| unsafe {
+        let mut open = true;
+        igBegin(
+            c"Rust Log Window".as_ptr(),
+            &mut open as *mut bool,
+            IMGUI_WINDOW_FLAGS_NO_FOCUS_ON_APPEARING,
+        );
+        for line in logs.iter() {
+            igText(line.as_ptr());
         }
+        igEnd();
     });
 }

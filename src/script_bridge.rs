@@ -1,17 +1,17 @@
-use std::mem;
-use std::ffi::CString;
-use shimlang::{Environment, Interpreter, ShimNative, ShimValue, debug_u8s};
-use shimlang::runtime::{ArgUnpacker, NativeFn, CallResult};
 use shimlang::ArgBundle;
+use shimlang::runtime::{ArgUnpacker, CallResult, NativeFn};
+use shimlang::{Environment, Interpreter, ShimNative, ShimValue, debug_u8s};
+use std::ffi::CString;
+use std::mem;
 
 use crate::shimlang_imgui;
 //use crate::test_mocks::igBegin;
 use crate::*;
 
 #[cfg(not(target_arch = "wasm32"))]
-use std::sync::mpsc::{channel, Receiver, Sender};
-#[cfg(not(target_arch = "wasm32"))]
 use std::fs;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::mpsc::{Receiver, Sender, channel};
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::SystemTime;
 
@@ -21,7 +21,7 @@ pub struct TextureHandle {
     pub texture_id: u32,
 }
 
-impl ShimNative for TextureHandle {    
+impl ShimNative for TextureHandle {
     fn gc_vals(&self) -> Vec<ShimValue> {
         Vec::new()
     }
@@ -168,7 +168,12 @@ fn scancode_from_name(name: &[u8]) -> Option<usize> {
 struct KeyMap;
 
 impl ShimNative for KeyMap {
-    fn get_attr(&self, _self_as_val: &ShimValue, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
+    fn get_attr(
+        &self,
+        _self_as_val: &ShimValue,
+        interpreter: &mut Interpreter,
+        ident: &[u8],
+    ) -> Result<ShimValue, String> {
         match scancode_from_name(ident) {
             Some(scancode) => Ok(interpreter.mem.alloc_native(KeyValue { scancode })),
             None => Err(format!("Unknown key: {}", debug_u8s(ident))),
@@ -186,7 +191,12 @@ struct KeyValue {
 }
 
 impl ShimNative for KeyValue {
-    fn get_attr(&self, _self_as_val: &ShimValue, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
+    fn get_attr(
+        &self,
+        _self_as_val: &ShimValue,
+        interpreter: &mut Interpreter,
+        ident: &[u8],
+    ) -> Result<ShimValue, String> {
         let ks = interpreter.fetch_mut::<KeyState>();
         let cur = ks.keys.get(self.scancode).copied().unwrap_or(0);
         let last = ks.last_keys.get(self.scancode).copied().unwrap_or(0);
@@ -195,7 +205,10 @@ impl ShimNative for KeyValue {
             b"released" => Ok(ShimValue::Bool(cur == 0)),
             b"just_pressed" => Ok(ShimValue::Bool(cur == 1 && cur != last)),
             b"just_released" => Ok(ShimValue::Bool(cur == 0 && cur != last)),
-            _ => Err(format!("KeyValue has pressed/released/just_pressed/just_released, not '{}'", debug_u8s(ident))),
+            _ => Err(format!(
+                "KeyValue has pressed/released/just_pressed/just_released, not '{}'",
+                debug_u8s(ident)
+            )),
         }
     }
 
@@ -223,8 +236,23 @@ impl DrawList {
         }
     }
 
-    fn push_rect(&mut self, x: f32, y: f32, w: f32, h: f32, texture: Option<TextureHandle>, modulate: [u8; 4]) {
-        self.items.push(DrawListItem::Rect(DrawRect { x, y, w, h, texture, modulate }));
+    fn push_rect(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        texture: Option<TextureHandle>,
+        modulate: [u8; 4],
+    ) {
+        self.items.push(DrawListItem::Rect(DrawRect {
+            x,
+            y,
+            w,
+            h,
+            texture,
+            modulate,
+        }));
     }
 
     fn push_texture(&mut self, w: u32, h: u32, data: Vec<u8>) -> TextureHandle {
@@ -272,8 +300,8 @@ fn shim_ig_begin(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shim
     let title_val = unpacker.required(b"title")?;
     unpacker.end()?;
     let title_bytes = title_val.to_string(interpreter);
-    let c_title = CString::new(title_bytes)
-        .map_err(|_| "igBegin: title contains null byte".to_string())?;
+    let c_title =
+        CString::new(title_bytes).map_err(|_| "igBegin: title contains null byte".to_string())?;
     #[cfg(not(test))]
     let result = unsafe { super::igBegin(c_title.as_ptr(), std::ptr::null_mut(), 0) };
     #[cfg(test)]
@@ -285,7 +313,9 @@ fn shim_ig_end(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimV
     let unpacker = ArgUnpacker::new(args);
     unpacker.end()?;
     #[cfg(not(test))]
-    unsafe { super::igEnd(); }
+    unsafe {
+        super::igEnd();
+    }
     Ok(ShimValue::None)
 }
 
@@ -294,8 +324,8 @@ fn shim_ig_text(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimV
     let text_val = unpacker.required(b"text")?;
     unpacker.end()?;
     let text_bytes = text_val.to_string(interpreter);
-    let c_text = CString::new(text_bytes)
-        .map_err(|_| "igText: text contains null byte".to_string())?;
+    let c_text =
+        CString::new(text_bytes).map_err(|_| "igText: text contains null byte".to_string())?;
     super::igText(c_text.as_ptr());
     Ok(ShimValue::None)
 }
@@ -307,16 +337,20 @@ fn shim_draw_rect(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shi
     let w = unpacker.required_number(b"w")?;
     let h = unpacker.required_number(b"h")?;
     let texture: Option<TextureHandle> = match unpacker.optional(b"texture") {
-        Some(val) => {
-            Some(val.as_native::<TextureHandle>(interpreter)?.clone())
-        }
+        Some(val) => Some(val.as_native::<TextureHandle>(interpreter)?.clone()),
         None => None,
     };
     fn optional_channel(val: Option<ShimValue>) -> Result<u8, String> {
         match val {
             None => Ok(255),
             Some(ShimValue::Integer(i)) => Ok(i.clamp(0, 255) as u8),
-            Some(ShimValue::Float(f)) => Ok(if f <= 0.0 { 0 } else if f >= 1.0 { 255 } else { (f * 255.0).round() as u8 }),
+            Some(ShimValue::Float(f)) => Ok(if f <= 0.0 {
+                0
+            } else if f >= 1.0 {
+                255
+            } else {
+                (f * 255.0).round() as u8
+            }),
             Some(_) => Err("Color channel must be a number".to_string()),
         }
     }
@@ -326,11 +360,16 @@ fn shim_draw_rect(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shi
     let a = optional_channel(unpacker.optional(b"a"))?;
     unpacker.end()?;
 
-    interpreter.fetch_mut::<DrawList>().push_rect(x, y, w, h, texture, [r, g, b, a]);
+    interpreter
+        .fetch_mut::<DrawList>()
+        .push_rect(x, y, w, h, texture, [r, g, b, a]);
     Ok(ShimValue::None)
 }
 
-fn shim_create_texture(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+fn shim_create_texture(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let w = unpacker.required_int(b"w")?;
     let h = unpacker.required_int(b"h")?;
@@ -349,41 +388,50 @@ fn shim_create_texture(interpreter: &mut Interpreter, args: &ArgBundle) -> Resul
         h as u32
     };
 
-    if data.len() != (w*h*4) as usize {
-        return Err(format!("Expected a w*h*4={} length array but got array length {}", w*h*4, data.len()));
+    if data.len() != (w * h * 4) as usize {
+        return Err(format!(
+            "Expected a w*h*4={} length array but got array length {}",
+            w * h * 4,
+            data.len()
+        ));
     }
 
     // TODO: The ShimList should provide an iterable the yields ShimValues
     let shimvalues = data.raw_data(&interpreter.mem);
 
-    let mut rgba_bytes: Vec<u8> = Vec::with_capacity((w*h*4) as usize);
+    let mut rgba_bytes: Vec<u8> = Vec::with_capacity((w * h * 4) as usize);
     for val in shimvalues.iter() {
-        rgba_bytes.push(
-            match unsafe { ShimValue::from_u64(*val) } {
-                ShimValue::Integer(i) => {
-                    if i <= 0 {
-                        0
-                    } else if i >= 255 {
-                        255
-                    } else {
-                        i as u8
-                    }
+        rgba_bytes.push(match unsafe { ShimValue::from_u64(*val) } {
+            ShimValue::Integer(i) => {
+                if i <= 0 {
+                    0
+                } else if i >= 255 {
+                    255
+                } else {
+                    i as u8
                 }
-                ShimValue::Float(f) => {
-                    if f <= 0.0 {
-                        0
-                    } else if f >= 1.0 {
-                        255
-                    } else {
-                        (f * 255.0).round() as u8
-                    }
-                }
-                _ => return Err(format!("Non-numeric passed to create_texture {}", val.to_string()))
             }
-        );
+            ShimValue::Float(f) => {
+                if f <= 0.0 {
+                    0
+                } else if f >= 1.0 {
+                    255
+                } else {
+                    (f * 255.0).round() as u8
+                }
+            }
+            _ => {
+                return Err(format!(
+                    "Non-numeric passed to create_texture {}",
+                    val.to_string()
+                ));
+            }
+        });
     }
 
-    let handle = interpreter.fetch_mut::<DrawList>().push_texture(w, h, rgba_bytes);
+    let handle = interpreter
+        .fetch_mut::<DrawList>()
+        .push_texture(w, h, rgba_bytes);
 
     Ok(interpreter.mem.alloc_native(handle))
 }
@@ -402,8 +450,15 @@ fn load_script(bytes: &[u8]) -> Result<(Interpreter, Environment, ShimValue), St
         (b"create_texture", shim_create_texture),
     ];
     for (name, func) in builtins {
-        let position = interpreter.mem.alloc_and_set(*func, &format!("builtin imgui::{}", std::str::from_utf8(name).unwrap()));
-        env.insert_new(&mut interpreter, name.to_vec(), ShimValue::NativeFn(position));
+        let position = interpreter.mem.alloc_and_set(
+            *func,
+            &format!("builtin imgui::{}", std::str::from_utf8(name).unwrap()),
+        );
+        env.insert_new(
+            &mut interpreter,
+            name.to_vec(),
+            ShimValue::NativeFn(position),
+        );
     }
 
     let key_val = interpreter.mem.alloc_native(KeyMap);
@@ -422,7 +477,11 @@ fn load_script(bytes: &[u8]) -> Result<(Interpreter, Environment, ShimValue), St
     Ok((interpreter, env, loop_fn))
 }
 
-fn call_loop_fn(interpreter: &mut Interpreter, env: &mut Environment, loop_fn: ShimValue) -> Result<(), String> {
+fn call_loop_fn(
+    interpreter: &mut Interpreter,
+    env: &mut Environment,
+    loop_fn: ShimValue,
+) -> Result<(), String> {
     match loop_fn.call(interpreter, &mut shimlang::ArgBundle::new()) {
         Ok(CallResult::ReturnValue(_)) => {
             interpreter.gc(env);
@@ -448,7 +507,8 @@ fn call_loop_fn(interpreter: &mut Interpreter, env: &mut Environment, loop_fn: S
 
 impl ScriptBridge {
     pub fn new() -> Self {
-        let (interpreter, env, loop_fn) = load_script(b"fn loop() {}").expect("Should be able to load hardcoded script");
+        let (interpreter, env, loop_fn) =
+            load_script(b"fn loop() {}").expect("Should be able to load hardcoded script");
         let script_path = "game.shm".to_string();
 
         #[cfg(not(target_arch = "wasm32"))]
@@ -496,22 +556,27 @@ impl ScriptBridge {
                                     println!("{}", debug_u8s(&bytes));
                                     match load_script(&bytes) {
                                         Ok((interpreter, env, loop_fn)) => {
-                                            self.state = BridgeState::Paused(interpreter, env, loop_fn);
+                                            self.state =
+                                                BridgeState::Paused(interpreter, env, loop_fn);
                                             self.interpreter_errors = Vec::new();
-                                        },
+                                        }
                                         Err(msg) => {
                                             self.interpreter_errors.push(msg);
                                         }
                                     }
-                                },
+                                }
                                 Err(_) => {
-                                    self.interpreter_errors.push(format!("Could not read {}", self.script_path));
+                                    self.interpreter_errors
+                                        .push(format!("Could not read {}", self.script_path));
                                 }
                             }
                         }
                     }
                     Err(e) => {
-                        self.interpreter_errors.push(format!("Could not get modification time for {}: {}", self.script_path, e));
+                        self.interpreter_errors.push(format!(
+                            "Could not get modification time for {}: {}",
+                            self.script_path, e
+                        ));
                     }
                 },
                 Err(_) => {
@@ -525,8 +590,16 @@ impl ScriptBridge {
                 match state {
                     BridgeState::Running => panic!("Somehow the interpreter is running"),
                     BridgeState::Paused(interpreter, env, loop_fn) => {
-                        self.tx.send(ScriptRequest::ExecuteLoop(interpreter, env, loop_fn, keys.to_vec(), last_keys.to_vec())).unwrap();
-                    },
+                        self.tx
+                            .send(ScriptRequest::ExecuteLoop(
+                                interpreter,
+                                env,
+                                loop_fn,
+                                keys.to_vec(),
+                                last_keys.to_vec(),
+                            ))
+                            .unwrap();
+                    }
                 }
 
                 match self.rx.recv().unwrap() {
@@ -545,10 +618,22 @@ impl ScriptBridge {
         if !self.interpreter_errors.is_empty() {
             let mut open = true;
             unsafe {
-                if super::igBegin(c"Shimlang Errors".as_ptr(), &mut open as *mut bool, IMGUI_WINDOW_FLAGS_NO_FOCUS_ON_APPEARING) {
+                if super::igBegin(
+                    c"Shimlang Errors".as_ptr(),
+                    &mut open as *mut bool,
+                    IMGUI_WINDOW_FLAGS_NO_FOCUS_ON_APPEARING,
+                ) {
                     for err in self.interpreter_errors.iter() {
-                        super::igTextColoredBC(1.0, 1.0, 1.0, 1.0, 0.5, 0.5, 0.5, 0.5,
-                            CString::new(format!("{}", err)).unwrap().as_ptr()
+                        super::igTextColoredBC(
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            0.5,
+                            0.5,
+                            0.5,
+                            0.5,
+                            CString::new(format!("{}", err)).unwrap().as_ptr(),
                         );
                     }
                     super::igEnd();
@@ -566,7 +651,11 @@ impl ScriptBridge {
                     if let Err(msg) = call_loop_fn(interpreter, env, loop_fn) {
                         self.interpreter_errors.push(msg);
                     }
-                    self.draw_list = interpreter.fetch_mut::<DrawList>().items.drain(..).collect();
+                    self.draw_list = interpreter
+                        .fetch_mut::<DrawList>()
+                        .items
+                        .drain(..)
+                        .collect();
                 }
             }
         }
@@ -576,16 +665,13 @@ impl ScriptBridge {
         &self.interpreter_errors
     }
 
-    pub fn debug_window(
-        &mut self,
-        shimlang_debug_window: &mut shimlang_imgui::Navigation,
-    ) {
+    pub fn debug_window(&mut self, shimlang_debug_window: &mut shimlang_imgui::Navigation) {
         match &mut self.state {
             #[cfg(not(target_arch = "wasm32"))]
-            BridgeState::Running => {},
+            BridgeState::Running => {}
             BridgeState::Paused(interpreter, env, _loop_fn) => {
                 shimlang_debug_window.debug_window(interpreter, &env);
-            },
+            }
         }
     }
 }
@@ -599,15 +685,18 @@ fn script_thread_logic(rx: Receiver<ScriptRequest>, tx: Sender<ScriptResponse>) 
                     let ks = interpreter.fetch_mut::<KeyState>();
                     ks.keys = keys;
                     ks.last_keys = last_keys;
-                    tx.send(
-                        match call_loop_fn(&mut interpreter, &mut env, loop_fn) {
-                            Ok(()) => {
-                                let draw_list = interpreter.fetch_mut::<DrawList>().items.drain(..).collect();
-                                ScriptResponse::LoopComplete(interpreter, env, loop_fn, draw_list)
-                            }
-                            Err(msg) => ScriptResponse::Error(interpreter, env, loop_fn, msg),
+                    tx.send(match call_loop_fn(&mut interpreter, &mut env, loop_fn) {
+                        Ok(()) => {
+                            let draw_list = interpreter
+                                .fetch_mut::<DrawList>()
+                                .items
+                                .drain(..)
+                                .collect();
+                            ScriptResponse::LoopComplete(interpreter, env, loop_fn, draw_list)
                         }
-                    ).unwrap();
+                        Err(msg) => ScriptResponse::Error(interpreter, env, loop_fn, msg),
+                    })
+                    .unwrap();
                 }
             }
         }

@@ -1,20 +1,30 @@
-use crate::runtime::*;
 use crate::lex::debug_u8s;
-use std::any::type_name;
-use shm_tracy::*;
-use shm_tracy::zone_scoped;
 use crate::mem::*;
+use crate::runtime::*;
+use shm_tracy::zone_scoped;
+use shm_tracy::*;
+use std::any::type_name;
 
 pub(crate) struct ListIterator {
     pub(crate) lst: ShimValue,
     pub(crate) idx: usize,
 }
 impl ShimNative for ListIterator {
-    fn get_attr(&self, self_as_val: &ShimValue, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
+    fn get_attr(
+        &self,
+        self_as_val: &ShimValue,
+        interpreter: &mut Interpreter,
+        ident: &[u8],
+    ) -> Result<ShimValue, String> {
         if ident == b"next" {
-            fn shim_list_iter_next(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+            fn shim_list_iter_next(
+                interpreter: &mut Interpreter,
+                args: &ArgBundle,
+            ) -> Result<ShimValue, String> {
                 if args.args.len() != 1 {
-                    return Err(format!("Can't provide positional args to ListIterator.next()"));
+                    return Err(format!(
+                        "Can't provide positional args to ListIterator.next()"
+                    ));
                 }
 
                 let itr: &mut ListIterator = args.args[0].as_native(interpreter)?;
@@ -29,9 +39,15 @@ impl ShimNative for ListIterator {
                 }
             }
 
-            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_list_iter_next))
+            Ok(interpreter
+                .mem
+                .alloc_bound_native_fn(self_as_val, shim_list_iter_next))
         } else {
-            Err(format!("Can't get_attr {} on {}", debug_u8s(ident), type_name::<Self>() ))
+            Err(format!(
+                "Can't get_attr {} on {}",
+                debug_u8s(ident),
+                type_name::<Self>()
+            ))
         }
     }
 
@@ -45,17 +61,27 @@ pub(crate) struct DictKeysIterator {
     pub(crate) idx: usize,
 }
 impl ShimNative for DictKeysIterator {
-    fn get_attr(&self, self_as_val: &ShimValue, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
+    fn get_attr(
+        &self,
+        self_as_val: &ShimValue,
+        interpreter: &mut Interpreter,
+        ident: &[u8],
+    ) -> Result<ShimValue, String> {
         if ident == b"next" {
-            fn shim_dict_keys_iter_next(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+            fn shim_dict_keys_iter_next(
+                interpreter: &mut Interpreter,
+                args: &ArgBundle,
+            ) -> Result<ShimValue, String> {
                 if args.args.len() != 1 {
-                    return Err(format!("Can't provide positional args to DictKeysIterator.next()"));
+                    return Err(format!(
+                        "Can't provide positional args to DictKeysIterator.next()"
+                    ));
                 }
 
                 let itr: &mut DictKeysIterator = args.args[0].as_native(interpreter)?;
                 let dict = itr.dict.dict(interpreter)?;
                 let entries = dict.entries_array(interpreter);
-                
+
                 // Skip invalid entries (tombstones)
                 while itr.idx < entries.len() {
                     if entries[itr.idx].is_valid() {
@@ -65,22 +91,33 @@ impl ShimNative for DictKeysIterator {
                     }
                     itr.idx += 1;
                 }
-                
+
                 Ok(ShimValue::None)
             }
 
-            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_dict_keys_iter_next))
+            Ok(interpreter
+                .mem
+                .alloc_bound_native_fn(self_as_val, shim_dict_keys_iter_next))
         } else if ident == b"iter" {
-            fn shim_dict_keys_iter_iter(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+            fn shim_dict_keys_iter_iter(
+                _interpreter: &mut Interpreter,
+                args: &ArgBundle,
+            ) -> Result<ShimValue, String> {
                 let mut unpacker = ArgUnpacker::new(args);
                 let obj = unpacker.required(b"obj")?;
                 unpacker.end()?;
                 Ok(obj)
             }
 
-            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_dict_keys_iter_iter))
+            Ok(interpreter
+                .mem
+                .alloc_bound_native_fn(self_as_val, shim_dict_keys_iter_iter))
         } else {
-            Err(format!("Can't get_attr {} on {}", debug_u8s(ident), type_name::<Self>() ))
+            Err(format!(
+                "Can't get_attr {} on {}",
+                debug_u8s(ident),
+                type_name::<Self>()
+            ))
         }
     }
 
@@ -94,17 +131,27 @@ pub(crate) struct DictValuesIterator {
     pub(crate) idx: usize,
 }
 impl ShimNative for DictValuesIterator {
-    fn get_attr(&self, self_as_val: &ShimValue, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
+    fn get_attr(
+        &self,
+        self_as_val: &ShimValue,
+        interpreter: &mut Interpreter,
+        ident: &[u8],
+    ) -> Result<ShimValue, String> {
         if ident == b"next" {
-            fn shim_dict_values_iter_next(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+            fn shim_dict_values_iter_next(
+                interpreter: &mut Interpreter,
+                args: &ArgBundle,
+            ) -> Result<ShimValue, String> {
                 if args.args.len() != 1 {
-                    return Err(format!("Can't provide positional args to DictValuesIterator.next()"));
+                    return Err(format!(
+                        "Can't provide positional args to DictValuesIterator.next()"
+                    ));
                 }
 
                 let itr: &mut DictValuesIterator = args.args[0].as_native(interpreter)?;
                 let dict = itr.dict.dict(interpreter)?;
                 let entries = dict.entries_array(interpreter);
-                
+
                 // Skip invalid entries (tombstones)
                 while itr.idx < entries.len() {
                     if entries[itr.idx].is_valid() {
@@ -114,22 +161,33 @@ impl ShimNative for DictValuesIterator {
                     }
                     itr.idx += 1;
                 }
-                
+
                 Ok(ShimValue::None)
             }
 
-            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_dict_values_iter_next))
+            Ok(interpreter
+                .mem
+                .alloc_bound_native_fn(self_as_val, shim_dict_values_iter_next))
         } else if ident == b"iter" {
-            fn shim_dict_values_iter_iter(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+            fn shim_dict_values_iter_iter(
+                _interpreter: &mut Interpreter,
+                args: &ArgBundle,
+            ) -> Result<ShimValue, String> {
                 let mut unpacker = ArgUnpacker::new(args);
                 let obj = unpacker.required(b"obj")?;
                 unpacker.end()?;
                 Ok(obj)
             }
 
-            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_dict_values_iter_iter))
+            Ok(interpreter
+                .mem
+                .alloc_bound_native_fn(self_as_val, shim_dict_values_iter_iter))
         } else {
-            Err(format!("Can't get_attr {} on {}", debug_u8s(ident), type_name::<Self>() ))
+            Err(format!(
+                "Can't get_attr {} on {}",
+                debug_u8s(ident),
+                type_name::<Self>()
+            ))
         }
     }
 
@@ -143,13 +201,22 @@ pub(crate) struct DictEntryNative {
     pub(crate) value: ShimValue,
 }
 impl ShimNative for DictEntryNative {
-    fn get_attr(&self, _self_as_val: &ShimValue, _interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
+    fn get_attr(
+        &self,
+        _self_as_val: &ShimValue,
+        _interpreter: &mut Interpreter,
+        ident: &[u8],
+    ) -> Result<ShimValue, String> {
         if ident == b"key" {
             Ok(self.key)
         } else if ident == b"value" {
             Ok(self.value)
         } else {
-            Err(format!("Can't get_attr {} on {}", debug_u8s(ident), type_name::<Self>() ))
+            Err(format!(
+                "Can't get_attr {} on {}",
+                debug_u8s(ident),
+                type_name::<Self>()
+            ))
         }
     }
 
@@ -163,17 +230,27 @@ pub(crate) struct DictItemsIterator {
     pub(crate) idx: usize,
 }
 impl ShimNative for DictItemsIterator {
-    fn get_attr(&self, self_as_val: &ShimValue, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
+    fn get_attr(
+        &self,
+        self_as_val: &ShimValue,
+        interpreter: &mut Interpreter,
+        ident: &[u8],
+    ) -> Result<ShimValue, String> {
         if ident == b"next" {
-            fn shim_dict_items_iter_next(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+            fn shim_dict_items_iter_next(
+                interpreter: &mut Interpreter,
+                args: &ArgBundle,
+            ) -> Result<ShimValue, String> {
                 if args.args.len() != 1 {
-                    return Err(format!("Can't provide positional args to DictItemsIterator.next()"));
+                    return Err(format!(
+                        "Can't provide positional args to DictItemsIterator.next()"
+                    ));
                 }
 
                 let itr: &mut DictItemsIterator = args.args[0].as_native(interpreter)?;
                 let dict = itr.dict.dict(interpreter)?;
                 let entries = dict.entries_array(interpreter);
-                
+
                 // Skip invalid entries (tombstones)
                 while itr.idx < entries.len() {
                     if entries[itr.idx].is_valid() {
@@ -187,22 +264,33 @@ impl ShimNative for DictItemsIterator {
                     }
                     itr.idx += 1;
                 }
-                
+
                 Ok(ShimValue::None)
             }
 
-            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_dict_items_iter_next))
+            Ok(interpreter
+                .mem
+                .alloc_bound_native_fn(self_as_val, shim_dict_items_iter_next))
         } else if ident == b"iter" {
-            fn shim_dict_items_iter_iter(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+            fn shim_dict_items_iter_iter(
+                _interpreter: &mut Interpreter,
+                args: &ArgBundle,
+            ) -> Result<ShimValue, String> {
                 let mut unpacker = ArgUnpacker::new(args);
                 let obj = unpacker.required(b"obj")?;
                 unpacker.end()?;
                 Ok(obj)
             }
 
-            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_dict_items_iter_iter))
+            Ok(interpreter
+                .mem
+                .alloc_bound_native_fn(self_as_val, shim_dict_items_iter_iter))
         } else {
-            Err(format!("Can't get_attr {} on {}", debug_u8s(ident), type_name::<Self>() ))
+            Err(format!(
+                "Can't get_attr {} on {}",
+                debug_u8s(ident),
+                type_name::<Self>()
+            ))
         }
     }
 
@@ -218,30 +306,46 @@ pub(crate) struct RangeNative {
 
 impl ShimNative for RangeNative {
     fn to_string(&self, interpreter: &mut Interpreter) -> String {
-        format!("Range({}, {})", self.start.to_string(interpreter), self.end.to_string(interpreter))
+        format!(
+            "Range({}, {})",
+            self.start.to_string(interpreter),
+            self.end.to_string(interpreter)
+        )
     }
 
     fn to_string_mem(&self, mem: &MMU) -> String {
-        format!("Range({}, {})", self.start.to_string_mem(mem), self.end.to_string_mem(mem))
+        format!(
+            "Range({}, {})",
+            self.start.to_string_mem(mem),
+            self.end.to_string_mem(mem)
+        )
     }
 
-    fn get_attr(&self, self_as_val: &ShimValue, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
+    fn get_attr(
+        &self,
+        self_as_val: &ShimValue,
+        interpreter: &mut Interpreter,
+        ident: &[u8],
+    ) -> Result<ShimValue, String> {
         if ident == b"step" {
-            fn shim_range_step(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+            fn shim_range_step(
+                interpreter: &mut Interpreter,
+                args: &ArgBundle,
+            ) -> Result<ShimValue, String> {
                 let mut unpacker = ArgUnpacker::new(args);
                 let obj = unpacker.required(b"obj")?;
                 let step = unpacker.required(b"step")?;
                 unpacker.end()?;
 
                 let range: &RangeNative = obj.as_native(interpreter)?;
-                
+
                 // Check for zero step
                 let is_zero = match step {
                     ShimValue::Integer(0) => true,
                     ShimValue::Float(f) if f == 0.0 => true,
                     _ => false,
                 };
-                
+
                 if is_zero {
                     return Err(format!("Step cannot be zero"));
                 }
@@ -254,9 +358,14 @@ impl ShimNative for RangeNative {
                 Ok(interpreter.mem.alloc_native(iterator))
             }
 
-            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_range_step))
+            Ok(interpreter
+                .mem
+                .alloc_bound_native_fn(self_as_val, shim_range_step))
         } else if ident == b"iter" {
-            fn shim_range_iter(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+            fn shim_range_iter(
+                interpreter: &mut Interpreter,
+                args: &ArgBundle,
+            ) -> Result<ShimValue, String> {
                 let mut unpacker = ArgUnpacker::new(args);
                 let obj = unpacker.required(b"obj")?;
                 unpacker.end()?;
@@ -270,9 +379,15 @@ impl ShimNative for RangeNative {
                 Ok(interpreter.mem.alloc_native(iterator))
             }
 
-            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_range_iter))
+            Ok(interpreter
+                .mem
+                .alloc_bound_native_fn(self_as_val, shim_range_iter))
         } else {
-            Err(format!("Can't get_attr {} on {}", debug_u8s(ident), type_name::<Self>()))
+            Err(format!(
+                "Can't get_attr {} on {}",
+                debug_u8s(ident),
+                type_name::<Self>()
+            ))
         }
     }
 
@@ -288,15 +403,25 @@ pub(crate) struct RangeIterator {
 }
 
 impl ShimNative for RangeIterator {
-    fn get_attr(&self, self_as_val: &ShimValue, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
+    fn get_attr(
+        &self,
+        self_as_val: &ShimValue,
+        interpreter: &mut Interpreter,
+        ident: &[u8],
+    ) -> Result<ShimValue, String> {
         if ident == b"next" {
-            fn shim_range_iter_next(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+            fn shim_range_iter_next(
+                interpreter: &mut Interpreter,
+                args: &ArgBundle,
+            ) -> Result<ShimValue, String> {
                 if args.args.len() != 1 {
-                    return Err(format!("Can't provide positional args to RangeIterator.next()"));
+                    return Err(format!(
+                        "Can't provide positional args to RangeIterator.next()"
+                    ));
                 }
 
                 let itr: &mut RangeIterator = args.args[0].as_native(interpreter)?;
-                
+
                 // Determine if we've reached the end based on step direction
                 // For positive steps: iterate while current < end
                 // For negative steps: iterate while current > end
@@ -304,7 +429,7 @@ impl ShimNative for RangeIterator {
                     ShimValue::Bool(b) => b,
                     _ => return Err(format!("Step comparison failed")),
                 };
-                
+
                 let has_more = if step_is_positive {
                     // current < end
                     match itr.current.lt(interpreter, &itr.end)? {
@@ -318,7 +443,7 @@ impl ShimNative for RangeIterator {
                         _ => return Err(format!("Range comparison failed")),
                     }
                 };
-                
+
                 if !has_more {
                     Ok(ShimValue::None)
                 } else {
@@ -344,18 +469,29 @@ impl ShimNative for RangeIterator {
                 }
             }
 
-            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_range_iter_next))
+            Ok(interpreter
+                .mem
+                .alloc_bound_native_fn(self_as_val, shim_range_iter_next))
         } else if ident == b"iter" {
-            fn shim_range_iterator_iter(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+            fn shim_range_iterator_iter(
+                _interpreter: &mut Interpreter,
+                args: &ArgBundle,
+            ) -> Result<ShimValue, String> {
                 let mut unpacker = ArgUnpacker::new(args);
                 let obj = unpacker.required(b"obj")?;
                 unpacker.end()?;
                 Ok(obj)
             }
 
-            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_range_iterator_iter))
+            Ok(interpreter
+                .mem
+                .alloc_bound_native_fn(self_as_val, shim_range_iterator_iter))
         } else {
-            Err(format!("Can't get_attr {} on {}", debug_u8s(ident), type_name::<Self>()))
+            Err(format!(
+                "Can't get_attr {} on {}",
+                debug_u8s(ident),
+                type_name::<Self>()
+            ))
         }
     }
 
@@ -455,9 +591,7 @@ pub(crate) struct DictEntry {
 
 impl DictEntry {
     pub(crate) fn is_valid(&self) -> bool {
-        self.hash != 0
-            && !self.key.is_uninitialized()
-            && !self.value.is_uninitialized()
+        self.hash != 0 && !self.key.is_uninitialized() && !self.value.is_uninitialized()
     }
 
     fn invalidate(&mut self) {
@@ -508,45 +642,45 @@ impl TypedIndices {
     fn get(&self, index: usize) -> usize {
         match self {
             Self::Zero => panic!("Can't index empty TypedIndices"),
-            Self::U8(data) => {data[index] as usize},
-            Self::U16(data) => {data[index] as usize},
-            Self::U32(data) => {data[index] as usize},
+            Self::U8(data) => data[index] as usize,
+            Self::U16(data) => data[index] as usize,
+            Self::U32(data) => data[index] as usize,
         }
     }
 
     fn set(&mut self, index: usize, value: usize) {
         match self {
             Self::Zero => panic!("Can't IndexMut empty TypedIndices"),
-            Self::U8(data) => {data[index] = value as u8},
-            Self::U16(data) => {data[index] = value as u16},
-            Self::U32(data) => {data[index] = value as u32},
+            Self::U8(data) => data[index] = value as u8,
+            Self::U16(data) => data[index] = value as u16,
+            Self::U32(data) => data[index] = value as u32,
         }
     }
 
     fn is_unset(&self, index: usize) -> bool {
         match self {
             Self::Zero => panic!("Can't index empty TypedIndices"),
-            Self::U8(data) => {data[index] == u8::MAX},
-            Self::U16(data) => {data[index] == u16::MAX},
-            Self::U32(data) => {data[index] == u32::MAX},
+            Self::U8(data) => data[index] == u8::MAX,
+            Self::U16(data) => data[index] == u16::MAX,
+            Self::U32(data) => data[index] == u32::MAX,
         }
     }
 
     fn is_tombstone(&self, index: usize) -> bool {
         match self {
             Self::Zero => panic!("Can't index empty TypedIndices"),
-            Self::U8(data) => {data[index] == u8::MAX - 1},
-            Self::U16(data) => {data[index] == u16::MAX - 1},
-            Self::U32(data) => {data[index] == u32::MAX - 1},
+            Self::U8(data) => data[index] == u8::MAX - 1,
+            Self::U16(data) => data[index] == u16::MAX - 1,
+            Self::U32(data) => data[index] == u32::MAX - 1,
         }
     }
 
     fn set_tombstone(&mut self, index: usize) {
         match self {
             Self::Zero => panic!("Can't index empty TypedIndices"),
-            Self::U8(data) => {data[index] = u8::MAX - 1},
-            Self::U16(data) => {data[index] = u16::MAX - 1},
-            Self::U32(data) => {data[index] = u32::MAX - 1},
+            Self::U8(data) => data[index] = u8::MAX - 1,
+            Self::U16(data) => data[index] = u16::MAX - 1,
+            Self::U32(data) => data[index] = u32::MAX - 1,
         }
     }
 }
@@ -566,19 +700,25 @@ impl ShimDict {
         self.used as usize
     }
 
-    pub(crate) fn get(&self, interpreter: &mut Interpreter, key: ShimValue) -> Result<ShimValue, String> {
+    pub(crate) fn get(
+        &self,
+        interpreter: &mut Interpreter,
+        key: ShimValue,
+    ) -> Result<ShimValue, String> {
         // Check if dict is empty
         if self.size_pow == 0 {
-            return Err(format!("Key {} not in dict", key.to_string_mem(&interpreter.mem)));
+            return Err(format!(
+                "Key {} not in dict",
+                key.to_string_mem(&interpreter.mem)
+            ));
         }
-        
+
         match self.probe(interpreter, key)? {
-            DictSlot::Occupied(_, entry) => {
-                Ok(entry.value)
-            },
-            DictSlot::UnoccupiedU8(..) => {
-                Err(format!("Key {} not in dict", key.to_string_mem(&interpreter.mem)))
-            },
+            DictSlot::Occupied(_, entry) => Ok(entry.value),
+            DictSlot::UnoccupiedU8(..) => Err(format!(
+                "Key {} not in dict",
+                key.to_string_mem(&interpreter.mem)
+            )),
             _ => todo!(),
         }
     }
@@ -586,14 +726,9 @@ impl ShimDict {
     fn print_entries(&self, interpreter: &Interpreter) {
         eprintln!("Entries");
         let _entries: &[DictEntry] = unsafe {
-            let u64_slice = &interpreter.mem.mem[
-                usize::from(self.entries)..
-                usize::from(self.entries)+3*(self.entry_count as usize)
-            ];
-            std::slice::from_raw_parts(
-                u64_slice.as_ptr() as *const DictEntry,
-                u64_slice.len() / 3,
-            )
+            let u64_slice = &interpreter.mem.mem[usize::from(self.entries)
+                ..usize::from(self.entries) + 3 * (self.entry_count as usize)];
+            std::slice::from_raw_parts(u64_slice.as_ptr() as *const DictEntry, u64_slice.len() / 3)
         };
     }
 
@@ -606,7 +741,6 @@ impl ShimDict {
         } else {
             self.size_pow + 1
         };
-
 
         self.clear_and_alloc_indices(interpreter, old_size);
         self.realloc_entries(interpreter, old_capacity);
@@ -660,15 +794,13 @@ impl ShimDict {
     fn typed_indices(&self, interpreter: &Interpreter) -> TypedIndices {
         match self.index_size() {
             0 => TypedIndices::Zero,
-            x if x <= (u8::MAX as usize) + 1 => TypedIndices::U8(
-                self.indicies_mut::<u8>(interpreter)
-            ),
-            x if x <= (u16::MAX as usize) + 1 => TypedIndices::U16(
-                self.indicies_mut::<u16>(interpreter)
-            ),
-            _ => TypedIndices::U32(
-                self.indicies_mut::<u32>(interpreter)
-            ),
+            x if x <= (u8::MAX as usize) + 1 => {
+                TypedIndices::U8(self.indicies_mut::<u8>(interpreter))
+            }
+            x if x <= (u16::MAX as usize) + 1 => {
+                TypedIndices::U16(self.indicies_mut::<u16>(interpreter))
+            }
+            _ => TypedIndices::U32(self.indicies_mut::<u32>(interpreter)),
             // On wasm32 (32-bit usize), all values fit in u32 so the catch-all above covers everything.
             // On 64-bit, the memory system is bounded by MAX_U24 * 8 bytes, so index_size() can never
             // exceed u32::MAX + 1 in practice.
@@ -683,14 +815,17 @@ impl ShimDict {
         let free_word_count: u24 = if old_size == 0 {
             0.into()
         } else {
-            old_size.div_ceil(8 / self.indices_stride_bytes(old_size)).into()
+            old_size
+                .div_ceil(8 / self.indices_stride_bytes(old_size))
+                .into()
         };
         let alloc_word_count: u24 = if new_size == 0 {
             0.into()
         } else {
-            new_size.div_ceil(8 / self.indices_stride_bytes(new_size)).into()
+            new_size
+                .div_ceil(8 / self.indices_stride_bytes(new_size))
+                .into()
         };
-
 
         interpreter.mem.free(self.indices, free_word_count);
         self.indices = alloc!(interpreter.mem, alloc_word_count, "Dict index array");
@@ -701,17 +836,17 @@ impl ShimDict {
                 for x in indices.iter_mut() {
                     *x = u8::MAX;
                 }
-            },
+            }
             TypedIndices::U16(indices) => {
                 for x in indices.iter_mut() {
                     *x = u16::MAX;
                 }
-            },
+            }
             TypedIndices::U32(indices) => {
                 for x in indices.iter_mut() {
                     *x = u32::MAX;
                 }
-            },
+            }
         }
     }
 
@@ -756,7 +891,7 @@ impl ShimDict {
                     }
                     idx = (idx + 1) & mask;
                 }
-            },
+            }
             TypedIndices::U16(indices) => {
                 for _ in 0..self.index_size() {
                     if indices[idx] == u16::MAX {
@@ -766,7 +901,7 @@ impl ShimDict {
                     }
                     idx = (idx + 1) & mask;
                 }
-            },
+            }
             TypedIndices::U32(indices) => {
                 for _ in 0..self.index_size() {
                     if indices[idx] == u32::MAX {
@@ -776,7 +911,7 @@ impl ShimDict {
                     }
                     idx = (idx + 1) & mask;
                 }
-            },
+            }
         }
 
         panic!("Probe entry realloc failed probing!");
@@ -797,7 +932,7 @@ impl ShimDict {
                 if freeslot == None {
                     freeslot = Some(idx);
                 }
-                break
+                break;
             } else if indices.is_tombstone(idx) {
                 if freeslot == None {
                     freeslot = Some(idx);
@@ -819,7 +954,7 @@ impl ShimDict {
                 eprintln!("{self:#?}");
                 eprintln!("Capacity: {:#?}  Mask: {}", self.capacity(), mask);
                 panic!("Could not find free slot");
-            },
+            }
         };
         match indices {
             TypedIndices::Zero => panic!("probing nothing"),
@@ -829,7 +964,12 @@ impl ShimDict {
         }
     }
 
-    pub(crate) fn set(&mut self, interpreter: &mut Interpreter, key: ShimValue, val: ShimValue) -> Result<(), String> {
+    pub(crate) fn set(
+        &mut self,
+        interpreter: &mut Interpreter,
+        key: ShimValue,
+        val: ShimValue,
+    ) -> Result<(), String> {
         if self.entry_count as usize == self.capacity() {
             self.expand_capacity(interpreter);
         }
@@ -838,30 +978,35 @@ impl ShimDict {
             DictSlot::Occupied(_, entry) => {
                 entry.key = key;
                 entry.value = val;
-            },
+            }
             DictSlot::UnoccupiedU8(longhash, idx) => {
                 let entry_idx = self.set_entry(interpreter, longhash, key, val);
                 self.indicies_mut::<u8>(interpreter)[idx] = entry_idx as u8;
                 self.entries_mut(interpreter)[entry_idx].is_valid();
                 self.entries_array(interpreter)[entry_idx].is_valid();
                 self.used += 1;
-            },
+            }
             DictSlot::UnoccupiedU16(longhash, idx) => {
                 let entry_idx = self.set_entry(interpreter, longhash, key, val);
                 self.indicies_mut::<u16>(interpreter)[idx] = entry_idx as u16;
                 self.used += 1;
-            },
+            }
             DictSlot::UnoccupiedU32(longhash, idx) => {
                 let entry_idx = self.set_entry(interpreter, longhash, key, val);
                 self.indicies_mut::<u32>(interpreter)[idx] = entry_idx as u32;
                 self.used += 1;
-            },
+            }
         }
 
         Ok(())
     }
 
-    pub(crate) fn pop(&mut self, interpreter: &mut Interpreter, key: ShimValue, default: Option<ShimValue>) -> Result<ShimValue, String> {
+    pub(crate) fn pop(
+        &mut self,
+        interpreter: &mut Interpreter,
+        key: ShimValue,
+        default: Option<ShimValue>,
+    ) -> Result<ShimValue, String> {
         match self.probe(interpreter, key) {
             Ok(DictSlot::Occupied(indices_idx, entry)) => {
                 let value = entry.value;
@@ -876,14 +1021,14 @@ impl ShimDict {
                 self.used -= 1;
 
                 Ok(value)
-            },
+            }
             Ok(_) => {
                 if let Some(default) = default {
                     Ok(default)
                 } else {
                     Err(format!("Key {key:?} not found in dict"))
                 }
-            },
+            }
             _ => todo!(),
         }
     }
@@ -895,10 +1040,7 @@ impl ShimDict {
         let len = size / stride;
         let u64_slice = &interpreter.mem.mem[start..start + len];
         unsafe {
-            std::slice::from_raw_parts_mut(
-                u64_slice.as_ptr() as *mut T,
-                u64_slice.len() * stride,
-            )
+            std::slice::from_raw_parts_mut(u64_slice.as_ptr() as *mut T, u64_slice.len() * stride)
         }
     }
 
@@ -907,14 +1049,9 @@ impl ShimDict {
      */
     pub(crate) fn entries_array(&self, interpreter: &Interpreter) -> &'static [DictEntry] {
         unsafe {
-            let u64_slice = &interpreter.mem.mem[
-                usize::from(self.entries)..
-                usize::from(self.entries)+3*(self.entry_count as usize)
-            ];
-            std::slice::from_raw_parts(
-                u64_slice.as_ptr() as *const DictEntry,
-                u64_slice.len() / 3,
-            )
+            let u64_slice = &interpreter.mem.mem[usize::from(self.entries)
+                ..usize::from(self.entries) + 3 * (self.entry_count as usize)];
+            std::slice::from_raw_parts(u64_slice.as_ptr() as *const DictEntry, u64_slice.len() / 3)
         }
     }
 
@@ -923,10 +1060,8 @@ impl ShimDict {
      */
     fn entries_mut(&self, interpreter: &mut Interpreter) -> &'static mut [DictEntry] {
         unsafe {
-            let u64_slice = &mut interpreter.mem.mem[
-                usize::from(self.entries)..
-                usize::from(self.entries)+3*(self.capacity() as usize)
-            ];
+            let u64_slice = &mut interpreter.mem.mem[usize::from(self.entries)
+                ..usize::from(self.entries) + 3 * (self.capacity() as usize)];
             std::slice::from_raw_parts_mut(
                 u64_slice.as_mut_ptr() as *mut DictEntry,
                 u64_slice.len() / 3,
@@ -935,18 +1070,22 @@ impl ShimDict {
     }
 
     fn get_entry(&self, interpreter: &Interpreter, idx: usize) -> &DictEntry {
-        unsafe{std::mem::transmute(&interpreter.mem.mem[
-            usize::from(self.entries)+3*idx
-        ])}
+        unsafe { std::mem::transmute(&interpreter.mem.mem[usize::from(self.entries) + 3 * idx]) }
     }
 
     fn get_entry_mut(&self, interpreter: &mut Interpreter, idx: usize) -> &mut DictEntry {
-        unsafe{std::mem::transmute(&mut interpreter.mem.mem[
-            usize::from(self.entries)+3*idx
-        ])}
+        unsafe {
+            std::mem::transmute(&mut interpreter.mem.mem[usize::from(self.entries) + 3 * idx])
+        }
     }
 
-    fn set_entry(&mut self, interpreter: &mut Interpreter, hash: u32, key: ShimValue, val: ShimValue) -> usize {
+    fn set_entry(
+        &mut self,
+        interpreter: &mut Interpreter,
+        hash: u32,
+        key: ShimValue,
+        val: ShimValue,
+    ) -> usize {
         let entry = self.get_entry_mut(interpreter, self.entry_count as usize);
         entry.hash = hash as u64;
         entry.key = key;
@@ -962,14 +1101,14 @@ impl ShimDict {
             // Empty dict - reset to minimal size
             let old_size = self.index_size();
             let old_capacity = self.capacity();
-            
+
             if old_size == 0 {
                 return; // Already minimal
             }
-            
+
             self.size_pow = 0;
             self.clear_and_alloc_indices(interpreter, old_size);
-            
+
             // Free the old entries
             let free_word_count: u24 = (old_capacity * 3).into();
             interpreter.mem.free(self.entries, free_word_count);
@@ -977,7 +1116,7 @@ impl ShimDict {
             self.entry_count = 0;
             return;
         }
-        
+
         // Calculate the optimal size_pow for the current number of used entries
         // We want capacity to be at least used, and index_size = capacity * 3 / 2
         // Since index_size must be a power of 2, we find the smallest power of 2
@@ -985,7 +1124,7 @@ impl ShimDict {
         let min_capacity = self.used as usize;
         // Start with MIN_NON_ZERO_SIZE_POW, which matches expand_capacity's initial size
         let mut optimal_size_pow = MIN_NON_ZERO_SIZE_POW;
-        
+
         // Upper bound of 31 prevents undefined behavior from 1 << 32 and ensures
         // we stay within u32 limits for entry_count/used fields.
         // Loop condition is <= 31 to allow checking if size_pow=31 is sufficient.
@@ -996,16 +1135,16 @@ impl ShimDict {
             }
             optimal_size_pow += 1;
         }
-        
+
         // If the optimal size is the same or larger than current, no need to shrink
         if optimal_size_pow >= self.size_pow {
             return;
         }
-        
+
         let old_size = self.index_size();
         let old_capacity = self.capacity();
         self.size_pow = optimal_size_pow;
-        
+
         self.clear_and_alloc_indices(interpreter, old_size);
         self.realloc_entries(interpreter, old_capacity);
     }
@@ -1055,18 +1194,16 @@ impl ShimList {
             return Err(format!("Index {idx} is out of bounds"));
         }
 
-        Ok(
-            if idx < 0 {
-                let updated_idx = self.len() as isize + idx;
-                if updated_idx < 0 {
-                    return Err(format!("Index {idx} is out of bounds"));
-                } else {
-                    updated_idx as usize
-                }
+        Ok(if idx < 0 {
+            let updated_idx = self.len() as isize + idx;
+            if updated_idx < 0 {
+                return Err(format!("Index {idx} is out of bounds"));
             } else {
-                idx as usize
+                updated_idx as usize
             }
-        )
+        } else {
+            idx as usize
+        })
     }
 
     pub fn raw_data<'a>(&self, mem: &'a MMU) -> &'a [u64] {
@@ -1097,19 +1234,24 @@ impl ShimList {
             let new_data = usize::from(self.data);
 
             for idx in 0..self.len() {
-                mem.mem[new_data+idx] = mem.mem[old_data+idx];
+                mem.mem[new_data + idx] = mem.mem[old_data + idx];
             }
 
             mem.free(old_data.into(), old_capacity.into());
         }
 
-        mem.mem[usize::from(self.data)+self.len()] = val.to_u64();
+        mem.mem[usize::from(self.data) + self.len()] = val.to_u64();
         self.len = (usize::from(self.len) + 1).into();
     }
 }
-const _: () = { assert!(std::mem::size_of::<ShimList>() == 8); };
+const _: () = {
+    assert!(std::mem::size_of::<ShimList>() == 8);
+};
 
-pub(crate) fn shim_dict(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_dict(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     if args.args.len() != 0 {
         return Err(format!("Can't provide positional args to dict()"));
     }
@@ -1125,7 +1267,10 @@ pub(crate) fn shim_dict(interpreter: &mut Interpreter, args: &ArgBundle) -> Resu
     Ok(retval)
 }
 
-pub(crate) fn shim_range(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_range(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let start = unpacker.required(b"start")?;
     let end = unpacker.required(b"end")?;
@@ -1138,7 +1283,10 @@ pub(crate) fn shim_range(interpreter: &mut Interpreter, args: &ArgBundle) -> Res
     Ok(interpreter.mem.alloc_native(range))
 }
 
-pub(crate) fn shim_print(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_print(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let _zone = zone_scoped!("shim_print");
     for (idx, arg) in args.args.iter().enumerate() {
         if idx != 0 {
@@ -1151,7 +1299,10 @@ pub(crate) fn shim_print(interpreter: &mut Interpreter, args: &ArgBundle) -> Res
     Ok(ShimValue::None)
 }
 
-pub(crate) fn shim_assert(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_assert(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     if !args.kwargs.is_empty() {
         return Err(format!("Assert doesn't take keyword arguments"));
     }
@@ -1174,7 +1325,10 @@ pub(crate) fn shim_assert(interpreter: &mut Interpreter, args: &ArgBundle) -> Re
     }
 }
 
-pub(crate) fn shim_panic(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_panic(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut out = String::new();
     for (idx, arg) in args.args.iter().enumerate() {
         if idx != 0 {
@@ -1193,7 +1347,10 @@ pub(crate) fn shim_panic(interpreter: &mut Interpreter, args: &ArgBundle) -> Res
 //    Float(f32),
 //}
 
-pub(crate) fn shim_list_sort(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_list_sort(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let obj = unpacker.required(b"obj")?;
     let lst = obj.list(interpreter)?;
@@ -1202,10 +1359,10 @@ pub(crate) fn shim_list_sort(interpreter: &mut Interpreter, args: &ArgBundle) ->
 
     // Create a vector of (index, value, sort_key) tuples to maintain stability
     let mut items_with_keys: Vec<(usize, ShimValue, ShimValue)> = Vec::new();
-    
+
     for idx in 0..lst.len() {
         let item = lst.get(&interpreter.mem, idx as isize)?;
-        
+
         let sort_key = if let Some(key) = key {
             let mut args = ArgBundle::new();
             args.args.push(item);
@@ -1213,25 +1370,21 @@ pub(crate) fn shim_list_sort(interpreter: &mut Interpreter, args: &ArgBundle) ->
                 CallResult::ReturnValue(val) => val,
                 CallResult::PC(pc, captured_scope) => {
                     let mut new_env = Environment::with_scope(captured_scope);
-                    interpreter.execute_bytecode_extended(
-                        &mut (pc as usize),
-                        args,
-                        &mut new_env,
-                    )?
-                },
+                    interpreter.execute_bytecode_extended(&mut (pc as usize), args, &mut new_env)?
+                }
             }
         } else {
             item
         };
-        
+
         items_with_keys.push((idx, item, sort_key));
     }
-    
+
     // Perform stable sort by comparing sort keys
     items_with_keys.sort_by(|a, b| {
         let (idx_a, _, key_a) = a;
         let (idx_b, _, key_b) = b;
-        
+
         // Try to compare the keys
         match compare_values(interpreter, key_a, key_b) {
             Ok(ordering) => ordering,
@@ -1241,22 +1394,26 @@ pub(crate) fn shim_list_sort(interpreter: &mut Interpreter, args: &ArgBundle) ->
             }
         }
     });
-    
+
     // Mutate the list in place
     let lst_mut = obj.list_mut(interpreter)?;
     for (idx, (_, item, _)) in items_with_keys.iter().enumerate() {
         lst_mut.set(&mut interpreter.mem, idx as isize, *item)?;
     }
-    
+
     Ok(ShimValue::None)
 }
 
 // Helper function to compare two ShimValues for sorting/ordering purposes.
 // This function returns an Ordering to determine relative position in a sorted sequence.
 // For equality checks, use ShimValue::equal_inner instead.
-pub(crate) fn compare_values(interpreter: &mut Interpreter, a: &ShimValue, b: &ShimValue) -> Result<std::cmp::Ordering, String> {
+pub(crate) fn compare_values(
+    interpreter: &mut Interpreter,
+    a: &ShimValue,
+    b: &ShimValue,
+) -> Result<std::cmp::Ordering, String> {
     use std::cmp::Ordering;
-    
+
     match (a, b) {
         (ShimValue::Integer(x), ShimValue::Integer(y)) => Ok(x.cmp(y)),
         (ShimValue::Float(x), ShimValue::Float(y)) => {
@@ -1274,7 +1431,7 @@ pub(crate) fn compare_values(interpreter: &mut Interpreter, a: &ShimValue, b: &S
             } else {
                 Ok(Ordering::Equal)
             }
-        },
+        }
         (ShimValue::Integer(x), ShimValue::Float(y)) => {
             let x_f = *x as f32;
             if x_f < *y {
@@ -1284,7 +1441,7 @@ pub(crate) fn compare_values(interpreter: &mut Interpreter, a: &ShimValue, b: &S
             } else {
                 Ok(Ordering::Equal)
             }
-        },
+        }
         (ShimValue::Float(x), ShimValue::Integer(y)) => {
             let y_f = *y as f32;
             if *x < y_f {
@@ -1294,19 +1451,19 @@ pub(crate) fn compare_values(interpreter: &mut Interpreter, a: &ShimValue, b: &S
             } else {
                 Ok(Ordering::Equal)
             }
-        },
+        }
         (ShimValue::String(..), ShimValue::String(..)) => {
             let str_a = a.string(interpreter)?;
             let str_b = b.string(interpreter)?;
             Ok(str_a.cmp(&str_b))
-        },
+        }
         (ShimValue::Bool(x), ShimValue::Bool(y)) => Ok(x.cmp(y)),
         (ShimValue::None, ShimValue::None) => Ok(Ordering::Equal),
         (ShimValue::List(_), ShimValue::List(_)) => {
             // Compare lists lexicographically
             let lst_a = a.list(interpreter)?;
             let lst_b = b.list(interpreter)?;
-            
+
             let min_len = std::cmp::min(lst_a.len(), lst_b.len());
             for i in 0..min_len {
                 let item_a = lst_a.get(&interpreter.mem, i as isize)?;
@@ -1317,7 +1474,7 @@ pub(crate) fn compare_values(interpreter: &mut Interpreter, a: &ShimValue, b: &S
                 }
             }
             Ok(lst_a.len().cmp(&lst_b.len()))
-        },
+        }
         (ShimValue::Struct(..), _) => {
             // Try struct method overrides for comparison operators
             if let Some(gt_result) = a.try_struct_override(interpreter, b"gt", b) {
@@ -1338,13 +1495,24 @@ pub(crate) fn compare_values(interpreter: &mut Interpreter, a: &ShimValue, b: &S
                     return Ok(Ordering::Equal);
                 }
             }
-            Err(format!("Cannot compare {} and {}", a.to_string_mem(&interpreter.mem), b.to_string_mem(&interpreter.mem)))
-        },
-        _ => Err(format!("Cannot compare {} and {}", a.to_string_mem(&interpreter.mem), b.to_string_mem(&interpreter.mem))),
+            Err(format!(
+                "Cannot compare {} and {}",
+                a.to_string_mem(&interpreter.mem),
+                b.to_string_mem(&interpreter.mem)
+            ))
+        }
+        _ => Err(format!(
+            "Cannot compare {} and {}",
+            a.to_string_mem(&interpreter.mem),
+            b.to_string_mem(&interpreter.mem)
+        )),
     }
 }
 
-pub(crate) fn shim_list_filter(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_list_filter(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let obj = unpacker.required(b"obj")?;
     let lst = obj.list(interpreter)?;
@@ -1360,9 +1528,7 @@ pub(crate) fn shim_list_filter(interpreter: &mut Interpreter, args: &ArgBundle) 
             let mut args = ArgBundle::new();
             args.args.push(input);
             match key.call(interpreter, &mut args)? {
-                CallResult::ReturnValue(val) => {
-                    val
-                },
+                CallResult::ReturnValue(val) => val,
                 CallResult::PC(pc, captured_scope) => {
                     let mut new_env = Environment::with_scope(captured_scope);
                     let val = interpreter.execute_bytecode_extended(
@@ -1371,8 +1537,8 @@ pub(crate) fn shim_list_filter(interpreter: &mut Interpreter, args: &ArgBundle) 
                         &mut new_env,
                     )?;
                     val
-                },
-            } 
+                }
+            }
         } else {
             input
         };
@@ -1384,7 +1550,10 @@ pub(crate) fn shim_list_filter(interpreter: &mut Interpreter, args: &ArgBundle) 
     Ok(new_lst_val)
 }
 
-pub(crate) fn shim_list_map(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_list_map(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let obj = unpacker.required(b"obj")?;
     let lst = obj.list(interpreter)?;
@@ -1399,9 +1568,7 @@ pub(crate) fn shim_list_map(interpreter: &mut Interpreter, args: &ArgBundle) -> 
         let mut args = ArgBundle::new();
         args.args.push(input);
         let output = match key.call(interpreter, &mut args)? {
-            CallResult::ReturnValue(val) => {
-                val
-            },
+            CallResult::ReturnValue(val) => val,
             CallResult::PC(pc, captured_scope) => {
                 let mut new_env = Environment::with_scope(captured_scope);
                 let val = interpreter.execute_bytecode_extended(
@@ -1410,7 +1577,7 @@ pub(crate) fn shim_list_map(interpreter: &mut Interpreter, args: &ArgBundle) -> 
                     &mut new_env,
                 )?;
                 val
-            },
+            }
         };
         new_lst.push(&mut interpreter.mem, output);
     }
@@ -1418,7 +1585,10 @@ pub(crate) fn shim_list_map(interpreter: &mut Interpreter, args: &ArgBundle) -> 
     Ok(new_lst_val)
 }
 
-pub(crate) fn shim_list_len(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_list_len(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let obj = unpacker.required(b"obj")?;
     let lst = obj.list(interpreter)?;
@@ -1427,7 +1597,10 @@ pub(crate) fn shim_list_len(interpreter: &mut Interpreter, args: &ArgBundle) -> 
     Ok(ShimValue::Integer(lst.len() as i32))
 }
 
-pub(crate) fn shim_list_append(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_list_append(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let obj = unpacker.required(b"obj")?;
     let lst = obj.list_mut(interpreter)?;
@@ -1439,26 +1612,37 @@ pub(crate) fn shim_list_append(interpreter: &mut Interpreter, args: &ArgBundle) 
     Ok(ShimValue::None)
 }
 
-pub(crate) fn shim_list_iter(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_list_iter(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let obj = unpacker.required(b"obj")?;
     unpacker.end()?;
 
-    Ok(interpreter.mem.alloc_native(ListIterator {lst: obj, idx: 0}))
+    Ok(interpreter
+        .mem
+        .alloc_native(ListIterator { lst: obj, idx: 0 }))
 }
 
-pub(crate) fn shim_list_clear(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_list_clear(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let obj = unpacker.required(b"obj")?;
     let lst = obj.list_mut(interpreter)?;
     unpacker.end()?;
 
     lst.len = 0.into();
-    
+
     Ok(ShimValue::None)
 }
 
-pub(crate) fn shim_list_extend(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_list_extend(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let obj = unpacker.required(b"obj")?;
     let iterable = unpacker.required(b"iterable")?;
@@ -1466,17 +1650,15 @@ pub(crate) fn shim_list_extend(interpreter: &mut Interpreter, args: &ArgBundle) 
 
     // Get the iterator for the iterable
     let mut iter_args = ArgBundle::new();
-    let iterator = iterable.get_attr(interpreter, b"iter")?.call(interpreter, &mut iter_args)?;
+    let iterator = iterable
+        .get_attr(interpreter, b"iter")?
+        .call(interpreter, &mut iter_args)?;
     let iterator = match iterator {
         CallResult::ReturnValue(val) => val,
         CallResult::PC(pc, captured_scope) => {
             let mut new_env = Environment::with_scope(captured_scope);
-            interpreter.execute_bytecode_extended(
-                &mut (pc as usize),
-                iter_args,
-                &mut new_env,
-            )?
-        },
+            interpreter.execute_bytecode_extended(&mut (pc as usize), iter_args, &mut new_env)?
+        }
     };
 
     // Get the next method
@@ -1485,7 +1667,7 @@ pub(crate) fn shim_list_extend(interpreter: &mut Interpreter, args: &ArgBundle) 
     // Iterate and append each item
     loop {
         let mut next_args = ArgBundle::new();
-        
+
         let result = match next_method.call(interpreter, &mut next_args)? {
             CallResult::ReturnValue(val) => val,
             CallResult::PC(pc, captured_scope) => {
@@ -1495,7 +1677,7 @@ pub(crate) fn shim_list_extend(interpreter: &mut Interpreter, args: &ArgBundle) 
                     next_args,
                     &mut new_env,
                 )?
-            },
+            }
         };
 
         // Break if we get None (end of iteration)
@@ -1511,7 +1693,10 @@ pub(crate) fn shim_list_extend(interpreter: &mut Interpreter, args: &ArgBundle) 
     Ok(ShimValue::None)
 }
 
-pub(crate) fn shim_list_index(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_list_index(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let obj = unpacker.required(b"obj")?;
     let lst = obj.list(interpreter)?;
@@ -1529,7 +1714,10 @@ pub(crate) fn shim_list_index(interpreter: &mut Interpreter, args: &ArgBundle) -
     Ok(default.unwrap_or(ShimValue::None))
 }
 
-pub(crate) fn shim_list_insert(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_list_insert(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let obj = unpacker.required(b"obj")?;
     let index = unpacker.required(b"index")?;
@@ -1567,7 +1755,10 @@ pub(crate) fn shim_list_insert(interpreter: &mut Interpreter, args: &ArgBundle) 
     Ok(ShimValue::None)
 }
 
-pub(crate) fn shim_list_pop(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_list_pop(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let obj = unpacker.required(b"obj")?;
     let index = unpacker.optional(b"index");
@@ -1575,7 +1766,7 @@ pub(crate) fn shim_list_pop(interpreter: &mut Interpreter, args: &ArgBundle) -> 
     unpacker.end()?;
 
     let lst = obj.list_mut(interpreter)?;
-    
+
     if lst.is_empty() {
         return Ok(default.unwrap_or(ShimValue::None));
     }
@@ -1604,7 +1795,10 @@ pub(crate) fn shim_list_pop(interpreter: &mut Interpreter, args: &ArgBundle) -> 
     Ok(value)
 }
 
-pub(crate) fn shim_list_sorted(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_list_sorted(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let obj = unpacker.required(b"obj")?;
     let lst = obj.list(interpreter)?;
@@ -1614,7 +1808,7 @@ pub(crate) fn shim_list_sorted(interpreter: &mut Interpreter, args: &ArgBundle) 
     // Create a new list with the same elements
     let new_lst_val = interpreter.mem.alloc_list();
     let new_lst = new_lst_val.list_mut(interpreter)?;
-    
+
     for idx in 0..lst.len() {
         let item = lst.get(&interpreter.mem, idx as isize)?;
         new_lst.push(&mut interpreter.mem, item);
@@ -1631,7 +1825,10 @@ pub(crate) fn shim_list_sorted(interpreter: &mut Interpreter, args: &ArgBundle) 
     Ok(new_lst_val)
 }
 
-pub(crate) fn shim_list_reverse(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_list_reverse(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let obj = unpacker.required(b"obj")?;
     let lst = obj.list_mut(interpreter)?;
@@ -1648,7 +1845,10 @@ pub(crate) fn shim_list_reverse(interpreter: &mut Interpreter, args: &ArgBundle)
     Ok(ShimValue::None)
 }
 
-pub(crate) fn shim_list_reversed(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_list_reversed(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let obj = unpacker.required(b"obj")?;
     let lst = obj.list(interpreter)?;
@@ -1657,7 +1857,7 @@ pub(crate) fn shim_list_reversed(interpreter: &mut Interpreter, args: &ArgBundle
     // Create a new list with reversed elements
     let new_lst_val = interpreter.mem.alloc_list();
     let new_lst = new_lst_val.list_mut(interpreter)?;
-    
+
     for idx in (0..lst.len()).rev() {
         let item = lst.get(&interpreter.mem, idx as isize)?;
         new_lst.push(&mut interpreter.mem, item);
@@ -1666,36 +1866,56 @@ pub(crate) fn shim_list_reversed(interpreter: &mut Interpreter, args: &ArgBundle
     Ok(new_lst_val)
 }
 
-pub(crate) fn shim_dict_iter(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_dict_iter(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let obj = unpacker.required(b"obj")?;
     unpacker.end()?;
 
-    Ok(interpreter.mem.alloc_native(DictKeysIterator {dict: obj, idx: 0}))
+    Ok(interpreter
+        .mem
+        .alloc_native(DictKeysIterator { dict: obj, idx: 0 }))
 }
 
-pub(crate) fn shim_dict_keys(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_dict_keys(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let obj = unpacker.required(b"obj")?;
     unpacker.end()?;
 
-    Ok(interpreter.mem.alloc_native(DictKeysIterator {dict: obj, idx: 0}))
+    Ok(interpreter
+        .mem
+        .alloc_native(DictKeysIterator { dict: obj, idx: 0 }))
 }
 
-pub(crate) fn shim_dict_values(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_dict_values(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let obj = unpacker.required(b"obj")?;
     unpacker.end()?;
 
-    Ok(interpreter.mem.alloc_native(DictValuesIterator {dict: obj, idx: 0}))
+    Ok(interpreter
+        .mem
+        .alloc_native(DictValuesIterator { dict: obj, idx: 0 }))
 }
 
-pub(crate) fn shim_dict_items(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_dict_items(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let obj = unpacker.required(b"obj")?;
     unpacker.end()?;
 
-    Ok(interpreter.mem.alloc_native(DictItemsIterator {dict: obj, idx: 0}))
+    Ok(interpreter
+        .mem
+        .alloc_native(DictItemsIterator { dict: obj, idx: 0 }))
 }
 
 pub(crate) fn shim_dict_pop(
@@ -1779,7 +1999,10 @@ pub(crate) fn shim_dict_shrink_to_fit(
     Ok(ShimValue::None)
 }
 
-pub(crate) fn shim_str_len(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_str_len(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let binding = unpacker.required(b"obj")?;
     let s = binding.string(interpreter)?;
@@ -1788,7 +2011,10 @@ pub(crate) fn shim_str_len(interpreter: &mut Interpreter, args: &ArgBundle) -> R
     Ok(ShimValue::Integer(s.len() as i32))
 }
 
-pub(crate) fn shim_str_split(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_str_split(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let binding = unpacker.required(b"obj")?;
     let s = binding.string(interpreter)?;
@@ -1815,13 +2041,10 @@ pub(crate) fn shim_str_split(interpreter: &mut Interpreter, args: &ArgBundle) ->
         }
         let val = ShimValue::String(
             (idx - start_range) as u16, // len
-            (start_range % 8) as u8, // byte offset within the 8-byte aligned word
+            (start_range % 8) as u8,    // byte offset within the 8-byte aligned word
             (usize::from(pos) + start_range / 8).into(),
         );
-        out.push(
-            &mut interpreter.mem,
-            val,
-        );
+        out.push(&mut interpreter.mem, val);
 
         while idx < len && matches!(s[idx], b'\n' | b' ' | b'\t' | b'\r') {
             idx += 1;
@@ -1832,7 +2055,10 @@ pub(crate) fn shim_str_split(interpreter: &mut Interpreter, args: &ArgBundle) ->
     Ok(out_val)
 }
 
-pub(crate) fn shim_str_join(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_str_join(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let binding = unpacker.required(b"obj")?;
     let _s = binding.string(interpreter)?;
@@ -1842,7 +2068,10 @@ pub(crate) fn shim_str_join(interpreter: &mut Interpreter, args: &ArgBundle) -> 
     todo!();
 }
 
-pub(crate) fn shim_str_upper(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_str_upper(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let binding = unpacker.required(b"obj")?;
     let _s = binding.string(interpreter)?;
@@ -1852,7 +2081,10 @@ pub(crate) fn shim_str_upper(interpreter: &mut Interpreter, args: &ArgBundle) ->
     todo!();
 }
 
-pub(crate) fn shim_str_lower(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_str_lower(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let binding = unpacker.required(b"obj")?;
     let _s = binding.string(interpreter)?;
@@ -1862,7 +2094,10 @@ pub(crate) fn shim_str_lower(interpreter: &mut Interpreter, args: &ArgBundle) ->
     todo!();
 }
 
-pub(crate) fn shim_str_strip(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_str_strip(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let binding = unpacker.required(b"obj")?;
     let _s = binding.string(interpreter)?;
@@ -1872,7 +2107,10 @@ pub(crate) fn shim_str_strip(interpreter: &mut Interpreter, args: &ArgBundle) ->
     todo!();
 }
 
-pub(crate) fn shim_str_remove_prefix(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_str_remove_prefix(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let binding = unpacker.required(b"obj")?;
     let _s = binding.string(interpreter)?;
@@ -1882,7 +2120,10 @@ pub(crate) fn shim_str_remove_prefix(interpreter: &mut Interpreter, args: &ArgBu
     todo!();
 }
 
-pub(crate) fn shim_str_remove_suffix(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_str_remove_suffix(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let binding = unpacker.required(b"obj")?;
     let _s = binding.string(interpreter)?;
@@ -1892,7 +2133,10 @@ pub(crate) fn shim_str_remove_suffix(interpreter: &mut Interpreter, args: &ArgBu
     todo!();
 }
 
-pub(crate) fn shim_str_split_lines(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_str_split_lines(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let binding = unpacker.required(b"obj")?;
     let _s = binding.string(interpreter)?;
@@ -1902,7 +2146,10 @@ pub(crate) fn shim_str_split_lines(interpreter: &mut Interpreter, args: &ArgBund
     todo!();
 }
 
-pub(crate) fn shim_str_contains(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_str_contains(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let binding = unpacker.required(b"obj")?;
     let _s = binding.string(interpreter)?;
@@ -1912,7 +2159,10 @@ pub(crate) fn shim_str_contains(interpreter: &mut Interpreter, args: &ArgBundle)
     todo!();
 }
 
-pub(crate) fn shim_str_ends_with(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_str_ends_with(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let binding = unpacker.required(b"obj")?;
     let _s = binding.string(interpreter)?;
@@ -1922,7 +2172,10 @@ pub(crate) fn shim_str_ends_with(interpreter: &mut Interpreter, args: &ArgBundle
     todo!();
 }
 
-pub(crate) fn shim_str_starts_with(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_str_starts_with(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let binding = unpacker.required(b"obj")?;
     let _s = binding.string(interpreter)?;
@@ -1932,7 +2185,10 @@ pub(crate) fn shim_str_starts_with(interpreter: &mut Interpreter, args: &ArgBund
     todo!();
 }
 
-pub(crate) fn shim_str_find(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_str_find(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let binding = unpacker.required(b"obj")?;
     let _s = binding.string(interpreter)?;
@@ -1942,7 +2198,10 @@ pub(crate) fn shim_str_find(interpreter: &mut Interpreter, args: &ArgBundle) -> 
     todo!();
 }
 
-pub(crate) fn shim_str_lstrip(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_str_lstrip(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let binding = unpacker.required(b"obj")?;
     let _s = binding.string(interpreter)?;
@@ -1952,7 +2211,10 @@ pub(crate) fn shim_str_lstrip(interpreter: &mut Interpreter, args: &ArgBundle) -
     todo!();
 }
 
-pub(crate) fn shim_str_rstrip(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_str_rstrip(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let binding = unpacker.required(b"obj")?;
     let _s = binding.string(interpreter)?;
@@ -1962,7 +2224,10 @@ pub(crate) fn shim_str_rstrip(interpreter: &mut Interpreter, args: &ArgBundle) -
     todo!();
 }
 
-pub(crate) fn shim_str_replace(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_str_replace(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let binding = unpacker.required(b"obj")?;
     let _s = binding.string(interpreter)?;
@@ -1997,27 +2262,25 @@ pub(crate) fn get_type_name(value: &ShimValue) -> &'static str {
 fn trim_bytes(s: &[u8]) -> &[u8] {
     let mut start = 0;
     let mut end = s.len();
-    
+
     // Trim from start
     while start < end && s[start].is_ascii_whitespace() {
         start += 1;
     }
-    
+
     // Trim from end
     while end > start && s[end - 1].is_ascii_whitespace() {
         end -= 1;
     }
-    
+
     &s[start..end]
 }
 
-fn parse_string_to<T: std::str::FromStr>(
-    s: &[u8],
-    type_name: &str,
-) -> Result<T, String> {
+fn parse_string_to<T: std::str::FromStr>(s: &[u8], type_name: &str) -> Result<T, String> {
     let trimmed = trim_bytes(s);
     unsafe {
-        std::str::from_utf8_unchecked(trimmed).parse::<T>()
+        std::str::from_utf8_unchecked(trimmed)
+            .parse::<T>()
             .map_err(|_| {
                 let string_repr = std::str::from_utf8(s).unwrap_or("<invalid utf8>");
                 format!("Cannot convert string '{}' to {}", string_repr, type_name)
@@ -2025,7 +2288,10 @@ fn parse_string_to<T: std::str::FromStr>(
     }
 }
 
-pub(crate) fn shim_str(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_str(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let value = unpacker.required(b"value")?;
     unpacker.end()?;
@@ -2035,7 +2301,10 @@ pub(crate) fn shim_str(interpreter: &mut Interpreter, args: &ArgBundle) -> Resul
     Ok(interpreter.mem.alloc_str(bytes))
 }
 
-pub(crate) fn shim_int(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_int(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let value = unpacker.required(b"value")?;
     unpacker.end()?;
@@ -2047,12 +2316,15 @@ pub(crate) fn shim_int(interpreter: &mut Interpreter, args: &ArgBundle) -> Resul
         ShimValue::String(..) => {
             let s = value.string(interpreter)?;
             parse_string_to::<i32>(s, "int").map(ShimValue::Integer)
-        },
-        _ => Err(format!("Cannot convert {} to int", get_type_name(&value)))
+        }
+        _ => Err(format!("Cannot convert {} to int", get_type_name(&value))),
     }
 }
 
-pub(crate) fn shim_float(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_float(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let value = unpacker.required(b"value")?;
     unpacker.end()?;
@@ -2064,12 +2336,15 @@ pub(crate) fn shim_float(interpreter: &mut Interpreter, args: &ArgBundle) -> Res
         ShimValue::String(..) => {
             let s = value.string(interpreter)?;
             parse_string_to::<f32>(s, "float").map(ShimValue::Float)
-        },
-        _ => Err(format!("Cannot convert {} to float", get_type_name(&value)))
+        }
+        _ => Err(format!("Cannot convert {} to float", get_type_name(&value))),
     }
 }
 
-pub(crate) fn shim_try_int(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_try_int(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let value = unpacker.required(b"value")?;
     unpacker.end()?;
@@ -2083,14 +2358,17 @@ pub(crate) fn shim_try_int(interpreter: &mut Interpreter, args: &ArgBundle) -> R
             parse_string_to::<i32>(s, "int")
                 .map(ShimValue::Integer)
                 .ok()
-        },
-        _ => None
+        }
+        _ => None,
     };
 
     Ok(result.unwrap_or(ShimValue::None))
 }
 
-pub(crate) fn shim_try_float(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_try_float(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let value = unpacker.required(b"value")?;
     unpacker.end()?;
@@ -2104,14 +2382,17 @@ pub(crate) fn shim_try_float(interpreter: &mut Interpreter, args: &ArgBundle) ->
             parse_string_to::<f32>(s, "float")
                 .map(ShimValue::Float)
                 .ok()
-        },
-        _ => None
+        }
+        _ => None,
     };
 
     Ok(result.unwrap_or(ShimValue::None))
 }
 
-pub(crate) fn shim_sqrt(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_sqrt(
+    _interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let value = unpacker.required(b"self")?;
     unpacker.end()?;
@@ -2123,7 +2404,10 @@ pub(crate) fn shim_sqrt(_interpreter: &mut Interpreter, args: &ArgBundle) -> Res
     Ok(ShimValue::Float(f.sqrt()))
 }
 
-pub(crate) fn shim_pow(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_pow(
+    _interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let base = unpacker.required(b"self")?;
     let exp = unpacker.required(b"exp")?;
@@ -2143,7 +2427,10 @@ pub(crate) fn shim_pow(_interpreter: &mut Interpreter, args: &ArgBundle) -> Resu
     }
 }
 
-pub(crate) fn shim_round(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_round(
+    _interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let value = unpacker.required(b"self")?;
     unpacker.end()?;
@@ -2154,7 +2441,10 @@ pub(crate) fn shim_round(_interpreter: &mut Interpreter, args: &ArgBundle) -> Re
     }
 }
 
-pub(crate) fn shim_ceil(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_ceil(
+    _interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let value = unpacker.required(b"self")?;
     unpacker.end()?;
@@ -2165,7 +2455,10 @@ pub(crate) fn shim_ceil(_interpreter: &mut Interpreter, args: &ArgBundle) -> Res
     }
 }
 
-pub(crate) fn shim_floor(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_floor(
+    _interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let value = unpacker.required(b"self")?;
     unpacker.end()?;
@@ -2176,7 +2469,10 @@ pub(crate) fn shim_floor(_interpreter: &mut Interpreter, args: &ArgBundle) -> Re
     }
 }
 
-pub(crate) fn shim_signum(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_signum(
+    _interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let value = unpacker.required(b"self")?;
     unpacker.end()?;
@@ -2187,7 +2483,10 @@ pub(crate) fn shim_signum(_interpreter: &mut Interpreter, args: &ArgBundle) -> R
     }
 }
 
-pub(crate) fn shim_recip(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_recip(
+    _interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let value = unpacker.required(b"self")?;
     unpacker.end()?;
@@ -2199,7 +2498,10 @@ pub(crate) fn shim_recip(_interpreter: &mut Interpreter, args: &ArgBundle) -> Re
     Ok(ShimValue::Float(f.recip()))
 }
 
-pub(crate) fn shim_frac(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_frac(
+    _interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let value = unpacker.required(b"self")?;
     unpacker.end()?;
@@ -2211,7 +2513,10 @@ pub(crate) fn shim_frac(_interpreter: &mut Interpreter, args: &ArgBundle) -> Res
     Ok(ShimValue::Float(f.fract()))
 }
 
-pub(crate) fn shim_trunc(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_trunc(
+    _interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let value = unpacker.required(b"self")?;
     unpacker.end()?;
@@ -2222,165 +2527,309 @@ pub(crate) fn shim_trunc(_interpreter: &mut Interpreter, args: &ArgBundle) -> Re
     }
 }
 
-pub(crate) fn shim_sin(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_sin(
+    _interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let value = unpacker.required(b"self")?;
     unpacker.end()?;
-    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("sin: expected int or float")) };
+    let f = match value {
+        ShimValue::Integer(i) => i as f32,
+        ShimValue::Float(f) => f,
+        _ => return Err(format!("sin: expected int or float")),
+    };
     Ok(ShimValue::Float(f.sin()))
 }
 
-pub(crate) fn shim_cos(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_cos(
+    _interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let value = unpacker.required(b"self")?;
     unpacker.end()?;
-    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("cos: expected int or float")) };
+    let f = match value {
+        ShimValue::Integer(i) => i as f32,
+        ShimValue::Float(f) => f,
+        _ => return Err(format!("cos: expected int or float")),
+    };
     Ok(ShimValue::Float(f.cos()))
 }
 
-pub(crate) fn shim_tan(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_tan(
+    _interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let value = unpacker.required(b"self")?;
     unpacker.end()?;
-    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("tan: expected int or float")) };
+    let f = match value {
+        ShimValue::Integer(i) => i as f32,
+        ShimValue::Float(f) => f,
+        _ => return Err(format!("tan: expected int or float")),
+    };
     Ok(ShimValue::Float(f.tan()))
 }
 
-pub(crate) fn shim_asin(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_asin(
+    _interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let value = unpacker.required(b"self")?;
     unpacker.end()?;
-    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("asin: expected int or float")) };
+    let f = match value {
+        ShimValue::Integer(i) => i as f32,
+        ShimValue::Float(f) => f,
+        _ => return Err(format!("asin: expected int or float")),
+    };
     Ok(ShimValue::Float(f.asin()))
 }
 
-pub(crate) fn shim_acos(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_acos(
+    _interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let value = unpacker.required(b"self")?;
     unpacker.end()?;
-    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("acos: expected int or float")) };
+    let f = match value {
+        ShimValue::Integer(i) => i as f32,
+        ShimValue::Float(f) => f,
+        _ => return Err(format!("acos: expected int or float")),
+    };
     Ok(ShimValue::Float(f.acos()))
 }
 
-pub(crate) fn shim_atan(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_atan(
+    _interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let value = unpacker.required(b"self")?;
     unpacker.end()?;
-    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("atan: expected int or float")) };
+    let f = match value {
+        ShimValue::Integer(i) => i as f32,
+        ShimValue::Float(f) => f,
+        _ => return Err(format!("atan: expected int or float")),
+    };
     Ok(ShimValue::Float(f.atan()))
 }
 
-pub(crate) fn shim_atan2(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_atan2(
+    _interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let value = unpacker.required(b"self")?;
     let other = unpacker.required(b"other")?;
     unpacker.end()?;
-    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("atan2: expected int or float")) };
-    let g = match other { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("atan2: expected int or float")) };
+    let f = match value {
+        ShimValue::Integer(i) => i as f32,
+        ShimValue::Float(f) => f,
+        _ => return Err(format!("atan2: expected int or float")),
+    };
+    let g = match other {
+        ShimValue::Integer(i) => i as f32,
+        ShimValue::Float(f) => f,
+        _ => return Err(format!("atan2: expected int or float")),
+    };
     Ok(ShimValue::Float(f.atan2(g)))
 }
 
-pub(crate) fn shim_sinh(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_sinh(
+    _interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let value = unpacker.required(b"self")?;
     unpacker.end()?;
-    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("sinh: expected int or float")) };
+    let f = match value {
+        ShimValue::Integer(i) => i as f32,
+        ShimValue::Float(f) => f,
+        _ => return Err(format!("sinh: expected int or float")),
+    };
     Ok(ShimValue::Float(f.sinh()))
 }
 
-pub(crate) fn shim_cosh(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_cosh(
+    _interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let value = unpacker.required(b"self")?;
     unpacker.end()?;
-    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("cosh: expected int or float")) };
+    let f = match value {
+        ShimValue::Integer(i) => i as f32,
+        ShimValue::Float(f) => f,
+        _ => return Err(format!("cosh: expected int or float")),
+    };
     Ok(ShimValue::Float(f.cosh()))
 }
 
-pub(crate) fn shim_tanh(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_tanh(
+    _interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let value = unpacker.required(b"self")?;
     unpacker.end()?;
-    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("tanh: expected int or float")) };
+    let f = match value {
+        ShimValue::Integer(i) => i as f32,
+        ShimValue::Float(f) => f,
+        _ => return Err(format!("tanh: expected int or float")),
+    };
     Ok(ShimValue::Float(f.tanh()))
 }
 
-pub(crate) fn shim_asinh(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_asinh(
+    _interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let value = unpacker.required(b"self")?;
     unpacker.end()?;
-    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("asinh: expected int or float")) };
+    let f = match value {
+        ShimValue::Integer(i) => i as f32,
+        ShimValue::Float(f) => f,
+        _ => return Err(format!("asinh: expected int or float")),
+    };
     Ok(ShimValue::Float(f.asinh()))
 }
 
-pub(crate) fn shim_acosh(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_acosh(
+    _interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let value = unpacker.required(b"self")?;
     unpacker.end()?;
-    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("acosh: expected int or float")) };
+    let f = match value {
+        ShimValue::Integer(i) => i as f32,
+        ShimValue::Float(f) => f,
+        _ => return Err(format!("acosh: expected int or float")),
+    };
     Ok(ShimValue::Float(f.acosh()))
 }
 
-pub(crate) fn shim_atanh(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_atanh(
+    _interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let value = unpacker.required(b"self")?;
     unpacker.end()?;
-    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("atanh: expected int or float")) };
+    let f = match value {
+        ShimValue::Integer(i) => i as f32,
+        ShimValue::Float(f) => f,
+        _ => return Err(format!("atanh: expected int or float")),
+    };
     Ok(ShimValue::Float(f.atanh()))
 }
 
-pub(crate) fn shim_log2(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_log2(
+    _interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let value = unpacker.required(b"self")?;
     unpacker.end()?;
-    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("log2: expected int or float")) };
+    let f = match value {
+        ShimValue::Integer(i) => i as f32,
+        ShimValue::Float(f) => f,
+        _ => return Err(format!("log2: expected int or float")),
+    };
     Ok(ShimValue::Float(f.log2()))
 }
 
-pub(crate) fn shim_log10(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_log10(
+    _interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let value = unpacker.required(b"self")?;
     unpacker.end()?;
-    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("log10: expected int or float")) };
+    let f = match value {
+        ShimValue::Integer(i) => i as f32,
+        ShimValue::Float(f) => f,
+        _ => return Err(format!("log10: expected int or float")),
+    };
     Ok(ShimValue::Float(f.log10()))
 }
 
-pub(crate) fn shim_ln(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_ln(
+    _interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let value = unpacker.required(b"self")?;
     unpacker.end()?;
-    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("ln: expected int or float")) };
+    let f = match value {
+        ShimValue::Integer(i) => i as f32,
+        ShimValue::Float(f) => f,
+        _ => return Err(format!("ln: expected int or float")),
+    };
     Ok(ShimValue::Float(f.ln()))
 }
 
-pub(crate) fn shim_log(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_log(
+    _interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let value = unpacker.required(b"self")?;
     let base = unpacker.required(b"base")?;
     unpacker.end()?;
-    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("log: expected int or float")) };
-    let b = match base { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("log: base must be int or float")) };
+    let f = match value {
+        ShimValue::Integer(i) => i as f32,
+        ShimValue::Float(f) => f,
+        _ => return Err(format!("log: expected int or float")),
+    };
+    let b = match base {
+        ShimValue::Integer(i) => i as f32,
+        ShimValue::Float(f) => f,
+        _ => return Err(format!("log: base must be int or float")),
+    };
     Ok(ShimValue::Float(f.log(b)))
 }
 
-pub(crate) fn shim_to_degrees(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_to_degrees(
+    _interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let value = unpacker.required(b"self")?;
     unpacker.end()?;
-    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("to_degrees: expected int or float")) };
+    let f = match value {
+        ShimValue::Integer(i) => i as f32,
+        ShimValue::Float(f) => f,
+        _ => return Err(format!("to_degrees: expected int or float")),
+    };
     Ok(ShimValue::Float(f.to_degrees()))
 }
 
-pub(crate) fn shim_to_radians(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_to_radians(
+    _interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let value = unpacker.required(b"self")?;
     unpacker.end()?;
-    let f = match value { ShimValue::Integer(i) => i as f32, ShimValue::Float(f) => f, _ => return Err(format!("to_radians: expected int or float")) };
+    let f = match value {
+        ShimValue::Integer(i) => i as f32,
+        ShimValue::Float(f) => f,
+        _ => return Err(format!("to_radians: expected int or float")),
+    };
     Ok(ShimValue::Float(f.to_radians()))
 }
 
 /// Clamp function that's generic over any comparable type.
 /// Prefers returning the original value when value == min or value == max
-pub(crate) fn shim_clamp(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_clamp(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let value = unpacker.required(b"value")?;
     let min = unpacker.required(b"min")?;

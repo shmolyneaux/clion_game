@@ -1,30 +1,50 @@
-use glam::Vec3;
-use crate::*;
-use crate::u32size_of;
-use crate::State;
-use crate::Primitive;
 use crate::END_PRIMITIVE;
+use crate::Primitive;
+use crate::State;
+use crate::u32size_of;
+use crate::*;
+use glam::Vec3;
 
 pub fn draw_debug_shapes(state: &mut State) {
     unsafe {
         {
             let _zone = zone_scoped!("Bind Debug Vertex Data");
             gl::BindVertexArray(state.debug_vao.id);
-            state.debug_vbo.bind_data(&state.debug_verts, gl::DYNAMIC_DRAW);
-            state.debug_ebo.bind_data(&state.debug_vert_indices, Primitive::LineStrip, gl::DYNAMIC_DRAW);
+            state
+                .debug_vbo
+                .bind_data(&state.debug_verts, gl::DYNAMIC_DRAW);
+            state.debug_ebo.bind_data(
+                &state.debug_vert_indices,
+                Primitive::LineStrip,
+                gl::DYNAMIC_DRAW,
+            );
         }
 
         {
             let _zone = zone_scoped!("Vertex Position Attribute");
             // Vertex Position Attribute
-            gl::VertexAttribPointer(0, 3, gl::FLOAT, gl::FALSE, (6 * u32size_of::<f32>()) as i32, std::ptr::null());
+            gl::VertexAttribPointer(
+                0,
+                3,
+                gl::FLOAT,
+                gl::FALSE,
+                (6 * u32size_of::<f32>()) as i32,
+                std::ptr::null(),
+            );
             gl::EnableVertexAttribArray(0);
         }
 
         {
             let _zone = zone_scoped!("Vertex Color Attribute");
             // Vertex Color Attribute
-            gl::VertexAttribPointer(1, 3, gl::FLOAT, gl::FALSE, (6 * u32size_of::<f32>()) as i32, (3 * u32size_of::<f32>()) as *const std::ffi::c_void);
+            gl::VertexAttribPointer(
+                1,
+                3,
+                gl::FLOAT,
+                gl::FALSE,
+                (6 * u32size_of::<f32>()) as i32,
+                (3 * u32size_of::<f32>()) as *const std::ffi::c_void,
+            );
             gl::EnableVertexAttribArray(1);
         }
 
@@ -33,12 +53,27 @@ pub fn draw_debug_shapes(state: &mut State) {
             gl::UseProgram(state.debug_shader_program.id);
         }
 
-        gl::UniformMatrix4fv(state.debug_view_loc, 1, gl::FALSE, &state.view.to_cols_array() as *const gl::types::GLfloat);
-        gl::UniformMatrix4fv(state.debug_projection_loc, 1, gl::FALSE, &state.projection.to_cols_array() as *const gl::types::GLfloat);
+        gl::UniformMatrix4fv(
+            state.debug_view_loc,
+            1,
+            gl::FALSE,
+            &state.view.to_cols_array() as *const gl::types::GLfloat,
+        );
+        gl::UniformMatrix4fv(
+            state.debug_projection_loc,
+            1,
+            gl::FALSE,
+            &state.projection.to_cols_array() as *const gl::types::GLfloat,
+        );
 
         {
             let _zone = zone_scoped!("gl::DrawElements");
-            gl::DrawElements(gl::LINE_STRIP, state.debug_vert_indices.len().try_into().unwrap(), gl::UNSIGNED_INT, std::ptr::null());
+            gl::DrawElements(
+                gl::LINE_STRIP,
+                state.debug_vert_indices.len().try_into().unwrap(),
+                gl::UNSIGNED_INT,
+                std::ptr::null(),
+            );
         }
 
         state.debug_verts.clear();
@@ -76,14 +111,14 @@ pub fn debug_box(state: &mut State, position: Vec3, size: Vec3, _color: Vec3) {
     let offset = state.debug_verts.len() as u32;
 
     let debug_verts_here = [
-        position + Vec3::new( size.x,  size.y,  size.z)/2.0f32,
-        position + Vec3::new( size.x,  size.y, -size.z)/2.0f32,
-        position + Vec3::new( size.x, -size.y,  size.z)/2.0f32,
-        position + Vec3::new( size.x, -size.y, -size.z)/2.0f32,
-        position + Vec3::new(-size.x,  size.y,  size.z)/2.0f32,
-        position + Vec3::new(-size.x,  size.y, -size.z)/2.0f32,
-        position + Vec3::new(-size.x, -size.y,  size.z)/2.0f32,
-        position + Vec3::new(-size.x, -size.y, -size.z)/2.0f32,
+        position + Vec3::new(size.x, size.y, size.z) / 2.0f32,
+        position + Vec3::new(size.x, size.y, -size.z) / 2.0f32,
+        position + Vec3::new(size.x, -size.y, size.z) / 2.0f32,
+        position + Vec3::new(size.x, -size.y, -size.z) / 2.0f32,
+        position + Vec3::new(-size.x, size.y, size.z) / 2.0f32,
+        position + Vec3::new(-size.x, size.y, -size.z) / 2.0f32,
+        position + Vec3::new(-size.x, -size.y, size.z) / 2.0f32,
+        position + Vec3::new(-size.x, -size.y, -size.z) / 2.0f32,
     ];
 
     for vert in debug_verts_here {
@@ -91,24 +126,33 @@ pub fn debug_box(state: &mut State, position: Vec3, size: Vec3, _color: Vec3) {
     }
 
     let debug_vert_indices_here = [
-        0, 1, 3, 2, 0,
-        4, 5, 7, 6, 4,
+        0,
+        1,
+        3,
+        2,
+        0,
+        4,
+        5,
+        7,
+        6,
+        4,
         END_PRIMITIVE,
-        1, 5,
+        1,
+        5,
         END_PRIMITIVE,
-        3, 7,
+        3,
+        7,
         END_PRIMITIVE,
-        2, 6,
+        2,
+        6,
         END_PRIMITIVE,
     ];
 
     for index in debug_vert_indices_here {
-        state.debug_vert_indices.push(
-            if index == END_PRIMITIVE {
-                index
-            } else {
-                index + offset
-            }
-        );
+        state.debug_vert_indices.push(if index == END_PRIMITIVE {
+            index
+        } else {
+            index + offset
+        });
     }
 }

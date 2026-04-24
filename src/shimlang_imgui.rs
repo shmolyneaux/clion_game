@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use crate::*;
-use ::shimlang::{u24, FreeBlock, Interpreter, fnv1a_hash};
+use ::shimlang::{FreeBlock, Interpreter, fnv1a_hash, u24};
 
 #[derive(Facet, Default)]
 pub struct Navigation {
@@ -21,32 +21,45 @@ pub fn i32_to_rgb(i: i32) -> [u8; 3] {
     // 1. Convert to u32 to handle negative IDs and treat as a continuous scale
     let val = i as u32;
 
-    // 2. Use the Golden Ratio conjugate (0.6180339887...) 
+    // 2. Use the Golden Ratio conjugate (0.6180339887...)
     // This spreads the "Hue" evenly around the 360-degree wheel.
     let golden_ratio_conjugate = 0.618033988749895_f64;
-    let hue = (val as f64 * golden_ratio_conjugate).fract(); 
+    let hue = (val as f64 * golden_ratio_conjugate).fract();
 
     // 3. Set constant Saturation (0.8) and Lightness (0.6) for a "clean" UI look
     hsl_to_rgb(hue, 0.8, 0.6)
 }
 
 fn hsl_to_rgb(h: f64, s: f64, l: f64) -> [u8; 3] {
-    let q = if l < 0.5 { l * (1.0 + s) } else { l + s - l * s };
+    let q = if l < 0.5 {
+        l * (1.0 + s)
+    } else {
+        l + s - l * s
+    };
     let p = 2.0 * l - q;
 
     let mut rgb = [0u8; 3];
-    let transitions = [h + 1.0/3.0, h, h - 1.0/3.0];
+    let transitions = [h + 1.0 / 3.0, h, h - 1.0 / 3.0];
 
     for (i, &t) in transitions.iter().enumerate() {
         let mut tc = t;
-        if tc < 0.0 { tc += 1.0; }
-        if tc > 1.0 { tc -= 1.0; }
+        if tc < 0.0 {
+            tc += 1.0;
+        }
+        if tc > 1.0 {
+            tc -= 1.0;
+        }
 
-        let color_val = if tc < 1.0/6.0 { p + (q - p) * 6.0 * tc }
-            else if tc < 1.0/2.0 { q }
-            else if tc < 2.0/3.0 { p + (q - p) * (2.0/3.0 - tc) * 6.0 }
-            else { p };
-        
+        let color_val = if tc < 1.0 / 6.0 {
+            p + (q - p) * 6.0 * tc
+        } else if tc < 1.0 / 2.0 {
+            q
+        } else if tc < 2.0 / 3.0 {
+            p + (q - p) * (2.0 / 3.0 - tc) * 6.0
+        } else {
+            p
+        };
+
         rgb[i] = (color_val * 255.0).round() as u8;
     }
     rgb
@@ -55,10 +68,10 @@ fn hsl_to_rgb(h: f64, s: f64, l: f64) -> [u8; 3] {
 pub fn f32_to_rgb(f: f32) -> [u8; 3] {
     // 1. Normalize 0.0 and -0.0 so they produce the same color
     let normalized = if f == 0.0 { 0.0 } else { f };
-    
+
     // 2. Bit-cast to u32 (this is a no-op in assembly, just a type change)
     let bits = normalized.to_bits();
-    
+
     // 3. Use your existing vibrant function
     i32_to_rgb(bits as i32)
 }
@@ -66,47 +79,74 @@ pub fn f32_to_rgb(f: f32) -> [u8; 3] {
 pub fn f64_to_rgb(f: f64) -> [u8; 3] {
     let normalized = if f == 0.0 { 0.0 } else { f };
     let bits = normalized.to_bits();
-    
+
     // Fold the 64 bits into 32 bits using XOR
     // This ensures both the exponent and mantissa contribute to the color
     let folded = (bits ^ (bits >> 32)) as u32;
-    
+
     i32_to_rgb(folded as i32)
 }
 
 impl Navigation {
-    pub fn debug_window(&mut self, interpreter: &mut shimlang::Interpreter, env: &shimlang::Environment) {
+    pub fn debug_window(
+        &mut self,
+        interpreter: &mut shimlang::Interpreter,
+        env: &shimlang::Environment,
+    ) {
         let _zone = zone_scoped!("Navigation::debug_window");
         let mut open = true;
         unsafe {
-            igBegin(c"Shimlang Debug".as_ptr(), &mut open as *mut bool, IMGUI_WINDOW_FLAGS_NO_FOCUS_ON_APPEARING);
+            igBegin(
+                c"Shimlang Debug".as_ptr(),
+                &mut open as *mut bool,
+                IMGUI_WINDOW_FLAGS_NO_FOCUS_ON_APPEARING,
+            );
 
-            igText(CString::new(format!("Mem size is {}", interpreter.mem.mem.len())).unwrap().as_ptr());
-            igText(CString::new(format!("Mask size is {}", usize::from(interpreter.mem.free_list[interpreter.mem.free_list.len()-1].pos))).unwrap().as_ptr());
+            igText(
+                CString::new(format!("Mem size is {}", interpreter.mem.mem.len()))
+                    .unwrap()
+                    .as_ptr(),
+            );
+            igText(
+                CString::new(format!(
+                    "Mask size is {}",
+                    usize::from(interpreter.mem.free_list[interpreter.mem.free_list.len() - 1].pos)
+                ))
+                .unwrap()
+                .as_ptr(),
+            );
 
-
-            igText(CString::new(format!("Interpreter source: {:#?}", interpreter.source)).unwrap().as_ptr());
+            igText(
+                CString::new(format!("Interpreter source: {:#?}", interpreter.source))
+                    .unwrap()
+                    .as_ptr(),
+            );
             igText(cformat!("ANother test {}", 42).as_ptr());
-            igText(CString::new(format!("Disassembly:\n{}",
-                                        shimlang::format_asm(&interpreter.program.bytecode)
-                                        )).unwrap().as_ptr());
+            igText(
+                CString::new(format!(
+                    "Disassembly:\n{}",
+                    shimlang::format_asm(&interpreter.program.bytecode)
+                ))
+                .unwrap()
+                .as_ptr(),
+            );
 
             // Memory viewer
 
-            igText(CString::new(format!("Mem size is {}", interpreter.mem.mem.len())).unwrap().as_ptr());
-
+            igText(
+                CString::new(format!("Mem size is {}", interpreter.mem.mem.len()))
+                    .unwrap()
+                    .as_ptr(),
+            );
 
             draw_colored_grid(5, 5, 8.0);
-
 
             if self.memory_page == 0 {
                 igBeginDisabled();
                 igButton(CString::new(format!("Prev")).unwrap().as_ptr());
                 igEndDisabled();
             } else {
-                if igButton(
-                    CString::new(format!("Prev")).unwrap().as_ptr()
-                ) {
+                if igButton(CString::new(format!("Prev")).unwrap().as_ptr()) {
                     self.memory_page -= 1;
                 }
             }
@@ -122,9 +162,7 @@ impl Navigation {
             };
 
             if (self.memory_page + 1) * (page_size as u32) < mem_end as u32 {
-                if igButton(
-                    CString::new(format!("Next")).unwrap().as_ptr()
-                ) {
+                if igButton(CString::new(format!("Next")).unwrap().as_ptr()) {
                     self.memory_page += 1;
                 }
             } else {
@@ -135,16 +173,29 @@ impl Navigation {
 
             igSameLine();
 
-
             // TODO: disable "Next" button if it goes past the free_list last position
-            igText(CString::new(format!("Last block: {:?}", interpreter.mem.free_list.last())).unwrap().as_ptr());
+            igText(
+                CString::new(format!(
+                    "Last block: {:?}",
+                    interpreter.mem.free_list.last()
+                ))
+                .unwrap()
+                .as_ptr(),
+            );
 
             let item_offset: usize = page_size * self.memory_page as usize;
             let index_description = interpreter.describe_memory(env);
             let mut origin = ImVec2 { x: 0.0, y: 0.0 };
             igGetCursorScreenPos(&mut origin);
             let cell_size = 16.0;
-            for (relative_idx, x) in interpreter.mem.mem.iter().skip(item_offset).take(page_size).enumerate() {
+            for (relative_idx, x) in interpreter
+                .mem
+                .mem
+                .iter()
+                .skip(item_offset)
+                .take(page_size)
+                .enumerate()
+            {
                 let idx = relative_idx + item_offset;
 
                 let x = relative_idx % 32;
@@ -152,7 +203,7 @@ impl Navigation {
 
                 let mut cell_min = ImVec2 {
                     x: origin.x + (x as f32 * cell_size),
-                    y: origin.y + (y as f32 * (cell_size+1.0)),
+                    y: origin.y + (y as f32 * (cell_size + 1.0)),
                 };
                 let mut cell_max = ImVec2 {
                     x: cell_min.x + cell_size,
@@ -178,7 +229,11 @@ impl Navigation {
                     // Tooltip logic
                     if igIsMouseHoveringRect(cell_min, cell_max, true) {
                         igBeginTooltip();
-                        igText(CString::new(format!("{}: {}", s.start, s.to_string(&interpreter.mem))).unwrap().as_ptr());
+                        igText(
+                            CString::new(format!("{}: {}", s.start, s.to_string(&interpreter.mem)))
+                                .unwrap()
+                                .as_ptr(),
+                        );
                         igEndTooltip();
                     }
 
@@ -203,45 +258,27 @@ impl Navigation {
                     if let shimlang::MemDescriptorType::Struct(_, members) = &s.t {
                         let member_idx = idx - s.start;
                         let val = members[member_idx];
-                        let (inner_color, border_color) = if let shimlang::ShimValue::Integer(i) = val {
-                            let rgb = i32_to_rgb(i);
-                            (
-                                im_col32(
-                                    rgb[0].into(),
-                                    rgb[1].into(),
-                                    rgb[2].into(),
-                                    255
-                                ),
-                                im_col32(
-                                    128,
-                                    128,
-                                    128,
-                                    255
-                                ),
-                            )
-                        } else if let shimlang::ShimValue::Float(f) = val {
-                            let rgb = f32_to_rgb(f);
-                            (
-                                im_col32(
-                                    rgb[0].into(),
-                                    rgb[1].into(),
-                                    rgb[2].into(),
-                                    255,
-                                ),
-                                im_col32(
-                                    100,
-                                    200,
-                                    100,
-                                    255,
-                                ),
-                            )
-                        } else {
-                            (
-                                im_col32(0, 0, 0, 255),
-                                im_col32(0, 0, 0, 255),
-                            )
-                        };
-                        igDrawRectFilled(inner_cell_border_min, inner_cell_border_max, border_color);
+                        let (inner_color, border_color) =
+                            if let shimlang::ShimValue::Integer(i) = val {
+                                let rgb = i32_to_rgb(i);
+                                (
+                                    im_col32(rgb[0].into(), rgb[1].into(), rgb[2].into(), 255),
+                                    im_col32(128, 128, 128, 255),
+                                )
+                            } else if let shimlang::ShimValue::Float(f) = val {
+                                let rgb = f32_to_rgb(f);
+                                (
+                                    im_col32(rgb[0].into(), rgb[1].into(), rgb[2].into(), 255),
+                                    im_col32(100, 200, 100, 255),
+                                )
+                            } else {
+                                (im_col32(0, 0, 0, 255), im_col32(0, 0, 0, 255))
+                            };
+                        igDrawRectFilled(
+                            inner_cell_border_min,
+                            inner_cell_border_max,
+                            border_color,
+                        );
                         igDrawRectFilled(inner_cell_min, inner_cell_max, inner_color);
                     }
                 } else if mem_end <= idx {
@@ -265,15 +302,10 @@ impl Navigation {
     }
 }
 
-
-
 fn draw_colored_grid(rows: i32, cols: i32, cell_size: f32) {
     unsafe {
-
         for y in 0..rows {
-            for x in 0..cols {
-            }
+            for x in 0..cols {}
         }
-
     }
 }

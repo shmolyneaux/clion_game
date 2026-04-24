@@ -1,15 +1,15 @@
-use std::collections::HashMap;
 use std::any::{Any, TypeId, type_name};
+use std::collections::HashMap;
 use std::mem::size_of;
 use std::sync::Arc;
 
-use shm_tracy::*;
 use shm_tracy::zone_scoped;
+use shm_tracy::*;
 
-use crate::parse::*;
-use crate::lex::{debug_u8s, format_script_err};
 use crate::compile::*;
+use crate::lex::{debug_u8s, format_script_err};
 use crate::mem::*;
+use crate::parse::*;
 use crate::shimlibs::*;
 
 // Wrapper structure that chains scopes for the environment.
@@ -96,7 +96,13 @@ impl EnvScope {
 
     /// Write a ShimValue at the given byte offset within this scope's data block.
     /// Safety: `value_offset + 8` must be within capacity.
-    unsafe fn write_value_at(mem: &mut MMU, data: u24, capacity: u32, value_offset: usize, val: ShimValue) {
+    unsafe fn write_value_at(
+        mem: &mut MMU,
+        data: u24,
+        capacity: u32,
+        value_offset: usize,
+        val: ShimValue,
+    ) {
         unsafe {
             let buf = EnvScope::raw_bytes_mut_from(mem, data, capacity);
             let val_bytes: [u8; 8] = std::mem::transmute(val);
@@ -141,11 +147,19 @@ impl EnvScope {
 
             let val: ShimValue = unsafe {
                 let mut val_bytes = [0u8; 8];
-                std::ptr::copy_nonoverlapping(bytes[value_offset..].as_ptr(), val_bytes.as_mut_ptr(), 8);
+                std::ptr::copy_nonoverlapping(
+                    bytes[value_offset..].as_ptr(),
+                    val_bytes.as_mut_ptr(),
+                    8,
+                );
                 std::mem::transmute(val_bytes)
             };
 
-            out.push_str(&format!("{}: {}\n", debug_u8s(&bytes[entry_key_start..entry_key_end]), val.to_string_mem(mem)));
+            out.push_str(&format!(
+                "{}: {}\n",
+                debug_u8s(&bytes[entry_key_start..entry_key_end]),
+                val.to_string_mem(mem)
+            ));
 
             // Each entry is 1 + key_len + 8 bytes
             let entry_end = value_offset + 8;
@@ -216,7 +230,9 @@ impl Environment {
         ];
 
         for (name, func) in builtins {
-            let position = interpreter.mem.alloc_and_set(**func, &format!("builtin func {}", debug_u8s(name)));
+            let position = interpreter
+                .mem
+                .alloc_and_set(**func, &format!("builtin func {}", debug_u8s(name)));
             env.insert_new(interpreter, name.to_vec(), ShimValue::NativeFn(position));
         }
 
@@ -224,20 +240,28 @@ impl Environment {
     }
 
     pub fn insert_new(&mut self, interpreter: &mut Interpreter, key: Vec<u8>, val: ShimValue) {
-        assert!(key.len() <= u8::MAX as usize, "Key length {} exceeds maximum {}", key.len(), u8::MAX);
+        assert!(
+            key.len() <= u8::MAX as usize,
+            "Key length {} exceeds maximum {}",
+            key.len(),
+            u8::MAX
+        );
 
         // Check if key already exists in the current scope — update in place (upsert)
         let scope: &EnvScope = unsafe { interpreter.mem.get(u24::from(self.current_scope)) };
         if let Some(value_offset) = scope.scan_for_key(&interpreter.mem, &key) {
             let (data, capacity) = (scope.data, scope.capacity);
-            unsafe { EnvScope::write_value_at(&mut interpreter.mem, data, capacity, value_offset, val); }
+            unsafe {
+                EnvScope::write_value_at(&mut interpreter.mem, data, capacity, value_offset, val);
+            }
             return;
         }
 
         // Read current scope header via raw pointer to avoid borrow issues
         let (data, capacity, used) = unsafe {
-            let scope_ptr: *mut EnvScope =
-                interpreter.mem.mem[usize::from(u24::from(self.current_scope))..].as_mut_ptr() as *mut EnvScope;
+            let scope_ptr: *mut EnvScope = interpreter.mem.mem
+                [usize::from(u24::from(self.current_scope))..]
+                .as_mut_ptr() as *mut EnvScope;
             ((*scope_ptr).data, (*scope_ptr).capacity, (*scope_ptr).used)
         };
 
@@ -247,11 +271,16 @@ impl Environment {
 
         // Grow if needed (also handles initial allocation when capacity == 0)
         let (data, capacity) = if new_used > capacity as usize * 8 {
-            let mut new_capacity = if capacity == 0 { ENV_SCOPE_DEFAULT_CAPACITY } else { capacity * 2 };
+            let mut new_capacity = if capacity == 0 {
+                ENV_SCOPE_DEFAULT_CAPACITY
+            } else {
+                capacity * 2
+            };
             while new_used > new_capacity as usize * 8 {
                 new_capacity *= 2;
             }
-            let new_data = EnvScope::realloc(&mut interpreter.mem, data, capacity, used, new_capacity);
+            let new_data =
+                EnvScope::realloc(&mut interpreter.mem, data, capacity, used, new_capacity);
             (new_data, new_capacity)
         } else {
             (data, capacity)
@@ -259,8 +288,9 @@ impl Environment {
 
         // Update scope header (data/capacity may have changed)
         unsafe {
-            let scope_ptr: *mut EnvScope =
-                interpreter.mem.mem[usize::from(u24::from(self.current_scope))..].as_mut_ptr() as *mut EnvScope;
+            let scope_ptr: *mut EnvScope = interpreter.mem.mem
+                [usize::from(u24::from(self.current_scope))..]
+                .as_mut_ptr() as *mut EnvScope;
             (*scope_ptr).data = data;
             (*scope_ptr).capacity = capacity;
         }
@@ -272,17 +302,31 @@ impl Environment {
             buf[off] = key.len() as u8;
             buf[off + 1..off + 1 + key.len()].copy_from_slice(&key);
         }
-        unsafe { EnvScope::write_value_at(&mut interpreter.mem, data, capacity, used as usize + 1 + key.len(), val); }
+        unsafe {
+            EnvScope::write_value_at(
+                &mut interpreter.mem,
+                data,
+                capacity,
+                used as usize + 1 + key.len(),
+                val,
+            );
+        }
 
         // Update used in scope header
         unsafe {
-            let scope_ptr: *mut EnvScope =
-                interpreter.mem.mem[usize::from(u24::from(self.current_scope))..].as_mut_ptr() as *mut EnvScope;
+            let scope_ptr: *mut EnvScope = interpreter.mem.mem
+                [usize::from(u24::from(self.current_scope))..]
+                .as_mut_ptr() as *mut EnvScope;
             (*scope_ptr).used = new_used as u32;
         }
     }
 
-    fn update(&mut self, interpreter: &mut Interpreter, key: &[u8], val: ShimValue) -> Result<(), String> {
+    fn update(
+        &mut self,
+        interpreter: &mut Interpreter,
+        key: &[u8],
+        val: ShimValue,
+    ) -> Result<(), String> {
         // Walk the scope chain to find the key
         let mut current_scope_pos = self.current_scope;
 
@@ -293,11 +337,24 @@ impl Environment {
 
             let (parent, data, capacity, value_offset) = unsafe {
                 let scope: &EnvScope = interpreter.mem.get(u24::from(current_scope_pos));
-                (scope.parent, scope.data, scope.capacity, scope.scan_for_key(&interpreter.mem, key))
+                (
+                    scope.parent,
+                    scope.data,
+                    scope.capacity,
+                    scope.scan_for_key(&interpreter.mem, key),
+                )
             };
 
             if let Some(value_offset) = value_offset {
-                unsafe { EnvScope::write_value_at(&mut interpreter.mem, data, capacity, value_offset, val); }
+                unsafe {
+                    EnvScope::write_value_at(
+                        &mut interpreter.mem,
+                        data,
+                        capacity,
+                        value_offset,
+                        val,
+                    );
+                }
                 return Ok(());
             }
 
@@ -326,7 +383,11 @@ impl Environment {
                     let scope: &EnvScope = interpreter.mem.get(u24::from(current_scope_pos));
                     let bytes = scope.raw_bytes(&interpreter.mem);
                     let mut val_bytes = [0u8; 8];
-                    std::ptr::copy_nonoverlapping(bytes[value_offset..].as_ptr(), val_bytes.as_mut_ptr(), 8);
+                    std::ptr::copy_nonoverlapping(
+                        bytes[value_offset..].as_ptr(),
+                        val_bytes.as_mut_ptr(),
+                        8,
+                    );
                     std::mem::transmute(val_bytes)
                 };
                 return Some(val);
@@ -347,19 +408,17 @@ impl Environment {
         let current_depth = if self.current_scope == 0 {
             0
         } else {
-            let current: &EnvScope = unsafe {
-                mem.get(u24::from(self.current_scope))
-            };
+            let current: &EnvScope = unsafe { mem.get(u24::from(self.current_scope)) };
             current.depth
         };
-        
+
         // Allocate a new EnvScope with parent pointing to current scope
         // (data block allocated lazily on first insert)
         let scope_pos = mem.alloc_and_set(
             EnvScope::new_with_parent(self.current_scope.into(), current_depth, captures),
-            "EnvScope with parent"
+            "EnvScope with parent",
         );
-        
+
         // Update current scope to the new one
         self.current_scope = scope_pos.into();
     }
@@ -368,12 +427,10 @@ impl Environment {
         if self.current_scope == 0 {
             return Err(format!("Ran out of scopes to pop!"));
         }
-        
+
         // Get the current EnvScope
-        let scope: &EnvScope = unsafe {
-            mem.get(u24::from(self.current_scope))
-        };
-        
+        let scope: &EnvScope = unsafe { mem.get(u24::from(self.current_scope)) };
+
         // Move to parent scope
         let parent: u32 = scope.parent.into();
         if parent == 0 {
@@ -389,21 +446,19 @@ impl Environment {
             // Free the EnvScope struct
             mem.free_obj::<EnvScope>(u24::from(self.current_scope));
         }
-        
+
         self.current_scope = parent;
 
         Ok(())
     }
-    
+
     // Helper to get the depth of the current scope
     fn scope_depth(&self, mem: &MMU) -> usize {
         if self.current_scope == 0 {
             return 0;
         }
-        
-        let scope: &EnvScope = unsafe {
-            mem.get(u24::from(self.current_scope))
-        };
+
+        let scope: &EnvScope = unsafe { mem.get(u24::from(self.current_scope)) };
         scope.depth as usize
     }
 }
@@ -462,8 +517,13 @@ pub trait ShimNative: 'static {
         format!("{}", type_name::<Self>())
     }
 
-    fn get_attr(&self, _self_as_val: &ShimValue, _interpreter: &mut Interpreter, _ident: &[u8]) -> Result<ShimValue, String> {
-        Err(format!("Can't get_attr on {}", type_name::<Self>() ))
+    fn get_attr(
+        &self,
+        _self_as_val: &ShimValue,
+        _interpreter: &mut Interpreter,
+        _ident: &[u8],
+    ) -> Result<ShimValue, String> {
+        Err(format!("Can't get_attr on {}", type_name::<Self>()))
     }
 
     fn set_attr(
@@ -472,7 +532,7 @@ pub trait ShimNative: 'static {
         _ident: &[u8],
         _val: ShimValue,
     ) -> Result<(), String> {
-        Err(format!("Can't set_attr on {}", type_name::<Self>() ))
+        Err(format!("Can't set_attr on {}", type_name::<Self>()))
     }
 
     fn gc_vals(&self) -> Vec<ShimValue>;
@@ -525,7 +585,7 @@ impl StructDef {
     fn find(&self, ident: &[u8]) -> Option<StructAttribute> {
         for (attr, loc) in self.lookup.iter() {
             if ident == attr {
-                return Some(*loc)
+                return Some(*loc);
             }
         }
         None
@@ -538,11 +598,9 @@ impl StructDef {
     }
 
     pub(crate) fn method_fn_positions(&self) -> impl Iterator<Item = u24> + '_ {
-        self.lookup.iter().filter_map(|(_, attr)| {
-            match attr {
-                StructAttribute::MethodDef(pos) => Some(*pos),
-                _ => None,
-            }
+        self.lookup.iter().filter_map(|(_, attr)| match attr {
+            StructAttribute::MethodDef(pos) => Some(*pos),
+            _ => None,
         })
     }
 }
@@ -585,40 +643,62 @@ pub struct ArgUnpacker<'a> {
 
 impl<'a> ArgUnpacker<'a> {
     pub fn new(bundle: &'a ArgBundle) -> Self {
-        Self { bundle, pos: 0, kwargs_consumed: 0 }
+        Self {
+            bundle,
+            pos: 0,
+            kwargs_consumed: 0,
+        }
     }
 
     pub fn required(&mut self, name: &[u8]) -> Result<ShimValue, String> {
-        self.optional(name).ok_or_else(|| format!("Missing required argument: '{}'", debug_u8s(name)))
+        self.optional(name)
+            .ok_or_else(|| format!("Missing required argument: '{}'", debug_u8s(name)))
     }
 
     // 'static is a lie, but this is short-lived and should not be a problem
-    pub fn required_list(&mut self, interpreter: &mut Interpreter, name: &[u8]) -> Result<&'static mut ShimList, String> {
-        match self.optional(name).ok_or_else(|| format!("Missing required argument: '{}'", debug_u8s(name)))? {
-            ShimValue::List(position) => {
-                unsafe {
-                    Ok(std::mem::transmute(&mut interpreter.mem.mem[usize::from(position)]))
-                }
+    pub fn required_list(
+        &mut self,
+        interpreter: &mut Interpreter,
+        name: &[u8],
+    ) -> Result<&'static mut ShimList, String> {
+        match self
+            .optional(name)
+            .ok_or_else(|| format!("Missing required argument: '{}'", debug_u8s(name)))?
+        {
+            ShimValue::List(position) => unsafe {
+                Ok(std::mem::transmute(
+                    &mut interpreter.mem.mem[usize::from(position)],
+                ))
             },
-            _ => {
-                Err(format!("Argument {} is not a list", debug_u8s(name)))
-            }
+            _ => Err(format!("Argument {} is not a list", debug_u8s(name))),
         }
     }
 
     pub fn required_number(&mut self, name: &[u8]) -> Result<f32, String> {
-        match self.optional(name).ok_or_else(|| format!("Missing required argument: '{}'", debug_u8s(name)))? {
+        match self
+            .optional(name)
+            .ok_or_else(|| format!("Missing required argument: '{}'", debug_u8s(name)))?
+        {
             ShimValue::Float(f) => Ok(f),
             ShimValue::Integer(i) => Ok(i as f32),
-            _ => Err(format!("Required argument non-numeric: '{}'", debug_u8s(name))),
+            _ => Err(format!(
+                "Required argument non-numeric: '{}'",
+                debug_u8s(name)
+            )),
         }
     }
 
     pub fn required_int(&mut self, name: &[u8]) -> Result<i32, String> {
-        match self.optional(name).ok_or_else(|| format!("Missing required argument: '{}'", debug_u8s(name)))? {
+        match self
+            .optional(name)
+            .ok_or_else(|| format!("Missing required argument: '{}'", debug_u8s(name)))?
+        {
             ShimValue::Integer(i) => Ok(i),
             ShimValue::Float(f) => Ok(f as i32),
-            _ => Err(format!("Required argument non-integer: '{}'", debug_u8s(name))),
+            _ => Err(format!(
+                "Required argument non-integer: '{}'",
+                debug_u8s(name)
+            )),
         }
     }
 
@@ -634,7 +714,7 @@ impl<'a> ArgUnpacker<'a> {
             Some(val) => {
                 self.pos += 1;
                 Some(*val)
-            },
+            }
             None => None,
         }
     }
@@ -642,7 +722,11 @@ impl<'a> ArgUnpacker<'a> {
     pub fn end(&self) -> Result<(), String> {
         let consumed = self.pos + self.kwargs_consumed;
         if self.bundle.len() != consumed {
-            Err(format!("Got {} arguments, but only used {}", self.bundle.len(), consumed))
+            Err(format!(
+                "Got {} arguments, but only used {}",
+                self.bundle.len(),
+                consumed
+            ))
         } else {
             Ok(())
         }
@@ -704,7 +788,12 @@ enum ResolvedAttr {
 impl ShimValue {
     /// Try to call a named method on a struct as an operator override.
     /// Returns None if self is not a Struct or the method doesn't exist.
-    pub fn try_struct_override(&self, interpreter: &mut Interpreter, method: &[u8], other: &ShimValue) -> Option<Result<ShimValue, String>> {
+    pub fn try_struct_override(
+        &self,
+        interpreter: &mut Interpreter,
+        method: &[u8],
+        other: &ShimValue,
+    ) -> Option<Result<ShimValue, String>> {
         if let ShimValue::Struct(..) = self {
             match self.get_attr(interpreter, method) {
                 Ok(method_fn) => {
@@ -725,7 +814,7 @@ impl ShimValue {
                         }
                         Err(e) => Some(Err(e)),
                     }
-                },
+                }
                 Err(_) => None,
             }
         } else {
@@ -749,35 +838,49 @@ impl ShimValue {
         let hashcode: u64 = match self {
             ShimValue::Integer(i) => fnv1a_hash(&i.to_be_bytes()),
             ShimValue::Float(f) => fnv1a_hash(&f.to_be_bytes()),
-            ShimValue::String(..) => {
-                fnv1a_hash(&self.string(interpreter).unwrap().to_vec())
-            },
+            ShimValue::String(..) => fnv1a_hash(&self.string(interpreter).unwrap().to_vec()),
             // We might want to salt these to reduce collisions with other type,
             // but I expect there is a fairly trivial difference in performance
             // and would imply heterogenous dicts.
             ShimValue::None => fnv1a_hash(&[0x00]),
             ShimValue::Bool(false) => fnv1a_hash(&[0x00]),
             ShimValue::Bool(true) => fnv1a_hash(&[0x01]),
-            _ => return Err(format!("Can't hash {}", self.to_string_mem(&interpreter.mem)))
+            _ => {
+                return Err(format!(
+                    "Can't hash {}",
+                    self.to_string_mem(&interpreter.mem)
+                ));
+            }
         };
 
         Ok(hashcode as u32)
     }
 
-    pub fn as_native<T: ShimNative>(&self, interpreter: &mut Interpreter) -> Result<&mut T, String> {
+    pub fn as_native<T: ShimNative>(
+        &self,
+        interpreter: &mut Interpreter,
+    ) -> Result<&mut T, String> {
         match self {
             ShimValue::Native(type_idx, position) => {
                 let expected_type_id = TypeId::of::<T>();
-                let actual_type_id = interpreter.mem.native_type_registry[usize::from(*type_idx)].type_id;
+                let actual_type_id =
+                    interpreter.mem.native_type_registry[usize::from(*type_idx)].type_id;
                 if actual_type_id != expected_type_id {
-                    return Err(format!("Can't get native as {} (actual type does not match)", type_name::<T>()));
+                    return Err(format!(
+                        "Can't get native as {} (actual type does not match)",
+                        type_name::<T>()
+                    ));
                 }
                 Ok(unsafe {
-                    let ptr: *mut T = std::mem::transmute(&mut interpreter.mem.mem[usize::from(*position)]);
+                    let ptr: *mut T =
+                        std::mem::transmute(&mut interpreter.mem.mem[usize::from(*position)]);
                     &mut *ptr
                 })
-            },
-            _ => Err(format!("Can't try_into non-native {}", self.to_string_mem(&interpreter.mem)))
+            }
+            _ => Err(format!(
+                "Can't try_into non-native {}",
+                self.to_string_mem(&interpreter.mem)
+            )),
         }
     }
 
@@ -795,7 +898,7 @@ impl ShimValue {
             ShimValue::BoundMethod(pos) => {
                 let pos: usize = (*pos).into();
                 let obj = unsafe { ShimValue::from_u64(interpreter.mem.mem[pos]) };
-                let fn_pos_u64: u64 = interpreter.mem.mem[pos+1];
+                let fn_pos_u64: u64 = interpreter.mem.mem[pos + 1];
                 let fn_pos: u24 = u24::from(fn_pos_u64);
                 // push struct pos to start of arg list then return the pc of the method
                 args.args.insert(0, obj);
@@ -811,7 +914,7 @@ impl ShimValue {
             }
             ShimValue::StructDef(struct_def_pos) => {
                 let struct_def: &StructDef = unsafe { interpreter.mem.get(*struct_def_pos) };
-                if struct_def.member_count as usize != args.len() || !args.kwargs.is_empty()  {
+                if struct_def.member_count as usize != args.len() || !args.kwargs.is_empty() {
                     // Call the internal __init__ to handle default/kw arguments
                     // If we're not using defaults we could handle kw arguments here,
                     // but for now it simplifies things to push all the special cases to __init__
@@ -825,18 +928,17 @@ impl ShimValue {
 
                 // Allocate space for each member
                 let word_count: u24 = (struct_def.member_count as u32).into();
-                let new_pos = alloc!(
-                    interpreter.mem,
-                    word_count,
-                    "Struct instantiation"
-                );
+                let new_pos = alloc!(interpreter.mem, word_count, "Struct instantiation");
 
                 // The remaining words get copies of the arguments to the initializer
                 for (idx, arg) in args.args.iter().enumerate() {
                     interpreter.mem.mem[usize::from(new_pos) + idx] = arg.to_u64();
                 }
 
-                Ok(CallResult::ReturnValue(ShimValue::Struct(*struct_def_pos, new_pos)))
+                Ok(CallResult::ReturnValue(ShimValue::Struct(
+                    *struct_def_pos,
+                    new_pos,
+                )))
             }
             ShimValue::NativeFn(pos) => {
                 let native_fn: &NativeFn = unsafe { interpreter.mem.get(*pos) };
@@ -851,7 +953,11 @@ impl ShimValue {
 
     /// Resolves an attribute name to a `ResolvedAttr`, sharing lookup logic between
     /// `get_attr` (which allocates a bound value) and `attr_call` (which calls directly).
-    fn resolve_attr(&self, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ResolvedAttr, String> {
+    fn resolve_attr(
+        &self,
+        interpreter: &mut Interpreter,
+        ident: &[u8],
+    ) -> Result<ResolvedAttr, String> {
         match self {
             ShimValue::Struct(def_pos, pos) => {
                 unsafe {
@@ -860,7 +966,9 @@ impl ShimValue {
                         if ident == attr {
                             return match loc {
                                 StructAttribute::MemberInstanceOffset(offset) => {
-                                    Ok(ResolvedAttr::Value(*interpreter.mem.get(*pos + *offset as u32)))
+                                    Ok(ResolvedAttr::Value(
+                                        *interpreter.mem.get(*pos + *offset as u32),
+                                    ))
                                 }
                                 StructAttribute::MethodDef(fn_pos) => {
                                     Ok(ResolvedAttr::BoundMethod(*self, *fn_pos))
@@ -869,7 +977,11 @@ impl ShimValue {
                         }
                     }
                 }
-                Err(format!("Ident {:?} not found for {}", debug_u8s(ident), self.to_string_mem(&interpreter.mem)))
+                Err(format!(
+                    "Ident {:?} not found for {}",
+                    debug_u8s(ident),
+                    self.to_string_mem(&interpreter.mem)
+                ))
             }
             ShimValue::StructDef(def_pos) => {
                 unsafe {
@@ -879,16 +991,19 @@ impl ShimValue {
                             return match loc {
                                 StructAttribute::MemberInstanceOffset(_) => Err(format!(
                                     "Can't access member {:?} on StructDef {}",
-                                    ident, self.to_string_mem(&interpreter.mem)
+                                    ident,
+                                    self.to_string_mem(&interpreter.mem)
                                 )),
-                                StructAttribute::MethodDef(fn_pos) => {
-                                    Ok(ResolvedAttr::Fn(*fn_pos))
-                                }
+                                StructAttribute::MethodDef(fn_pos) => Ok(ResolvedAttr::Fn(*fn_pos)),
                             };
                         }
                     }
                 }
-                Err(format!("Ident {:?} not found for {}", debug_u8s(ident), self.to_string_mem(&interpreter.mem)))
+                Err(format!(
+                    "Ident {:?} not found for {}",
+                    debug_u8s(ident),
+                    self.to_string_mem(&interpreter.mem)
+                ))
             }
             ShimValue::String(..) => {
                 let func = match ident {
@@ -940,8 +1055,10 @@ impl ShimValue {
                 // pointer so the borrow checker does not extend the immutable borrow of
                 // `interpreter` across the mutable `&mut Interpreter` passed to get_attr.
                 let result = unsafe {
-                    let vtable = interpreter.mem.native_type_registry[usize::from(*type_idx)].vtable;
-                    let data_ptr = interpreter.mem.mem.as_ptr().add(usize::from(*position)) as *const ();
+                    let vtable =
+                        interpreter.mem.native_type_registry[usize::from(*type_idx)].vtable;
+                    let data_ptr =
+                        interpreter.mem.mem.as_ptr().add(usize::from(*position)) as *const ();
                     let fat_ptr: (*const (), *const ()) = (data_ptr, vtable);
                     let native_ptr: *const dyn ShimNative = std::mem::transmute(fat_ptr);
                     (*native_ptr).get_attr(self, interpreter, ident)?
@@ -979,7 +1096,13 @@ impl ShimValue {
                     b"log10" => shim_log10,
                     b"to_degrees" => shim_to_degrees,
                     b"to_radians" => shim_to_radians,
-                    _ => return Err(format!("Ident {:?} not available on {}", debug_u8s(ident), self.to_string_mem(&interpreter.mem))),
+                    _ => {
+                        return Err(format!(
+                            "Ident {:?} not available on {}",
+                            debug_u8s(ident),
+                            self.to_string_mem(&interpreter.mem)
+                        ));
+                    }
                 };
                 Ok(ResolvedAttr::NativeMethod(*self, func))
             }
@@ -1014,11 +1137,21 @@ impl ShimValue {
                     b"log10" => shim_log10,
                     b"to_degrees" => shim_to_degrees,
                     b"to_radians" => shim_to_radians,
-                    _ => return Err(format!("Ident {:?} not available on {}", debug_u8s(ident), self.to_string_mem(&interpreter.mem))),
+                    _ => {
+                        return Err(format!(
+                            "Ident {:?} not available on {}",
+                            debug_u8s(ident),
+                            self.to_string_mem(&interpreter.mem)
+                        ));
+                    }
                 };
                 Ok(ResolvedAttr::NativeMethod(*self, func))
             }
-            val => Err(format!("Ident {:?} not available on {}", debug_u8s(ident), val.to_string_mem(&interpreter.mem))),
+            val => Err(format!(
+                "Ident {:?} not available on {}",
+                debug_u8s(ident),
+                val.to_string_mem(&interpreter.mem)
+            )),
         }
     }
 
@@ -1060,50 +1193,39 @@ impl ShimValue {
                     std::mem::transmute(&mut interpreter.mem.mem[usize::from(*position)])
                 };
                 Ok(dict)
-            },
-            _ => {
-                Err(format!("Not a dict"))
             }
+            _ => Err(format!("Not a dict")),
         }
     }
 
     pub(crate) fn dict(&self, interpreter: &Interpreter) -> Result<&ShimDict, String> {
         match self {
             ShimValue::Dict(position) => {
-                let dict: &ShimDict = unsafe {
-                    std::mem::transmute(&interpreter.mem.mem[usize::from(*position)])
-                };
+                let dict: &ShimDict =
+                    unsafe { std::mem::transmute(&interpreter.mem.mem[usize::from(*position)]) };
                 Ok(dict)
-            },
-            _ => {
-                Err(format!("Not a dict"))
             }
+            _ => Err(format!("Not a dict")),
         }
     }
 
     pub(crate) fn list_mut(&self, interpreter: &mut Interpreter) -> Result<&mut ShimList, String> {
         match self {
-            ShimValue::List(position) => {
-                unsafe {
-                    Ok(std::mem::transmute(&mut interpreter.mem.mem[usize::from(*position)]))
-                }
+            ShimValue::List(position) => unsafe {
+                Ok(std::mem::transmute(
+                    &mut interpreter.mem.mem[usize::from(*position)],
+                ))
             },
-            _ => {
-                Err(format!("Not a list"))
-            }
+            _ => Err(format!("Not a list")),
         }
     }
 
     pub(crate) fn list_from_mem(&self, mem: &MMU) -> Result<&ShimList, String> {
         match self {
-            ShimValue::List(position) => {
-                unsafe {
-                    Ok(std::mem::transmute(&mem.mem[usize::from(*position)]))
-                }
+            ShimValue::List(position) => unsafe {
+                Ok(std::mem::transmute(&mem.mem[usize::from(*position)]))
             },
-            _ => {
-                Err(format!("Not a list"))
-            }
+            _ => Err(format!("Not a list")),
         }
     }
 
@@ -1122,10 +1244,8 @@ impl ShimValue {
                     let fat_ptr: (*const (), *const ()) = (data_ptr, vtable);
                     Ok(std::mem::transmute::<(*const (), *const ()), &dyn ShimNative>(fat_ptr))
                 }
-            },
-            _ => {
-                Err(format!("Not a native"))
             }
+            _ => Err(format!("Not a native")),
         }
     }
 
@@ -1142,16 +1262,20 @@ impl ShimValue {
                 unsafe {
                     let data_ptr = &mut mem.mem[position] as *mut u64 as *mut ();
                     let fat_ptr: (*mut (), *const ()) = (data_ptr, vtable);
-                    Ok(std::mem::transmute::<(*mut (), *const ()), &mut dyn ShimNative>(fat_ptr))
+                    Ok(std::mem::transmute::<
+                        (*mut (), *const ()),
+                        &mut dyn ShimNative,
+                    >(fat_ptr))
                 }
-            },
-            _ => {
-                Err(format!("Not a native"))
             }
+            _ => Err(format!("Not a native")),
         }
     }
 
-    fn native_mut<'a>(&self, interpreter: &'a mut Interpreter) -> Result<&'a mut dyn ShimNative, String> {
+    fn native_mut<'a>(
+        &self,
+        interpreter: &'a mut Interpreter,
+    ) -> Result<&'a mut dyn ShimNative, String> {
         self.native_mut_from_mem(&mut interpreter.mem)
     }
 
@@ -1168,20 +1292,12 @@ impl ShimValue {
                 let total_len: usize = (offset + len).div_ceil(8);
 
                 let bytes: &[u8] = unsafe {
-                    let u64_slice = &mem.mem[
-                        position_usize..
-                        (position_usize+total_len)
-                    ];
-                    std::slice::from_raw_parts(
-                        (u64_slice.as_ptr() as *const u8).add(offset),
-                        len,
-                    )
+                    let u64_slice = &mem.mem[position_usize..(position_usize + total_len)];
+                    std::slice::from_raw_parts((u64_slice.as_ptr() as *const u8).add(offset), len)
                 };
                 Ok(bytes)
-            },
-            _ => {
-                Err(format!("Not a string"))
             }
+            _ => Err(format!("Not a string")),
         }
     }
 
@@ -1215,20 +1331,22 @@ impl ShimValue {
                 let b: u8 = val[index as usize];
 
                 Ok(interpreter.mem.alloc_str(&[b]))
-            },
-            (ShimValue::List(position), ShimValue::Integer(idx)) => {
-                unsafe {
-                    let lst: &ShimList =
-                        std::mem::transmute(&interpreter.mem.mem[usize::from(*position)]);
-                    lst.get(&interpreter.mem, *idx as isize)
-                }
+            }
+            (ShimValue::List(position), ShimValue::Integer(idx)) => unsafe {
+                let lst: &ShimList =
+                    std::mem::transmute(&interpreter.mem.mem[usize::from(*position)]);
+                lst.get(&interpreter.mem, *idx as isize)
             },
             (ShimValue::Dict(_), some_key) => {
                 let dict = self.dict_mut(interpreter)?;
 
                 dict.get(interpreter, *some_key)
             }
-            (a, b) => Err(format!("Can't index {} with {}", a.to_string_mem(&interpreter.mem), b.to_string_mem(&interpreter.mem))),
+            (a, b) => Err(format!(
+                "Can't index {} with {}",
+                a.to_string_mem(&interpreter.mem),
+                b.to_string_mem(&interpreter.mem)
+            )),
         }
     }
 
@@ -1254,7 +1372,11 @@ impl ShimValue {
 
                 dict.set(interpreter, *index, *value)
             }
-            (a, b) => Err(format!("Can't set index {} with {}", a.to_string_mem(&interpreter.mem), b.to_string_mem(&interpreter.mem))),
+            (a, b) => Err(format!(
+                "Can't set index {} with {}",
+                a.to_string_mem(&interpreter.mem),
+                b.to_string_mem(&interpreter.mem)
+            )),
         }
     }
 
@@ -1271,9 +1393,8 @@ impl ShimValue {
             ShimValue::Float(f) => format_float(*f),
             ShimValue::Bool(false) => "false".to_string(),
             ShimValue::Bool(true) => "true".to_string(),
-            ShimValue::String(..) => {
-                String::from_utf8(self.string_from_mem(mem).unwrap().to_vec()).expect("valid utf-8 string stored")
-            },
+            ShimValue::String(..) => String::from_utf8(self.string_from_mem(mem).unwrap().to_vec())
+                .expect("valid utf-8 string stored"),
             ShimValue::List(_) => {
                 let lst = self.list_from_mem(mem).unwrap();
 
@@ -1289,10 +1410,8 @@ impl ShimValue {
                 out.push_str("]");
 
                 out
-            },
-            ShimValue::Native(_, _) => {
-                self.native_from_mem(mem).unwrap().to_string_mem(mem)
             }
+            ShimValue::Native(_, _) => self.native_from_mem(mem).unwrap().to_string_mem(mem),
             ShimValue::Struct(def_pos, pos) => {
                 unsafe {
                     let def: &StructDef = mem.get(*def_pos);
@@ -1343,31 +1462,42 @@ impl ShimValue {
             ShimValue::Float(f) => Ok(*f != 0.0),
             ShimValue::Bool(false) => Ok(false),
             ShimValue::Bool(true) => Ok(true),
-            ShimValue::String(..) => {
-                Ok(!self.expect_string(interpreter).is_empty())
-            },
-            ShimValue::List(_) => {
-                Ok(!self.list(interpreter)?.is_empty())
-            },
+            ShimValue::String(..) => Ok(!self.expect_string(interpreter).is_empty()),
+            ShimValue::List(_) => Ok(!self.list(interpreter)?.is_empty()),
             _ => Ok(true),
         }
     }
 
-    pub(crate) fn add(&self, interpreter: &mut Interpreter, other: &Self, pending_args: &mut ArgBundle) -> Result<CallResult, String> {
+    pub(crate) fn add(
+        &self,
+        interpreter: &mut Interpreter,
+        other: &Self,
+        pending_args: &mut ArgBundle,
+    ) -> Result<CallResult, String> {
         match (self, other) {
-            (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(CallResult::ReturnValue(ShimValue::Integer(*a + *b))),
-            (ShimValue::Float(a), ShimValue::Float(b)) => Ok(CallResult::ReturnValue(ShimValue::Float(*a + *b))),
-            (ShimValue::Integer(a), ShimValue::Float(b)) => Ok(CallResult::ReturnValue(ShimValue::Float((*a as f32) + *b))),
-            (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(CallResult::ReturnValue(ShimValue::Float(*a + (*b as f32)))),
+            (ShimValue::Integer(a), ShimValue::Integer(b)) => {
+                Ok(CallResult::ReturnValue(ShimValue::Integer(*a + *b)))
+            }
+            (ShimValue::Float(a), ShimValue::Float(b)) => {
+                Ok(CallResult::ReturnValue(ShimValue::Float(*a + *b)))
+            }
+            (ShimValue::Integer(a), ShimValue::Float(b)) => {
+                Ok(CallResult::ReturnValue(ShimValue::Float((*a as f32) + *b)))
+            }
+            (ShimValue::Float(a), ShimValue::Integer(b)) => {
+                Ok(CallResult::ReturnValue(ShimValue::Float(*a + (*b as f32))))
+            }
             (a @ ShimValue::String(..), b @ ShimValue::String(..)) => {
                 let a = a.string(interpreter)?;
                 let b = b.string(interpreter)?;
 
                 let c = interpreter.mem.alloc_str(
-                    &format!("{}{}",
+                    &format!(
+                        "{}{}",
                         unsafe { std::str::from_utf8_unchecked(a) },
                         unsafe { std::str::from_utf8_unchecked(b) },
-                    ).into_bytes()
+                    )
+                    .into_bytes(),
                 );
 
                 Ok(CallResult::ReturnValue(c))
@@ -1377,11 +1507,13 @@ impl ShimValue {
                 // construct a new ArgBundle?
                 pending_args.args.clear();
                 pending_args.args.push(*b);
-                self.get_attr(interpreter, b"add")?.call(interpreter, pending_args)
-            },
+                self.get_attr(interpreter, b"add")?
+                    .call(interpreter, pending_args)
+            }
             (a, b) => Err(format!(
                 "Operation '+' not supported between {} and {}",
-                a.to_string_mem(&interpreter.mem), b.to_string_mem(&interpreter.mem)
+                a.to_string_mem(&interpreter.mem),
+                b.to_string_mem(&interpreter.mem)
             )),
         }
     }
@@ -1390,7 +1522,11 @@ impl ShimValue {
         numeric_op!(self - other, interpreter, b"sub")
     }
 
-    pub(crate) fn equal_inner(&self, interpreter: &mut Interpreter, other: &Self) -> Result<bool, String> {
+    pub(crate) fn equal_inner(
+        &self,
+        interpreter: &mut Interpreter,
+        other: &Self,
+    ) -> Result<bool, String> {
         match (self, other) {
             (ShimValue::Bool(a), ShimValue::Bool(b)) => Ok(a == b),
             (ShimValue::Float(a), ShimValue::Float(b)) => Ok(a == b),
@@ -1407,7 +1543,7 @@ impl ShimValue {
                 let a = a.list(interpreter)?;
                 let b = b.list(interpreter)?;
                 if a.len() != b.len() {
-                    return Ok(false)
+                    return Ok(false);
                 }
                 for idx in 0..a.len() {
                     let item_a = a.get(&interpreter.mem, idx as isize)?;
@@ -1417,7 +1553,7 @@ impl ShimValue {
                     }
                 }
                 Ok(true)
-            },
+            }
             (ShimValue::Struct(..), ShimValue::Struct(..)) => {
                 match self.get_attr(interpreter, b"eq") {
                     Ok(eq_fn) => {
@@ -1435,21 +1571,19 @@ impl ShimValue {
                                 Ok(val.is_truthy(interpreter)?)
                             }
                         }
-                    },
+                    }
                     Err(_) => Ok(false),
                 }
-            },
-            (ShimValue::Fn(pos_a), ShimValue::Fn(pos_b)) => {
-                Ok(pos_a == pos_b)
-            },
+            }
+            (ShimValue::Fn(pos_a), ShimValue::Fn(pos_b)) => Ok(pos_a == pos_b),
             (ShimValue::BoundMethod(_pos_a), ShimValue::BoundMethod(_pos_b)) => {
                 // The pos's might not match up but still have an equivalent obj/func
                 Err("Can't yet check equality between bound methods".to_string())
-            },
+            }
             (ShimValue::BoundNativeMethod(_pos_a), ShimValue::BoundNativeMethod(_pos_b)) => {
                 // The pos's might not match up but still have an equivalent obj/func
                 Err("Can't yet check equality between bound native methods".to_string())
-            },
+            }
             _ => Ok(false),
         }
     }
@@ -1474,7 +1608,11 @@ impl ShimValue {
         numeric_op!(self % other, interpreter, b"modulus")
     }
 
-    pub(crate) fn gt(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
+    pub(crate) fn gt(
+        &self,
+        interpreter: &mut Interpreter,
+        other: &Self,
+    ) -> Result<ShimValue, String> {
         match compare_values(interpreter, self, other) {
             Ok(std::cmp::Ordering::Greater) => Ok(ShimValue::Bool(true)),
             Ok(_) => Ok(ShimValue::Bool(false)),
@@ -1484,13 +1622,19 @@ impl ShimValue {
 
     fn gte(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
         match compare_values(interpreter, self, other) {
-            Ok(std::cmp::Ordering::Greater) | Ok(std::cmp::Ordering::Equal) => Ok(ShimValue::Bool(true)),
+            Ok(std::cmp::Ordering::Greater) | Ok(std::cmp::Ordering::Equal) => {
+                Ok(ShimValue::Bool(true))
+            }
             Ok(std::cmp::Ordering::Less) => Ok(ShimValue::Bool(false)),
             Err(e) => Err(e),
         }
     }
 
-    pub(crate) fn lt(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
+    pub(crate) fn lt(
+        &self,
+        interpreter: &mut Interpreter,
+        other: &Self,
+    ) -> Result<ShimValue, String> {
         match compare_values(interpreter, self, other) {
             Ok(std::cmp::Ordering::Less) => Ok(ShimValue::Bool(true)),
             Ok(_) => Ok(ShimValue::Bool(false)),
@@ -1500,7 +1644,9 @@ impl ShimValue {
 
     fn lte(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
         match compare_values(interpreter, self, other) {
-            Ok(std::cmp::Ordering::Less) | Ok(std::cmp::Ordering::Equal) => Ok(ShimValue::Bool(true)),
+            Ok(std::cmp::Ordering::Less) | Ok(std::cmp::Ordering::Equal) => {
+                Ok(ShimValue::Bool(true))
+            }
             Ok(std::cmp::Ordering::Greater) => Ok(ShimValue::Bool(false)),
             Err(e) => Err(e),
         }
@@ -1546,9 +1692,17 @@ impl ShimValue {
                 if let Some(result) = self.try_struct_override(interpreter, b"contains", some_key) {
                     return result;
                 }
-                Err(format!("Can't `in` {} and {}", self.to_string_mem(&interpreter.mem), some_key.to_string_mem(&interpreter.mem)))
+                Err(format!(
+                    "Can't `in` {} and {}",
+                    self.to_string_mem(&interpreter.mem),
+                    some_key.to_string_mem(&interpreter.mem)
+                ))
             }
-            _ => Err(format!("Can't `in` {} and {}", self.to_string_mem(&interpreter.mem), some_key.to_string_mem(&interpreter.mem))),
+            _ => Err(format!(
+                "Can't `in` {} and {}",
+                self.to_string_mem(&interpreter.mem),
+                some_key.to_string_mem(&interpreter.mem)
+            )),
         }
     }
 
@@ -1567,11 +1721,18 @@ impl ShimValue {
         match self {
             ShimValue::Float(a) => Ok(ShimValue::Float(-a)),
             ShimValue::Integer(a) => Ok(ShimValue::Integer(-a)),
-            _ => Err(format!("Can't Negate {}", self.to_string_mem(&interpreter.mem))),
+            _ => Err(format!(
+                "Can't Negate {}",
+                self.to_string_mem(&interpreter.mem)
+            )),
         }
     }
 
-    pub(crate) fn get_attr(&self, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
+    pub(crate) fn get_attr(
+        &self,
+        interpreter: &mut Interpreter,
+        ident: &[u8],
+    ) -> Result<ShimValue, String> {
         if let ShimValue::Struct(def_pos, _) = self {
             if ident == b"__type__" {
                 return Ok(ShimValue::StructDef(*def_pos));
@@ -1619,25 +1780,36 @@ impl ShimValue {
                                 }
                                 StructAttribute::MethodDef(_) => Err(format!(
                                     "Can't assign to struct method {:?} for {}",
-                                    ident, self.to_string_mem(&interpreter.mem)
+                                    ident,
+                                    self.to_string_mem(&interpreter.mem)
                                 )),
                             };
                         }
                     }
                 }
-                Err(format!("Ident {:?} not found for {}", debug_u8s(ident), self.to_string_mem(&interpreter.mem)))
+                Err(format!(
+                    "Ident {:?} not found for {}",
+                    debug_u8s(ident),
+                    self.to_string_mem(&interpreter.mem)
+                ))
             }
             ShimValue::Native(type_idx, position) => {
                 // SAFETY: Same reasoning as in get_attr - stable memory location during call.
                 unsafe {
-                    let vtable = interpreter.mem.native_type_registry[usize::from(*type_idx)].vtable;
-                    let data_ptr = interpreter.mem.mem.as_ptr().add(usize::from(*position)) as *const ();
+                    let vtable =
+                        interpreter.mem.native_type_registry[usize::from(*type_idx)].vtable;
+                    let data_ptr =
+                        interpreter.mem.mem.as_ptr().add(usize::from(*position)) as *const ();
                     let fat_ptr: (*const (), *const ()) = (data_ptr, vtable);
                     let native_ptr: *const dyn ShimNative = std::mem::transmute(fat_ptr);
                     (*native_ptr).set_attr(interpreter, ident, val)
                 }
             }
-            val => Err(format!("Ident {:?} not available on {}", debug_u8s(ident), val.to_string_mem(&interpreter.mem))),
+            val => Err(format!(
+                "Ident {:?} not available on {}",
+                debug_u8s(ident),
+                val.to_string_mem(&interpreter.mem)
+            )),
         }
     }
 
@@ -1705,19 +1877,17 @@ impl Interpreter {
         let _zone = zone_scoped!("print_env");
         let mut current_scope_pos = env.current_scope;
         let mut idx = 0;
-        
+
         loop {
             if current_scope_pos == 0 {
                 break;
             }
-            
+
             println!("Scope {idx}");
-            
+
             // Get the EnvScope
-            let scope: &EnvScope = unsafe {
-                self.mem.get(u24::from(current_scope_pos))
-            };
-            
+            let scope: &EnvScope = unsafe { self.mem.get(u24::from(current_scope_pos)) };
+
             // Walk the contiguous data block and print entries
             let bytes = unsafe { scope.raw_bytes(&self.mem) };
             let mut off = 0usize;
@@ -1727,45 +1897,45 @@ impl Interpreter {
                 let value_offset = off + 1 + key_len;
                 let val: ShimValue = unsafe {
                     let mut val_bytes = [0u8; 8];
-                    std::ptr::copy_nonoverlapping(bytes[value_offset..].as_ptr(), val_bytes.as_mut_ptr(), 8);
+                    std::ptr::copy_nonoverlapping(
+                        bytes[value_offset..].as_ptr(),
+                        val_bytes.as_mut_ptr(),
+                        8,
+                    );
                     std::mem::transmute(val_bytes)
                 };
                 println!("{:>12}: {:?}", debug_u8s(key_bytes), val);
                 match val {
-                    ShimValue::Struct(def_pos, pos) => {
-                        unsafe {
-                            let def: &StructDef = self.mem.get(def_pos);
-                            for (attr, loc) in def.lookup.iter() {
-                                match loc {
-                                    StructAttribute::MemberInstanceOffset(offset) => {
-                                        let val: ShimValue = *self.mem.get(pos + *offset as u32 + 1);
-                                        println!("                - {} = {:?}", debug_u8s(&attr), val);
-                                    },
-                                    StructAttribute::MethodDef(_) => (),
-                                };
-                            }
+                    ShimValue::Struct(def_pos, pos) => unsafe {
+                        let def: &StructDef = self.mem.get(def_pos);
+                        for (attr, loc) in def.lookup.iter() {
+                            match loc {
+                                StructAttribute::MemberInstanceOffset(offset) => {
+                                    let val: ShimValue = *self.mem.get(pos + *offset as u32 + 1);
+                                    println!("                - {} = {:?}", debug_u8s(&attr), val);
+                                }
+                                StructAttribute::MethodDef(_) => (),
+                            };
                         }
                     },
-                    ShimValue::StructDef(pos) => {
-                        unsafe {
-                            let def: &StructDef = self.mem.get(pos);
-                            for (attr, loc) in def.lookup.iter() {
-                                match loc {
-                                    StructAttribute::MemberInstanceOffset(_) => {
-                                        println!("                - {}", debug_u8s(&attr));
-                                    },
-                                    StructAttribute::MethodDef(_) => {
-                                        println!("                - {}()", debug_u8s(&attr));
-                                    }
-                                };
-                            }
+                    ShimValue::StructDef(pos) => unsafe {
+                        let def: &StructDef = self.mem.get(pos);
+                        for (attr, loc) in def.lookup.iter() {
+                            match loc {
+                                StructAttribute::MemberInstanceOffset(_) => {
+                                    println!("                - {}", debug_u8s(&attr));
+                                }
+                                StructAttribute::MethodDef(_) => {
+                                    println!("                - {}()", debug_u8s(&attr));
+                                }
+                            };
                         }
                     },
                     _ => (),
                 }
                 off = value_offset + 8;
             }
-            
+
             // Move to parent scope
             let parent: u32 = scope.parent.into();
             current_scope_pos = parent;
@@ -1777,14 +1947,14 @@ impl Interpreter {
         let _zone = zone_scoped!("GC");
         //self.print_mem();
         //self.print_env(env);
-        
+
         unsafe {
             let _scope: &EnvScope = self.mem.get(u24::from(env.current_scope));
         }
 
         let mut roots: Vec<ShimValue> = Vec::new();
         roots.push(ShimValue::Environment(u24::from(env.current_scope)));
-        
+
         // Now create GC and process roots
         let mut gc = {
             let _zone = zone_scoped!("Init GC");
@@ -1815,14 +1985,21 @@ impl Interpreter {
 
     pub fn append_program(&mut self, program: Program) -> Result<(), String> {
         let span_offset = self.program.script.len() as u32;
-        Arc::<Program>::get_mut(&mut self.program).unwrap().bytecode.extend(program.bytecode);
-        Arc::<Program>::get_mut(&mut self.program).unwrap().spans.extend(
-            program.spans.into_iter().map(|span| Span {
+        Arc::<Program>::get_mut(&mut self.program)
+            .unwrap()
+            .bytecode
+            .extend(program.bytecode);
+        Arc::<Program>::get_mut(&mut self.program)
+            .unwrap()
+            .spans
+            .extend(program.spans.into_iter().map(|span| Span {
                 start: span.start + span_offset,
                 end: span.end + span_offset,
-            })
-        );
-        Arc::<Program>::get_mut(&mut self.program).unwrap().script.extend(program.script);
+            }));
+        Arc::<Program>::get_mut(&mut self.program)
+            .unwrap()
+            .script
+            .extend(program.script);
 
         Ok(())
     }
@@ -1839,7 +2016,6 @@ impl Interpreter {
         // These are values that are operated on. Expressions push and pop to
         // this stack, return values go on this stack etc.
         let mut stack: Vec<ShimValue> = Vec::new();
-
 
         // This is the (PC, loop_info, scope_count, caller_scope, fn_optional_param_names,
         // fn_optional_param_name_idx, stack_depth) call stack
@@ -1974,7 +2150,7 @@ impl Interpreter {
                 val if val == ByteCode::Range as u8 => {
                     let end = stack.pop().expect("Operand for ByteCode::Range");
                     let start = stack.pop().expect("Operand for ByteCode::Range");
-                    
+
                     let range = RangeNative {
                         start: start,
                         end: end,
@@ -2078,9 +2254,14 @@ impl Interpreter {
                                 // enough and we need to exit
                                 if param_idx < required_arg_count {
                                     return Err(format_script_err(
-                                        self.program.spans[stack_frame[stack_frame.len() - 1].0 - 3],
+                                        self.program.spans
+                                            [stack_frame[stack_frame.len() - 1].0 - 3],
                                         &self.program.script,
-                                        &format!("Not enough positional args, arg_count: {}, kwarg_count: {}", pending_args.args.len(), pending_args.kwargs.len()),
+                                        &format!(
+                                            "Not enough positional args, arg_count: {}, kwarg_count: {}",
+                                            pending_args.args.len(),
+                                            pending_args.kwargs.len()
+                                        ),
                                     ));
                                 }
 
@@ -2206,13 +2387,14 @@ impl Interpreter {
 
                     let res = match obj.get_attr(self, ident) {
                         Ok(val) => val,
-                        Err(msg) => return Err(format_script_err(
-                            self.program.spans[pc],
-                            &self.program.script,
-                            &msg,
-                        )),
+                        Err(msg) => {
+                            return Err(format_script_err(
+                                self.program.spans[pc],
+                                &self.program.script,
+                                &msg,
+                            ));
+                        }
                     };
-
 
                     stack.push(res);
 
@@ -2258,9 +2440,7 @@ impl Interpreter {
                     for _ in 0..kwarg_count {
                         let val = stack.pop().unwrap();
                         let ident = match stack.pop().unwrap() {
-                            val @ ShimValue::String(..) => {
-                                val.string(self)?.to_vec()
-                            },
+                            val @ ShimValue::String(..) => val.string(self)?.to_vec(),
                             other => return Err(format!("Invalid kwarg ident {:?}", other)),
                         };
                         pending_args.kwargs.push((ident, val));
@@ -2308,9 +2488,7 @@ impl Interpreter {
                     for _ in 0..kwarg_count {
                         let val = stack.pop().unwrap();
                         let ident = match stack.pop().unwrap() {
-                            val @ ShimValue::String(..) => {
-                                val.string(self)?.to_vec()
-                            },
+                            val @ ShimValue::String(..) => val.string(self)?.to_vec(),
                             other => return Err(format!("Invalid kwarg ident {:?}", other)),
                         };
                         pending_args.kwargs.push((ident, val));
@@ -2324,9 +2502,15 @@ impl Interpreter {
 
                     let obj = stack.pop().expect("obj not on stack");
 
-                    match obj.attr_call(ident, self, &mut pending_args).map_err(|err_str| {
-                        format_script_err(self.program.spans[pc], &self.program.script, &err_str)
-                    })? {
+                    match obj
+                        .attr_call(ident, self, &mut pending_args)
+                        .map_err(|err_str| {
+                            format_script_err(
+                                self.program.spans[pc],
+                                &self.program.script,
+                                &err_str,
+                            )
+                        })? {
                         CallResult::ReturnValue(res) => stack.push(res),
                         CallResult::PC(new_pc, captured_scope) => {
                             stack_frame.push((
@@ -2468,7 +2652,7 @@ impl Interpreter {
                     let method_count = bytes[pc + 4];
 
                     let mut idx = pc + 5;
-                    
+
                     // Read struct name
                     let name_len = bytes[idx];
                     let name = bytes[idx + 1..idx + 1 + name_len as usize].to_vec();
@@ -2493,19 +2677,18 @@ impl Interpreter {
 
                         let ident_len = bytes[idx];
                         let ident = &bytes[idx + 1..idx + 1 + ident_len as usize];
-                        
+
                         // Allocate a function object for this method
                         // Methods capture the environment where the struct is defined
-                        let fn_val = self.mem.alloc_fn(method_pc as u32, ident, env.current_scope);
+                        let fn_val = self
+                            .mem
+                            .alloc_fn(method_pc as u32, ident, env.current_scope);
                         let fn_pos = match fn_val {
                             ShimValue::Fn(pos) => pos,
                             _ => panic!("alloc_fn should return Fn"),
                         };
-                        
-                        struct_table.push((
-                            ident.to_vec(),
-                            StructAttribute::MethodDef(fn_pos),
-                        ));
+
+                        struct_table.push((ident.to_vec(), StructAttribute::MethodDef(fn_pos)));
                         idx = idx + 1 + ident_len as usize;
                     }
                     let struct_def_words: u32 = std::mem::size_of::<StructDef>().div_ceil(8) as u32;
@@ -2550,18 +2733,22 @@ impl Interpreter {
     pub fn describe_memory(&self, env: &Environment) -> HashMap<usize, MemDescriptor> {
         let mut roots: Vec<ShimValue> = Vec::new();
         roots.push(ShimValue::Environment(u24::from(env.current_scope)));
-        
+
         // Now create GC and process roots
         let mut gc = {
             let _zone = zone_scoped!("Init GC");
             GC::new(&self.mem)
         };
         gc.mark(roots);
-        
+
         #[cfg(feature = "gc_debug")]
-        { gc.mask.description }
+        {
+            gc.mask.description
+        }
         #[cfg(not(feature = "gc_debug"))]
-        { HashMap::new() }
+        {
+            HashMap::new()
+        }
     }
 }
 
@@ -2631,7 +2818,7 @@ mod tests {
         let val = env.get(&mut interpreter, b"x");
         assert!(val.is_some());
         match val.unwrap() {
-            ShimValue::Integer(42) => {},
+            ShimValue::Integer(42) => {}
             other => panic!("Expected Integer(42), got {:?}", other),
         }
     }
@@ -2642,9 +2829,10 @@ mod tests {
         let mut env = Environment::new(&mut interpreter.mem);
 
         env.insert_new(&mut interpreter, b"y".to_vec(), ShimValue::Integer(1));
-        env.update(&mut interpreter, b"y", ShimValue::Integer(99)).unwrap();
+        env.update(&mut interpreter, b"y", ShimValue::Integer(99))
+            .unwrap();
         match env.get(&mut interpreter, b"y").unwrap() {
-            ShimValue::Integer(99) => {},
+            ShimValue::Integer(99) => {}
             other => panic!("Expected Integer(99), got {:?}", other),
         }
     }
@@ -2654,18 +2842,26 @@ mod tests {
         let mut interpreter = test_interpreter();
         let mut env = Environment::new(&mut interpreter.mem);
 
-        env.insert_new(&mut interpreter, b"root_var".to_vec(), ShimValue::Integer(10));
+        env.insert_new(
+            &mut interpreter,
+            b"root_var".to_vec(),
+            ShimValue::Integer(10),
+        );
         env.push_scope(&mut interpreter.mem, false);
-        env.insert_new(&mut interpreter, b"child_var".to_vec(), ShimValue::Integer(20));
+        env.insert_new(
+            &mut interpreter,
+            b"child_var".to_vec(),
+            ShimValue::Integer(20),
+        );
 
         // Can see child var
         match env.get(&mut interpreter, b"child_var").unwrap() {
-            ShimValue::Integer(20) => {},
+            ShimValue::Integer(20) => {}
             other => panic!("Expected Integer(20), got {:?}", other),
         }
         // Can see parent var through scope chain
         match env.get(&mut interpreter, b"root_var").unwrap() {
-            ShimValue::Integer(10) => {},
+            ShimValue::Integer(10) => {}
             other => panic!("Expected Integer(10), got {:?}", other),
         }
 
@@ -2673,7 +2869,7 @@ mod tests {
         env.pop_scope(&interpreter.mem).unwrap();
         assert!(env.get(&mut interpreter, b"child_var").is_none());
         match env.get(&mut interpreter, b"root_var").unwrap() {
-            ShimValue::Integer(10) => {},
+            ShimValue::Integer(10) => {}
             other => panic!("Expected Integer(10), got {:?}", other),
         }
     }
@@ -2686,13 +2882,17 @@ mod tests {
         // Insert enough variables to force at least one grow
         for i in 0..20u8 {
             let name = format!("var_{}", i);
-            env.insert_new(&mut interpreter, name.into_bytes(), ShimValue::Integer(i as i32));
+            env.insert_new(
+                &mut interpreter,
+                name.into_bytes(),
+                ShimValue::Integer(i as i32),
+            );
         }
         // Verify all are retrievable
         for i in 0..20u8 {
             let name = format!("var_{}", i);
             match env.get(&mut interpreter, name.as_bytes()).unwrap() {
-                ShimValue::Integer(v) if v == i as i32 => {},
+                ShimValue::Integer(v) if v == i as i32 => {}
                 other => panic!("Expected Integer({}), got {:?}", i, other),
             }
         }
@@ -2702,7 +2902,9 @@ mod tests {
         let mut interpreter = test_interpreter();
 
         #[derive(Default)]
-        struct Counter { val: u32 }
+        struct Counter {
+            val: u32,
+        }
 
         let c = interpreter.fetch_mut::<Counter>();
         assert_eq!(c.val, 0);
@@ -2769,4 +2971,3 @@ mod tests {
  *
  */
 const _TODO: u8 = 42;
-

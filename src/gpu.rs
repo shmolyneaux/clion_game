@@ -1,8 +1,8 @@
 #![allow(unused_variables, unused_mut, unused_imports)]
 
-use crate::*;
 use crate::log;
 use crate::mesh_gen::box_mesh;
+use crate::*;
 
 #[macro_export]
 macro_rules! log_opengl_errors {
@@ -56,14 +56,29 @@ pub fn texture_from_rgba(width: u32, height: u32, rgba_bytes: &[u8]) -> GLuint {
         gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32);
         gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32);
 
-        gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA as i32, width as i32, height as i32, 0, gl::RGBA, gl::UNSIGNED_BYTE, rgba_bytes.as_ptr().cast());
+        gl::TexImage2D(
+            gl::TEXTURE_2D,
+            0,
+            gl::RGBA as i32,
+            width as i32,
+            height as i32,
+            0,
+            gl::RGBA,
+            gl::UNSIGNED_BYTE,
+            rgba_bytes.as_ptr().cast(),
+        );
         gl::GenerateMipmap(gl::TEXTURE_2D);
     }
 
     texture
 }
 
-pub fn capture_frame_texture(resolution_x: i32, resolution_y: i32, fbo: GLuint, existing_texture: Option<GLuint>) -> u32 {
+pub fn capture_frame_texture(
+    resolution_x: i32,
+    resolution_y: i32,
+    fbo: GLuint,
+    existing_texture: Option<GLuint>,
+) -> u32 {
     let texture = match existing_texture {
         Some(t) => t,
         None => {
@@ -73,18 +88,45 @@ pub fn capture_frame_texture(resolution_x: i32, resolution_y: i32, fbo: GLuint, 
                 gl::BindTexture(gl::TEXTURE_2D, texture);
                 gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as i32);
                 gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as i32);
-                gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA as i32, 128, 128, 0, gl::RGBA, gl::UNSIGNED_BYTE, std::ptr::null_mut());
+                gl::TexImage2D(
+                    gl::TEXTURE_2D,
+                    0,
+                    gl::RGBA as i32,
+                    128,
+                    128,
+                    0,
+                    gl::RGBA,
+                    gl::UNSIGNED_BYTE,
+                    std::ptr::null_mut(),
+                );
             }
             texture
         }
     };
     unsafe {
         gl::BindFramebuffer(gl::FRAMEBUFFER, fbo);
-        gl::FramebufferTexture2D(gl::FRAMEBUFFER, gl::COLOR_ATTACHMENT0, gl::TEXTURE_2D, texture, 0);
+        gl::FramebufferTexture2D(
+            gl::FRAMEBUFFER,
+            gl::COLOR_ATTACHMENT0,
+            gl::TEXTURE_2D,
+            texture,
+            0,
+        );
 
         gl::BindFramebuffer(gl::READ_FRAMEBUFFER, 0);
         gl::BindFramebuffer(gl::DRAW_FRAMEBUFFER, fbo);
-        gl::BlitFramebuffer(0, 0, resolution_x, resolution_y, 0, 0, 128, 128, gl::COLOR_BUFFER_BIT, gl::NEAREST);
+        gl::BlitFramebuffer(
+            0,
+            0,
+            resolution_x,
+            resolution_y,
+            0,
+            0,
+            128,
+            128,
+            gl::COLOR_BUFFER_BIT,
+            gl::NEAREST,
+        );
 
         gl::BindFramebuffer(gl::DRAW_FRAMEBUFFER, 0);
     }
@@ -103,7 +145,7 @@ fn fbo_test_mesh(size: Vec3) -> MeshDataRaw {
                 uv.x = pos.x;
                 uv.y = pos.y;
             }
-        },
+        }
         _ => panic!("Why is aPos not a Vec3?"),
     }
     my_box.verts.insert("aUV".to_string(), VertVec::Vec2(uvs));
@@ -114,7 +156,9 @@ fn fbo_test_mesh(size: Vec3) -> MeshDataRaw {
         vert_color.y = idx as f32 / len as f32;
         vert_color.z = idx as f32 / len as f32;
     }
-    my_box.verts.insert("aColor".to_string(), VertVec::Vec3(color));
+    my_box
+        .verts
+        .insert("aColor".to_string(), VertVec::Vec3(color));
 
     my_box
 }
@@ -131,24 +175,27 @@ pub fn gen_fbo_texture(code: &str) -> u32 {
                         gl_Position = vec4(aPos, 1.0);
                         uv = aUV;
                     }
-                "#.to_string()
-            ).build_vertex_shader().unwrap(),
+                "#
+                .to_string(),
+            )
+            .build_vertex_shader()
+            .unwrap(),
         ShaderBuilder::new()
             .with_input(ShaderSymbol::new(ShaderDataType::Vec2, "uv"))
             .with_output(ShaderSymbol::new(ShaderDataType::Vec4, "FragColor"))
             .with_code(code.to_string())
-            .build_fragment_shader().unwrap()
-        ).expect("Could not build texture shader");
+            .build_fragment_shader()
+            .unwrap(),
+    )
+    .expect("Could not build texture shader");
     let texture_shader = Rc::new(texture_shader);
 
     println!("Creating test mesh");
     let mut test_mesh = StaticMesh::create(
         texture_shader.clone(),
-        Rc::new(
-            Mesh::create(
-                &fbo_test_mesh(Vec3::new(1.0, 1.0, 1.0))
-            ).unwrap()),
-    ).expect("Can't create the test mesh");
+        Rc::new(Mesh::create(&fbo_test_mesh(Vec3::new(1.0, 1.0, 1.0))).unwrap()),
+    )
+    .expect("Can't create the test mesh");
 
     let mut fbo: GLuint = 0;
     let mut texture: GLuint = 0;
@@ -159,12 +206,28 @@ pub fn gen_fbo_texture(code: &str) -> u32 {
 
         gl::GenTextures(1, &mut texture as *mut u32);
         gl::BindTexture(gl::TEXTURE_2D, texture);
-        gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGB as i32, 128, 128, 0, gl::RGB, gl::UNSIGNED_BYTE, std::ptr::null_mut());
+        gl::TexImage2D(
+            gl::TEXTURE_2D,
+            0,
+            gl::RGB as i32,
+            128,
+            128,
+            0,
+            gl::RGB,
+            gl::UNSIGNED_BYTE,
+            std::ptr::null_mut(),
+        );
 
         gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32);
         gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32);
 
-        gl::FramebufferTexture2D(gl::FRAMEBUFFER, gl::COLOR_ATTACHMENT0, gl::TEXTURE_2D, texture, 0);
+        gl::FramebufferTexture2D(
+            gl::FRAMEBUFFER,
+            gl::COLOR_ATTACHMENT0,
+            gl::TEXTURE_2D,
+            texture,
+            0,
+        );
 
         if gl::CheckFramebufferStatus(gl::FRAMEBUFFER) != gl::FRAMEBUFFER_COMPLETE {
             log("Error: Framebuffer is not complete!");
@@ -201,7 +264,7 @@ pub enum ShaderDataType {
 }
 
 impl ShaderDataType {
-   fn component_count(&self) -> u32 {
+    fn component_count(&self) -> u32 {
         match self {
             ShaderDataType::Float => 1,
             ShaderDataType::Vec2 => 2,
@@ -210,7 +273,7 @@ impl ShaderDataType {
             ShaderDataType::Mat4 => 16,
             ShaderDataType::Sampler2D => panic!("sampler2D does not have a component count"),
         }
-   }
+    }
 }
 
 impl fmt::Display for ShaderDataType {
@@ -249,7 +312,10 @@ pub struct ShaderSymbol {
 
 impl ShaderSymbol {
     pub fn new(data_type: ShaderDataType, name: &str) -> Self {
-        Self {data_type, name: name.to_string()}
+        Self {
+            data_type,
+            name: name.to_string(),
+        }
     }
 }
 
@@ -298,11 +364,21 @@ impl ShaderBuilder {
     }
 
     pub fn build_vertex_shader(&self) -> Result<VertexShader, String> {
-        VertexShader::create(&self.build(ShaderType::Vertex), self.inputs.clone(), self.uniform_inputs.clone(), self.outputs.clone())
+        VertexShader::create(
+            &self.build(ShaderType::Vertex),
+            self.inputs.clone(),
+            self.uniform_inputs.clone(),
+            self.outputs.clone(),
+        )
     }
 
     pub fn build_fragment_shader(&self) -> Result<FragmentShader, String> {
-        FragmentShader::create(&self.build(ShaderType::Fragment), self.inputs.clone(), self.uniform_inputs.clone(), self.outputs.clone())
+        FragmentShader::create(
+            &self.build(ShaderType::Fragment),
+            self.inputs.clone(),
+            self.uniform_inputs.clone(),
+            self.outputs.clone(),
+        )
     }
 
     pub fn build(&self, shader_type: ShaderType) -> CString {
@@ -310,17 +386,26 @@ impl ShaderBuilder {
         match shader_type {
             ShaderType::Vertex => {
                 for (idx, vertex_attribute) in self.inputs.iter().enumerate() {
-                    shader_src.push_str(&format!("layout (location = {}) in {} {};\n", idx, vertex_attribute.data_type, vertex_attribute.name));
+                    shader_src.push_str(&format!(
+                        "layout (location = {}) in {} {};\n",
+                        idx, vertex_attribute.data_type, vertex_attribute.name
+                    ));
                 }
             }
             ShaderType::Fragment => {
                 for attrib_info in self.inputs.iter() {
-                    shader_src.push_str(&format!("in {} {};\n", attrib_info.data_type, attrib_info.name));
+                    shader_src.push_str(&format!(
+                        "in {} {};\n",
+                        attrib_info.data_type, attrib_info.name
+                    ));
                 }
             }
         }
         for uniform_info in self.uniform_inputs.iter() {
-            shader_src.push_str(&format!("uniform {} {};\n", uniform_info.data_type, uniform_info.name));
+            shader_src.push_str(&format!(
+                "uniform {} {};\n",
+                uniform_info.data_type, uniform_info.name
+            ));
         }
         for output in self.outputs.iter() {
             shader_src.push_str(&format!("out {} {};\n", output.data_type, output.name));
@@ -339,9 +424,19 @@ pub struct VertexShader {
 }
 
 impl VertexShader {
-    pub fn create(src: &CStr, inputs: Vec<ShaderSymbol>, uniform_inputs: Vec<ShaderSymbol>, outputs: Vec<ShaderSymbol>) -> Result<Self, String> {
+    pub fn create(
+        src: &CStr,
+        inputs: Vec<ShaderSymbol>,
+        uniform_inputs: Vec<ShaderSymbol>,
+        outputs: Vec<ShaderSymbol>,
+    ) -> Result<Self, String> {
         let id = compile_shader(src, gl::VERTEX_SHADER)?;
-        Ok(Self { id, inputs, uniform_inputs, outputs })
+        Ok(Self {
+            id,
+            inputs,
+            uniform_inputs,
+            outputs,
+        })
     }
 }
 
@@ -362,9 +457,19 @@ pub struct FragmentShader {
 }
 
 impl FragmentShader {
-    pub fn create(src: &CStr, inputs: Vec<ShaderSymbol>, uniform_inputs: Vec<ShaderSymbol>, outputs: Vec<ShaderSymbol>) -> Result<Self, String> {
+    pub fn create(
+        src: &CStr,
+        inputs: Vec<ShaderSymbol>,
+        uniform_inputs: Vec<ShaderSymbol>,
+        outputs: Vec<ShaderSymbol>,
+    ) -> Result<Self, String> {
         let id = compile_shader(src, gl::FRAGMENT_SHADER)?;
-        Ok(Self { id, inputs, uniform_inputs, outputs })
+        Ok(Self {
+            id,
+            inputs,
+            uniform_inputs,
+            outputs,
+        })
     }
 }
 
@@ -376,7 +481,10 @@ impl Drop for FragmentShader {
     }
 }
 
-pub fn compile_shader(src: &CStr, shader_type: gl::types::GLuint) -> Result<gl::types::GLuint, String> {
+pub fn compile_shader(
+    src: &CStr,
+    shader_type: gl::types::GLuint,
+) -> Result<gl::types::GLuint, String> {
     unsafe {
         let id = gl::CreateShader(shader_type);
 
@@ -387,14 +495,27 @@ pub fn compile_shader(src: &CStr, shader_type: gl::types::GLuint) -> Result<gl::
         gl::CompileShader(id);
 
         let mut compilation_success: gl::types::GLint = 0;
-        gl::GetShaderiv(id, gl::COMPILE_STATUS, &mut compilation_success as *mut gl::types::GLint);
+        gl::GetShaderiv(
+            id,
+            gl::COMPILE_STATUS,
+            &mut compilation_success as *mut gl::types::GLint,
+        );
         if compilation_success != gl::TRUE.into() {
             // Log length including the null terminator
             let mut log_length: gl::types::GLint = 0;
-            gl::GetShaderiv(id, gl::INFO_LOG_LENGTH, &mut log_length as *mut gl::types::GLint);
+            gl::GetShaderiv(
+                id,
+                gl::INFO_LOG_LENGTH,
+                &mut log_length as *mut gl::types::GLint,
+            );
 
-            let mut error_text: Vec<u8> = vec![0; log_length as usize-1];
-            gl::GetShaderInfoLog(id, error_text.len() as i32, std::ptr::null_mut(), error_text.as_mut_ptr() as *mut gl::types::GLchar);
+            let mut error_text: Vec<u8> = vec![0; log_length as usize - 1];
+            gl::GetShaderInfoLog(
+                id,
+                error_text.len() as i32,
+                std::ptr::null_mut(),
+                error_text.as_mut_ptr() as *mut gl::types::GLchar,
+            );
 
             return Err(String::from_utf8_lossy(&error_text).into_owned());
         }
@@ -447,27 +568,48 @@ impl ShaderProgram {
             gl::LinkProgram(id);
 
             let mut link_success: gl::types::GLint = 0;
-            gl::GetProgramiv(id, gl::LINK_STATUS, &mut link_success as *mut gl::types::GLint);
+            gl::GetProgramiv(
+                id,
+                gl::LINK_STATUS,
+                &mut link_success as *mut gl::types::GLint,
+            );
             if link_success != gl::TRUE.into() {
                 // Log length including the null terminator
                 let mut log_length: gl::types::GLint = 0;
-                gl::GetProgramiv(id, gl::INFO_LOG_LENGTH, &mut log_length as *mut gl::types::GLint);
+                gl::GetProgramiv(
+                    id,
+                    gl::INFO_LOG_LENGTH,
+                    &mut log_length as *mut gl::types::GLint,
+                );
 
-                let mut error_text: Vec<u8> = vec![0; log_length as usize-1];
-                gl::GetProgramInfoLog(id, error_text.len() as i32, std::ptr::null_mut(), error_text.as_mut_ptr() as *mut gl::types::GLchar);
+                let mut error_text: Vec<u8> = vec![0; log_length as usize - 1];
+                gl::GetProgramInfoLog(
+                    id,
+                    error_text.len() as i32,
+                    std::ptr::null_mut(),
+                    error_text.as_mut_ptr() as *mut gl::types::GLchar,
+                );
 
                 return Err(String::from_utf8_lossy(&error_text).into_owned());
             }
 
             let uniform_location_cache = SHMUnsafeCell::new(HashMap::new());
 
-            Ok(Self {id, vert, frag, uniform_location_cache})
+            Ok(Self {
+                id,
+                vert,
+                frag,
+                uniform_location_cache,
+            })
         }
     }
 
     pub fn uniforms(&self) -> impl Iterator<Item = &ShaderSymbol> {
         let zone = zone_scoped!("ShaderProgram::uniforms");
-        self.vert.uniform_inputs.iter().chain(self.frag.uniform_inputs.iter())
+        self.vert
+            .uniform_inputs
+            .iter()
+            .chain(self.frag.uniform_inputs.iter())
     }
 
     pub fn uniform_location(&self, uniform_name: &CStr) -> gl::types::GLint {
@@ -526,7 +668,7 @@ impl Drop for VertexArray {
 
 #[derive(Facet, Debug)]
 pub struct VertexBufferObject {
-    id: GLuint
+    id: GLuint,
 }
 
 impl VertexBufferObject {
@@ -547,7 +689,12 @@ impl VertexBufferObject {
     pub fn bind_data<T>(&self, data: &[T], mode: GLuint) {
         unsafe {
             gl::BindBuffer(gl::ARRAY_BUFFER, self.id);
-            gl::BufferData(gl::ARRAY_BUFFER, (data.len() * size_of::<T>()) as isize, data.as_ptr().cast(), mode);
+            gl::BufferData(
+                gl::ARRAY_BUFFER,
+                (data.len() * size_of::<T>()) as isize,
+                data.as_ptr().cast(),
+                mode,
+            );
         }
     }
 }
@@ -559,7 +706,6 @@ impl Drop for VertexBufferObject {
         }
     }
 }
-
 
 #[derive(Facet, Copy, Clone, Debug)]
 #[repr(u8)]
@@ -583,14 +729,14 @@ impl Primitive {
             Primitive::Triangles => gl::TRIANGLES,
             Primitive::TriangleStrip => gl::TRIANGLE_STRIP,
             Primitive::TriangleFan => gl::TRIANGLE_FAN,
-       }
+        }
     }
 }
 
 #[derive(Facet, Debug)]
 pub struct ElementBufferObject {
     id: GLuint,
-    primitive_type: Primitive
+    primitive_type: Primitive,
 }
 
 impl ElementBufferObject {
@@ -613,7 +759,12 @@ impl ElementBufferObject {
         unsafe {
             self.primitive_type = primitive_type;
             gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, self.id);
-            gl::BufferData(gl::ELEMENT_ARRAY_BUFFER, (data.len() * size_of::<T>()) as isize, data.as_ptr().cast(), mode);
+            gl::BufferData(
+                gl::ELEMENT_ARRAY_BUFFER,
+                (data.len() * size_of::<T>()) as isize,
+                data.as_ptr().cast(),
+                mode,
+            );
         }
     }
 }
@@ -634,41 +785,41 @@ pub enum VertVec {
 }
 
 impl VertVec {
-   pub fn element_size(&self) -> u32 {
+    pub fn element_size(&self) -> u32 {
         match self {
             VertVec::Float(_) => u32size_of::<f32>(),
             VertVec::Vec2(_) => u32size_of::<Vec2>(),
             VertVec::Vec3(_) => u32size_of::<Vec3>(),
             VertVec::Mat4(_) => u32size_of::<Mat4>(),
         }
-   }
+    }
 
-   // pub fn component_count(&self) -> u32 {
-   //      match self {
-   //          VertVec::Float(_) => 1,
-   //          VertVec::Vec2(_) => 2,
-   //          VertVec::Vec3(_) => 3,
-   //          VertVec::Mat4(_) => 16,
-   //      }
-   // }
+    // pub fn component_count(&self) -> u32 {
+    //      match self {
+    //          VertVec::Float(_) => 1,
+    //          VertVec::Vec2(_) => 2,
+    //          VertVec::Vec3(_) => 3,
+    //          VertVec::Mat4(_) => 16,
+    //      }
+    // }
 
-   pub fn to_shader_type(&self) -> ShaderDataType {
-       match self {
-           VertVec::Float(_) => ShaderDataType::Float,
-           VertVec::Vec2(_) => ShaderDataType::Vec2,
-           VertVec::Vec3(_) => ShaderDataType::Vec3,
-           VertVec::Mat4(_) => ShaderDataType::Mat4,
-       }
-   }
+    pub fn to_shader_type(&self) -> ShaderDataType {
+        match self {
+            VertVec::Float(_) => ShaderDataType::Float,
+            VertVec::Vec2(_) => ShaderDataType::Vec2,
+            VertVec::Vec3(_) => ShaderDataType::Vec3,
+            VertVec::Mat4(_) => ShaderDataType::Mat4,
+        }
+    }
 
-   pub fn len(&self) -> usize {
-       match self {
-           VertVec::Float(v) => v.len(),
-           VertVec::Vec2(v) => v.len(),
-           VertVec::Vec3(v) => v.len(),
-           VertVec::Mat4(v) => v.len(),
-       }
-   }
+    pub fn len(&self) -> usize {
+        match self {
+            VertVec::Float(v) => v.len(),
+            VertVec::Vec2(v) => v.len(),
+            VertVec::Vec3(v) => v.len(),
+            VertVec::Mat4(v) => v.len(),
+        }
+    }
 }
 
 #[derive(Facet, Copy, Clone, Debug)]
@@ -679,10 +830,7 @@ pub struct VertexAttribute {
 
 impl VertexAttribute {
     pub fn new(data_type: ShaderDataType, offset: u32) -> Self {
-        Self {
-            offset,
-            data_type,
-        }
+        Self { offset, data_type }
     }
 }
 
@@ -725,13 +873,13 @@ impl Mesh {
                         let p = v[idx];
                         vert_data.push(p.x);
                         vert_data.push(p.y);
-                    },
+                    }
                     VertVec::Vec3(v) => {
                         let p = v[idx];
                         vert_data.push(p.x);
                         vert_data.push(p.y);
                         vert_data.push(p.z);
-                    },
+                    }
                     VertVec::Mat4(_v) => todo!(),
                 }
             }
@@ -740,7 +888,11 @@ impl Mesh {
         log_opengl_errors!();
 
         let vbo = VertexBufferObject::create_with_data(&vert_data, gl::STATIC_DRAW);
-        let ebo = ElementBufferObject::create_with_data(&data.indices, data.primitive_type, gl::STATIC_DRAW);
+        let ebo = ElementBufferObject::create_with_data(
+            &data.indices,
+            data.primitive_type,
+            gl::STATIC_DRAW,
+        );
 
         let stride: u32 = vert_attribs.iter().map(|(_, a)| a.element_size()).sum();
 
@@ -796,10 +948,22 @@ impl StaticMesh {
             for (idx, attribute) in shader.vert.inputs.iter().enumerate() {
                 let idx = idx as GLuint;
                 let offset = match mesh.attribute(&attribute.name) {
-                    None => return Err(format!("Attribute {} doesn't exist for mesh", attribute.name)),
+                    None => {
+                        return Err(format!(
+                            "Attribute {} doesn't exist for mesh",
+                            attribute.name
+                        ));
+                    }
                     Some(mesh_attribute) => mesh_attribute.offset, // TODO: check for matching types
                 };
-                gl::VertexAttribPointer(idx, attribute.data_type.component_count() as GLint, gl::FLOAT, gl::FALSE, stride, offset as *const std::ffi::c_void);
+                gl::VertexAttribPointer(
+                    idx,
+                    attribute.data_type.component_count() as GLint,
+                    gl::FLOAT,
+                    gl::FALSE,
+                    stride,
+                    offset as *const std::ffi::c_void,
+                );
                 gl::EnableVertexAttribArray(idx);
                 log_opengl_errors!();
             }
@@ -844,42 +1008,31 @@ impl StaticMesh {
                     {
                         let loc = {
                             let zone = zone_scoped!("self.shader.uniform_location");
-                            self.shader.uniform_location(&CString::new(uniform_info.name.clone()).unwrap())
+                            self.shader
+                                .uniform_location(&CString::new(uniform_info.name.clone()).unwrap())
                         };
-                        match (uniform_info.data_type, self.uniform_override.get(&uniform_info.name).or_else(|| ctx.get(&uniform_info.name)).expect(&format!("Could not get uniform {}", &uniform_info.name))) {
+                        match (
+                            uniform_info.data_type,
+                            self.uniform_override
+                                .get(&uniform_info.name)
+                                .or_else(|| ctx.get(&uniform_info.name))
+                                .expect(&format!("Could not get uniform {}", &uniform_info.name)),
+                        ) {
                             (ShaderDataType::Float, ShaderValue::Float(v)) => {
                                 let zone = zone_scoped!("gl::Uniform1f");
-                                gl::Uniform1f(
-                                    loc,
-                                    *v,
-                                );
+                                gl::Uniform1f(loc, *v);
                             }
                             (ShaderDataType::Vec2, ShaderValue::Vec2(v)) => {
                                 let zone = zone_scoped!("gl::Uniform2f");
-                                gl::Uniform2f(
-                                    loc,
-                                    v.x,
-                                    v.y,
-                                );
+                                gl::Uniform2f(loc, v.x, v.y);
                             }
                             (ShaderDataType::Vec3, ShaderValue::Vec3(v)) => {
                                 let zone = zone_scoped!("gl::Uniform3f");
-                                gl::Uniform3f(
-                                    loc,
-                                    v.x,
-                                    v.y,
-                                    v.z,
-                                );
+                                gl::Uniform3f(loc, v.x, v.y, v.z);
                             }
                             (ShaderDataType::Vec4, ShaderValue::Vec4(v)) => {
                                 let zone = zone_scoped!("gl::Uniform4f");
-                                gl::Uniform4f(
-                                    loc,
-                                    v.x,
-                                    v.y,
-                                    v.z,
-                                    v.w,
-                                );
+                                gl::Uniform4f(loc, v.x, v.y, v.z, v.w);
                             }
                             (ShaderDataType::Mat4, ShaderValue::Mat4(v)) => {
                                 let zone = zone_scoped!("gl::UniformMatrix4fv");
@@ -887,27 +1040,22 @@ impl StaticMesh {
                                     loc,
                                     1,
                                     gl::FALSE,
-                                    &v.to_cols_array() as *const gl::types::GLfloat
+                                    &v.to_cols_array() as *const gl::types::GLfloat,
                                 );
                             }
                             (ShaderDataType::Sampler2D, ShaderValue::Sampler2D(v)) => {
                                 let zone = zone_scoped!("gl::Sampler2D");
-                                gl::ActiveTexture(
-                                    match texture_unit {
-                                        0 => gl::TEXTURE0,
-                                        1 => gl::TEXTURE1,
-                                        2 => gl::TEXTURE2,
-                                        3 => gl::TEXTURE3,
-                                        4 => gl::TEXTURE4,
-                                        5 => gl::TEXTURE5,
-                                        _ => todo!("Add the other texture unit constants"),
-                                    }
-                                );
+                                gl::ActiveTexture(match texture_unit {
+                                    0 => gl::TEXTURE0,
+                                    1 => gl::TEXTURE1,
+                                    2 => gl::TEXTURE2,
+                                    3 => gl::TEXTURE3,
+                                    4 => gl::TEXTURE4,
+                                    5 => gl::TEXTURE5,
+                                    _ => todo!("Add the other texture unit constants"),
+                                });
                                 gl::BindTexture(gl::TEXTURE_2D, *v);
-                                gl::Uniform1i(
-                                    loc,
-                                    texture_unit,
-                                );
+                                gl::Uniform1i(loc, texture_unit);
                                 texture_unit += 1;
                             }
                             _ => todo!(),
@@ -918,7 +1066,12 @@ impl StaticMesh {
 
             {
                 let zone = zone_scoped!("gl::DrawElements");
-                gl::DrawElements(self.mesh.ebo.primitive_type.to_gl(), self.mesh.index_count as i32, gl::UNSIGNED_INT, std::ptr::null());
+                gl::DrawElements(
+                    self.mesh.ebo.primitive_type.to_gl(),
+                    self.mesh.index_count as i32,
+                    gl::UNSIGNED_INT,
+                    std::ptr::null(),
+                );
             }
         }
     }

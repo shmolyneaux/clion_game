@@ -9,11 +9,21 @@ unsafe extern "C" {
 
 #[cfg(test)]
 mod test_mocks {
-    pub fn SDL_GL_GetProcAddress(proc: *const i8) -> *mut std::ffi::c_void {panic!("Can't call SDL_GL_GetProcAddress in test context")}
-    pub fn SDL_GetKeyboardState(numkeys: *mut i32) -> *const u8 {panic!("Can't call SDL_GetKeyboardState in test context")}
-    pub fn SDL_GetRelativeMouseState(x: *mut i32, y: *mut i32) -> u32 {panic!("Can't call SDL_GetRelativeMouseState in test context")}
-    pub fn SDL_SetRelativeMouseMode(enabled: bool) -> i32 {panic!("Can't call SDL_SetRelativeMouseMode in test context")}
-    pub fn SHM_GetDrawableSize(display_w: *mut i32, display_h: *mut i32) {panic!("Can't call SHM_GetDrawableSize in test context")}
+    pub fn SDL_GL_GetProcAddress(proc: *const i8) -> *mut std::ffi::c_void {
+        panic!("Can't call SDL_GL_GetProcAddress in test context")
+    }
+    pub fn SDL_GetKeyboardState(numkeys: *mut i32) -> *const u8 {
+        panic!("Can't call SDL_GetKeyboardState in test context")
+    }
+    pub fn SDL_GetRelativeMouseState(x: *mut i32, y: *mut i32) -> u32 {
+        panic!("Can't call SDL_GetRelativeMouseState in test context")
+    }
+    pub fn SDL_SetRelativeMouseMode(enabled: bool) -> i32 {
+        panic!("Can't call SDL_SetRelativeMouseMode in test context")
+    }
+    pub fn SHM_GetDrawableSize(display_w: *mut i32, display_h: *mut i32) {
+        panic!("Can't call SHM_GetDrawableSize in test context")
+    }
 }
 
 #[cfg(test)]

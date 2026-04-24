@@ -63,7 +63,7 @@ impl Token {
             Token::LSquare => "[".to_string(),
             Token::LCurly => "{".to_string(),
             Token::LBracket => "(".to_string(),
-            _ => format!("{self:?}")
+            _ => format!("{self:?}"),
         }
     }
 }
@@ -189,7 +189,11 @@ pub(crate) fn format_script_err(span: Span, script: &[u8], msg: &str) -> String 
         let gutter_pad = " ".repeat(lineno_width + 1);
 
         out.push_str(&format!("Error: {msg}\n"));
-        out.push_str(&format!("{gutter_pad} --> {}:{}\n", first_line + 1, start_col));
+        out.push_str(&format!(
+            "{gutter_pad} --> {}:{}\n",
+            first_line + 1,
+            start_col
+        ));
         out.push_str(&format!("{gutter_pad} |\n"));
 
         for lineno_0 in first_line..=last_line {
@@ -216,10 +220,7 @@ pub(crate) fn format_script_err(span: Span, script: &[u8], msg: &str) -> String 
         }
 
         // Closing line with ^
-        out.push_str(&format!(
-            "{gutter_pad} | |{}^\n",
-            "_".repeat(end_col),
-        ));
+        out.push_str(&format!("{gutter_pad} | |{}^\n", "_".repeat(end_col),));
     }
 
     out
@@ -239,7 +240,7 @@ impl TokenStream {
 
     pub(crate) fn peek_span(&self) -> Result<Span, String> {
         if self.is_empty() {
-            Ok(self.token_spans[self.token_spans.len()-1])
+            Ok(self.token_spans[self.token_spans.len() - 1])
         } else {
             Ok(self.token_spans[self.idx])
         }
@@ -360,7 +361,7 @@ pub fn lex_string(text: &mut &[u8]) -> Result<StringLexResult, String> {
                 b'(' => {
                     *text = &text[idx..];
                     return Ok(StringLexResult::Interpolation(out));
-                },
+                }
                 b => return Err(format!("Could not escape {:?}", printable_byte(*b))),
             }
             escape_next = false;
@@ -476,25 +477,27 @@ pub fn lex_multiline_comment_end_idx(text: &[u8]) -> Result<usize, String> {
     let mut depth = 1;
     let mut idx = 2;
 
-    while text.len() - idx > (depth*2) {
-        if text[idx] == b'/' && text[idx+1] == b'*' {
+    while text.len() - idx > (depth * 2) {
+        if text[idx] == b'/' && text[idx + 1] == b'*' {
             depth += 1;
             idx += 2;
-            continue
+            continue;
         }
 
-        if text[idx] == b'*' && text[idx+1] == b'/' {
+        if text[idx] == b'*' && text[idx + 1] == b'/' {
             depth -= 1;
             idx += 2;
 
             if depth == 0 {
                 return Ok(idx);
             }
-            continue
+            continue;
         }
         idx += 1;
     }
-    Err(format!("Not enough text remaining to close multiline comment"))
+    Err(format!(
+        "Not enough text remaining to close multiline comment"
+    ))
 }
 
 pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
@@ -552,126 +555,110 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
                 }
             }
             b'0'..=b'9' => tokens.push(lex_number(&mut text)?),
-            b'"' => {
-                match lex_string(&mut text)? {
-                    StringLexResult::Literal(s) => tokens.push(Token::String(s)),
-                    StringLexResult::Interpolation(s) => {
-                        tokens.push(Token::String(s));
-                        tokens.push(Token::StringInterpolationStart);
-                        braces.push(Token::StringInterpolationStart);
-                    },
+            b'"' => match lex_string(&mut text)? {
+                StringLexResult::Literal(s) => tokens.push(Token::String(s)),
+                StringLexResult::Interpolation(s) => {
+                    tokens.push(Token::String(s));
+                    tokens.push(Token::StringInterpolationStart);
+                    braces.push(Token::StringInterpolationStart);
                 }
             },
             b'{' => {
                 tokens.push(Token::LCurly);
                 braces.push(Token::LCurly);
-            },
+            }
             b'[' => {
                 tokens.push(Token::LSquare);
                 braces.push(Token::LSquare);
-            },
+            }
             b'(' => {
                 tokens.push(Token::LBracket);
                 braces.push(Token::LBracket);
-            },
+            }
             b'}' => {
                 match braces.pop() {
                     Some(Token::LCurly) => (),
                     Some(b) => {
-                        return Err(
-                            format_script_err(
-                                Span {
-                                    start: (original_text.len() - text.len()) as u32,
-                                    end: (original_text.len() - text.len() + 1) as u32,
-                                },
-                                original_text,
-                                &format!("Brace {} does not match {}", b.to_string(), c as char),
-                            )
-                        );
-                    },
+                        return Err(format_script_err(
+                            Span {
+                                start: (original_text.len() - text.len()) as u32,
+                                end: (original_text.len() - text.len() + 1) as u32,
+                            },
+                            original_text,
+                            &format!("Brace {} does not match {}", b.to_string(), c as char),
+                        ));
+                    }
                     None => {
-                        return Err(
-                            format_script_err(
-                                Span {
-                                    start: (original_text.len() - text.len()) as u32,
-                                    end: (original_text.len() - text.len() + 1) as u32,
-                                },
-                                original_text,
-                                &format!("No braces remaining on stack!"),
-                            )
-                        );
+                        return Err(format_script_err(
+                            Span {
+                                start: (original_text.len() - text.len()) as u32,
+                                end: (original_text.len() - text.len() + 1) as u32,
+                            },
+                            original_text,
+                            &format!("No braces remaining on stack!"),
+                        ));
                     }
                 }
                 tokens.push(Token::RCurly)
-            },
+            }
             b']' => {
                 match braces.pop() {
                     Some(Token::LSquare) => (),
                     Some(b) => {
-                        return Err(
-                            format_script_err(
-                                Span {
-                                    start: (original_text.len() - text.len()) as u32,
-                                    end: (original_text.len() - text.len() + 1) as u32,
-                                },
-                                original_text,
-                                &format!("Brace {} does not match {}", b.to_string(), c as char),
-                            )
-                        );
-                    },
+                        return Err(format_script_err(
+                            Span {
+                                start: (original_text.len() - text.len()) as u32,
+                                end: (original_text.len() - text.len() + 1) as u32,
+                            },
+                            original_text,
+                            &format!("Brace {} does not match {}", b.to_string(), c as char),
+                        ));
+                    }
                     None => {
-                        return Err(
-                            format_script_err(
-                                Span {
-                                    start: (original_text.len() - text.len()) as u32,
-                                    end: (original_text.len() - text.len() + 1) as u32,
-                                },
-                                original_text,
-                                &format!("No braces remaining on stack!"),
-                            )
-                        );
+                        return Err(format_script_err(
+                            Span {
+                                start: (original_text.len() - text.len()) as u32,
+                                end: (original_text.len() - text.len() + 1) as u32,
+                            },
+                            original_text,
+                            &format!("No braces remaining on stack!"),
+                        ));
                     }
                 }
                 tokens.push(Token::RSquare);
-            },
-            b')' => {
-                match braces.pop() {
-                    Some(Token::LBracket) => tokens.push(Token::RBracket),
-                    Some(Token::StringInterpolationStart) => {
-                        tokens.push(Token::StringInterpolationEnd);
-                        match lex_string(&mut text)? {
-                            StringLexResult::Literal(s) => tokens.push(Token::String(s)),
-                            StringLexResult::Interpolation(s) => {
-                                tokens.push(Token::String(s));
-                                tokens.push(Token::StringInterpolationStart);
-                                braces.push(Token::StringInterpolationStart);
-                            },
+            }
+            b')' => match braces.pop() {
+                Some(Token::LBracket) => tokens.push(Token::RBracket),
+                Some(Token::StringInterpolationStart) => {
+                    tokens.push(Token::StringInterpolationEnd);
+                    match lex_string(&mut text)? {
+                        StringLexResult::Literal(s) => tokens.push(Token::String(s)),
+                        StringLexResult::Interpolation(s) => {
+                            tokens.push(Token::String(s));
+                            tokens.push(Token::StringInterpolationStart);
+                            braces.push(Token::StringInterpolationStart);
                         }
-                    },
-                    Some(b) => {
-                        return Err(
-                            format_script_err(
-                                Span {
-                                    start: (original_text.len() - text.len()) as u32,
-                                    end: (original_text.len() - text.len() + 1) as u32,
-                                },
-                                original_text,
-                                &format!("Brace {} does not match {}", b.to_string(), c as char),
-                            )
-                        );
-                    },
-                    None => {
-                        return Err(
-                            format_script_err(
-                                Span {
-                                    start: (original_text.len() - text.len()) as u32,
-                                    end: (original_text.len() - text.len() + 1) as u32,
-                                },
-                                original_text,
-                                &format!("No braces remaining on stack!"),
-                            )
-                        );
                     }
+                }
+                Some(b) => {
+                    return Err(format_script_err(
+                        Span {
+                            start: (original_text.len() - text.len()) as u32,
+                            end: (original_text.len() - text.len() + 1) as u32,
+                        },
+                        original_text,
+                        &format!("Brace {} does not match {}", b.to_string(), c as char),
+                    ));
+                }
+                None => {
+                    return Err(format_script_err(
+                        Span {
+                            start: (original_text.len() - text.len()) as u32,
+                            end: (original_text.len() - text.len() + 1) as u32,
+                        },
+                        original_text,
+                        &format!("No braces remaining on stack!"),
+                    ));
                 }
             },
             b',' => tokens.push(Token::Comma),
@@ -682,7 +669,7 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
                 } else {
                     tokens.push(Token::Plus);
                 }
-            },
+            }
             b'*' => {
                 if text.len() > 1 && text[1] == b'=' {
                     text = &text[1..];
@@ -690,7 +677,7 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
                 } else {
                     tokens.push(Token::Star);
                 }
-            },
+            }
             b'%' => {
                 if text.len() > 1 && text[1] == b'=' {
                     text = &text[1..];
@@ -698,7 +685,7 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
                 } else {
                     tokens.push(Token::Percent);
                 }
-            },
+            }
             b'/' => match text[1] {
                 b'/' => {
                     loop {
@@ -712,10 +699,10 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
                         }
                     }
                     // NOTE: no token to push since this is a comment
-                },
+                }
                 b'*' => {
                     let idx = lex_multiline_comment_end_idx(&text)?;
-                    text = &text[(idx-1)..];
+                    text = &text[(idx - 1)..];
                 }
                 b'=' => {
                     text = &text[1..];
@@ -730,7 +717,7 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
                 } else {
                     tokens.push(Token::Minus);
                 }
-            },
+            }
             b'=' => match text[1] {
                 b'=' => {
                     text = &text[1..];
@@ -763,7 +750,7 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
                 } else {
                     tokens.push(Token::Bang);
                 }
-            },
+            }
             b'.' => {
                 if text.len() > 1 && text[1] == b'.' {
                     text = &text[1..];
@@ -771,7 +758,7 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
                 } else {
                     tokens.push(Token::Dot);
                 }
-            },
+            }
             b' ' => (),
             _ => return Err(format!("Unknown character '{}'", printable_byte(c))),
         }
@@ -784,10 +771,7 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
             });
         }
     }
-    assert_eq!(
-        tokens.len(),
-        spans.len(),
-    );
+    assert_eq!(tokens.len(), spans.len(),);
     Ok(TokenStream {
         idx: 0,
         tokens: tokens,
