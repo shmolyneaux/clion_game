@@ -6,6 +6,7 @@ use crate::*;
 use glam::Vec3Swizzles;
 
 #[derive(Clone)]
+#[allow(clippy::enum_variant_names)]
 pub enum Sdf {
     SdfTranslate(Vec3, Box<Sdf>),
     SdfUnion(Box<Sdf>, Box<Sdf>),
@@ -74,7 +75,7 @@ impl SdfCache {
     }
 
     pub fn get_nocache(&self, coord: Vec3) -> f32 {
-        let posf = Vec3::new(coord.x as f32, coord.y as f32, coord.z as f32) * self.scale;
+        let posf = Vec3::new(coord.x, coord.y, coord.z) * self.scale;
         self.sdf.dist(posf)
     }
 
@@ -162,18 +163,18 @@ impl SdfCache {
         let mut z_edges: HashSet<(i32, i32, i32)> = HashSet::new();
 
         for (c0, _) in vert_lookup.iter() {
-            let cx = ((c0.0 + 1), (c0.1 + 0), (c0.2 + 0));
-            let cxz = ((c0.0 + 1), (c0.1 + 0), (c0.2 + 1));
-            let cxy = ((c0.0 + 1), (c0.1 + 1), (c0.2 + 0));
-            let cxyz = ((c0.0 + 1), (c0.1 + 1), (c0.2 + 1));
-            let cz = ((c0.0 + 0), (c0.1 + 0), (c0.2 + 1));
-            let cy = ((c0.0 + 0), (c0.1 + 1), (c0.2 + 0));
-            let cyz = ((c0.0 + 0), (c0.1 + 1), (c0.2 + 1));
+            let cx = (c0.0 + 1, c0.1, c0.2);
+            let cxz = (c0.0 + 1, c0.1, c0.2 + 1);
+            let cxy = (c0.0 + 1, c0.1 + 1, c0.2);
+            let cxyz = (c0.0 + 1, c0.1 + 1, c0.2 + 1);
+            let cz = (c0.0, c0.1, c0.2 + 1);
+            let cy = (c0.0, c0.1 + 1, c0.2);
+            let cyz = (c0.0, c0.1 + 1, c0.2 + 1);
 
             // We only want an edge if the isosurface intersects with the
             // face of the cube this edge is passing through.
 
-            if vert_lookup.get(&cx).is_some() {
+            if vert_lookup.contains_key(&cx) {
                 let dist = self.get(cx);
                 if dist.is_sign_positive() != self.get(cxz).is_sign_positive()
                     || dist.is_sign_positive() != self.get(cxy).is_sign_positive()
@@ -183,7 +184,7 @@ impl SdfCache {
                 }
             }
 
-            if vert_lookup.get(&cy).is_some() {
+            if vert_lookup.contains_key(&cy) {
                 let dist = self.get(cy);
                 if dist.is_sign_positive() != self.get(cxy).is_sign_positive()
                     || dist.is_sign_positive() != self.get(cyz).is_sign_positive()
@@ -193,7 +194,7 @@ impl SdfCache {
                 }
             }
 
-            if vert_lookup.get(&cz).is_some() {
+            if vert_lookup.contains_key(&cz) {
                 let dist = self.get(cz);
                 if dist.is_sign_positive() != self.get(cxz).is_sign_positive()
                     || dist.is_sign_positive() != self.get(cyz).is_sign_positive()
@@ -209,13 +210,13 @@ impl SdfCache {
                 && y_edges.contains(coord)
                 && y_edges.contains(&(coord.0 + 1, coord.1, coord.2))
             {
-                let coord0 = (coord.0 + 0, coord.1 + 0, coord.2 + 0);
-                let coord1 = (coord.0 + 0, coord.1 + 1, coord.2 + 0);
-                let coord2 = (coord.0 + 1, coord.1 + 0, coord.2 + 0);
+                let coord0 = (coord.0, coord.1, coord.2);
+                let coord1 = (coord.0, coord.1 + 1, coord.2);
+                let coord2 = (coord.0 + 1, coord.1, coord.2);
 
-                let coord3 = (coord.0 + 1, coord.1 + 1, coord.2 + 0);
-                let coord4 = (coord.0 + 0, coord.1 + 1, coord.2 + 0);
-                let coord5 = (coord.0 + 1, coord.1 + 0, coord.2 + 0);
+                let coord3 = (coord.0 + 1, coord.1 + 1, coord.2);
+                let coord4 = (coord.0, coord.1 + 1, coord.2);
+                let coord5 = (coord.0 + 1, coord.1, coord.2);
 
                 let idx0 = vert_lookup.get(&coord0).unwrap();
                 let idx1 = vert_lookup.get(&coord1).unwrap();
@@ -237,13 +238,13 @@ impl SdfCache {
                 && z_edges.contains(coord)
                 && z_edges.contains(&(coord.0 + 1, coord.1, coord.2))
             {
-                let coord0 = (coord.0 + 0, coord.1 + 0, coord.2 + 0);
-                let coord1 = (coord.0 + 0, coord.1 + 0, coord.2 + 1);
-                let coord2 = (coord.0 + 1, coord.1 + 0, coord.2 + 0);
+                let coord0 = (coord.0, coord.1, coord.2);
+                let coord1 = (coord.0, coord.1, coord.2 + 1);
+                let coord2 = (coord.0 + 1, coord.1, coord.2);
 
-                let coord3 = (coord.0 + 1, coord.1 + 0, coord.2 + 1);
-                let coord4 = (coord.0 + 0, coord.1 + 0, coord.2 + 1);
-                let coord5 = (coord.0 + 1, coord.1 + 0, coord.2 + 0);
+                let coord3 = (coord.0 + 1, coord.1, coord.2 + 1);
+                let coord4 = (coord.0, coord.1, coord.2 + 1);
+                let coord5 = (coord.0 + 1, coord.1, coord.2);
 
                 let idx0 = vert_lookup.get(&coord0).unwrap();
                 let idx1 = vert_lookup.get(&coord1).unwrap();
@@ -267,13 +268,13 @@ impl SdfCache {
                 && z_edges.contains(coord)
                 && z_edges.contains(&(coord.0, coord.1 + 1, coord.2))
             {
-                let coord0 = (coord.0 + 0, coord.1 + 0, coord.2 + 0);
-                let coord1 = (coord.0 + 0, coord.1 + 1, coord.2 + 0);
-                let coord2 = (coord.0 + 0, coord.1 + 0, coord.2 + 1);
+                let coord0 = (coord.0, coord.1, coord.2);
+                let coord1 = (coord.0, coord.1 + 1, coord.2);
+                let coord2 = (coord.0, coord.1, coord.2 + 1);
 
-                let coord3 = (coord.0 + 0, coord.1 + 1, coord.2 + 1);
-                let coord4 = (coord.0 + 0, coord.1 + 1, coord.2 + 0);
-                let coord5 = (coord.0 + 0, coord.1 + 0, coord.2 + 1);
+                let coord3 = (coord.0, coord.1 + 1, coord.2 + 1);
+                let coord4 = (coord.0, coord.1 + 1, coord.2);
+                let coord5 = (coord.0, coord.1, coord.2 + 1);
 
                 let idx0 = vert_lookup.get(&coord0).unwrap();
                 let idx1 = vert_lookup.get(&coord1).unwrap();

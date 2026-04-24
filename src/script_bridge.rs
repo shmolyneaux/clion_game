@@ -42,19 +42,12 @@ pub enum DrawListItem {
     CreateTexture(u32, u32, u32, Vec<u8>),
 }
 
+#[derive(Default)]
 pub struct KeyState {
     pub keys: Vec<u8>,
     pub last_keys: Vec<u8>,
 }
 
-impl Default for KeyState {
-    fn default() -> Self {
-        Self {
-            keys: Vec::new(),
-            last_keys: Vec::new(),
-        }
-    }
-}
 
 fn scancode_from_name(name: &[u8]) -> Option<usize> {
     match name {
@@ -279,7 +272,7 @@ pub enum ScriptResponse {
 enum BridgeState {
     #[cfg(not(target_arch = "wasm32"))]
     Running,
-    Paused(Interpreter, Environment, ShimValue),
+    Paused(Box<Interpreter>, Environment, ShimValue),
 }
 
 pub struct ScriptBridge {
@@ -423,7 +416,7 @@ fn shim_create_texture(
             _ => {
                 return Err(format!(
                     "Non-numeric passed to create_texture {}",
-                    val.to_string()
+                    val
                 ));
             }
         });
@@ -521,7 +514,7 @@ impl ScriptBridge {
             });
 
             Self {
-                state: BridgeState::Paused(interpreter, env, loop_fn),
+                state: BridgeState::Paused(Box::new(interpreter), env, loop_fn),
                 interpreter_errors: Vec::new(),
                 draw_list: Vec::new(),
                 script_path,
@@ -534,7 +527,7 @@ impl ScriptBridge {
         #[cfg(target_arch = "wasm32")]
         {
             Self {
-                state: BridgeState::Paused(interpreter, env, loop_fn),
+                state: BridgeState::Paused(Box::new(interpreter), env, loop_fn),
                 interpreter_errors: Vec::new(),
                 draw_list: Vec::new(),
                 script_path,
@@ -557,7 +550,7 @@ impl ScriptBridge {
                                     match load_script(&bytes) {
                                         Ok((interpreter, env, loop_fn)) => {
                                             self.state =
-                                                BridgeState::Paused(interpreter, env, loop_fn);
+                                                BridgeState::Paused(Box::new(interpreter), env, loop_fn);
                                             self.interpreter_errors = Vec::new();
                                         }
                                         Err(msg) => {
@@ -592,7 +585,7 @@ impl ScriptBridge {
                     BridgeState::Paused(interpreter, env, loop_fn) => {
                         self.tx
                             .send(ScriptRequest::ExecuteLoop(
-                                interpreter,
+                                *interpreter,
                                 env,
                                 loop_fn,
                                 keys.to_vec(),
@@ -604,11 +597,11 @@ impl ScriptBridge {
 
                 match self.rx.recv().unwrap() {
                     ScriptResponse::Error(interpreter, env, loop_fn, msg) => {
-                        self.state = BridgeState::Paused(interpreter, env, loop_fn);
+                        self.state = BridgeState::Paused(Box::new(interpreter), env, loop_fn);
                         self.interpreter_errors.push(msg);
                     }
                     ScriptResponse::LoopComplete(interpreter, env, loop_fn, draw_list) => {
-                        self.state = BridgeState::Paused(interpreter, env, loop_fn);
+                        self.state = BridgeState::Paused(Box::new(interpreter), env, loop_fn);
                         self.draw_list = draw_list;
                     }
                 }
@@ -633,7 +626,7 @@ impl ScriptBridge {
                             0.5,
                             0.5,
                             0.5,
-                            CString::new(format!("{}", err)).unwrap().as_ptr(),
+                            CString::new(err.to_string()).unwrap().as_ptr(),
                         );
                     }
                     super::igEnd();
@@ -670,7 +663,7 @@ impl ScriptBridge {
             #[cfg(not(target_arch = "wasm32"))]
             BridgeState::Running => {}
             BridgeState::Paused(interpreter, env, _loop_fn) => {
-                shimlang_debug_window.debug_window(interpreter, &env);
+                shimlang_debug_window.debug_window(interpreter, env);
             }
         }
     }

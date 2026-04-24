@@ -143,12 +143,10 @@ impl Navigation {
 
             if self.memory_page == 0 {
                 igBeginDisabled();
-                igButton(CString::new(format!("Prev")).unwrap().as_ptr());
+                igButton(CString::new("Prev".to_string()).unwrap().as_ptr());
                 igEndDisabled();
-            } else {
-                if igButton(CString::new(format!("Prev")).unwrap().as_ptr()) {
-                    self.memory_page -= 1;
-                }
+            } else if igButton(CString::new("Prev".to_string()).unwrap().as_ptr()) {
+                self.memory_page -= 1;
             }
 
             igSameLine();
@@ -162,12 +160,12 @@ impl Navigation {
             };
 
             if (self.memory_page + 1) * (page_size as u32) < mem_end as u32 {
-                if igButton(CString::new(format!("Next")).unwrap().as_ptr()) {
+                if igButton(CString::new("Next".to_string()).unwrap().as_ptr()) {
                     self.memory_page += 1;
                 }
             } else {
                 igBeginDisabled();
-                igButton(CString::new(format!("Next")).unwrap().as_ptr());
+                igButton(CString::new("Next".to_string()).unwrap().as_ptr());
                 igEndDisabled();
             }
 
@@ -293,7 +291,7 @@ impl Navigation {
                 x: 0.0,
                 y: 32.0 * cell_size,
             });
-            igText(CString::new(format!("Did that work?")).unwrap().as_ptr());
+            igText(CString::new("Did that work?".to_string()).unwrap().as_ptr());
 
             // TODO: Add a source code viewer
             // TODO: Add support for executing single statements

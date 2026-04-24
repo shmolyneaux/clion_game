@@ -66,37 +66,37 @@ pub fn box_mesh(size: Vec3) -> MeshDataRaw {
     ];
 
     let indices = vec![
-        0 + 0,
-        0 + 1,
-        0 + 2,
-        0 + 1,
-        0 + 2,
-        0 + 3,
-        4 + 0,
+        0,
+        1,
+        2,
+        1,
+        2,
+        3,
+        4,
         4 + 1,
         4 + 2,
         4 + 1,
         4 + 2,
         4 + 3,
-        8 + 0,
+        8,
         8 + 1,
         8 + 2,
         8 + 1,
         8 + 2,
         8 + 3,
-        12 + 0,
+        12,
         12 + 1,
         12 + 2,
         12 + 1,
         12 + 2,
         12 + 3,
-        16 + 0,
+        16,
         16 + 1,
         16 + 2,
         16 + 1,
         16 + 2,
         16 + 3,
-        20 + 0,
+        20,
         20 + 1,
         20 + 2,
         20 + 1,
@@ -133,7 +133,7 @@ pub fn screen_quad_mesh(x: u32, y: u32, w: u32, h: u32) -> MeshDataRaw {
         Vec2::new(1.0, 1.0),
     ];
 
-    let indices = vec![0 + 0, 0 + 1, 0 + 2, 0 + 1, 0 + 2, 0 + 3];
+    let indices = vec![0, 1, 2, 1, 2, 3];
 
     let mut verts = HashMap::new();
     verts.insert("aPos".to_string(), VertVec::Vec3(positions));
@@ -162,7 +162,7 @@ pub fn quad_mesh() -> MeshDataRaw {
         Vec2::new(1.0, 1.0),
     ];
 
-    let indices = vec![0 + 0, 0 + 1, 0 + 2, 0 + 1, 0 + 2, 0 + 3];
+    let indices = vec![0, 1, 2, 1, 2, 3];
 
     let mut verts = HashMap::new();
     verts.insert("aPos".to_string(), VertVec::Vec3(positions));

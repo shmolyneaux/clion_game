@@ -542,6 +542,7 @@ impl<T: Sized> SHMUnsafeCell<T> {
         self as *const SHMUnsafeCell<T> as *const T as *mut T
     }
 
+    #[allow(clippy::mut_from_ref)]
     pub const unsafe fn as_mut_unchecked(&self) -> &mut T {
         unsafe { &mut *self.get() }
     }
@@ -691,7 +692,7 @@ impl VertexBufferObject {
             gl::BindBuffer(gl::ARRAY_BUFFER, self.id);
             gl::BufferData(
                 gl::ARRAY_BUFFER,
-                (data.len() * size_of::<T>()) as isize,
+                std::mem::size_of_val(data) as isize,
                 data.as_ptr().cast(),
                 mode,
             );
@@ -720,7 +721,7 @@ pub enum Primitive {
 }
 
 impl Primitive {
-    pub fn to_gl(&self) -> GLenum {
+    pub fn to_gl(self) -> GLenum {
         match self {
             Primitive::Points => gl::POINTS,
             Primitive::Lines => gl::LINES,
@@ -761,7 +762,7 @@ impl ElementBufferObject {
             gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, self.id);
             gl::BufferData(
                 gl::ELEMENT_ARRAY_BUFFER,
-                (data.len() * size_of::<T>()) as isize,
+                std::mem::size_of_val(data) as isize,
                 data.as_ptr().cast(),
                 mode,
             );
@@ -1016,7 +1017,7 @@ impl StaticMesh {
                             self.uniform_override
                                 .get(&uniform_info.name)
                                 .or_else(|| ctx.get(&uniform_info.name))
-                                .expect(&format!("Could not get uniform {}", &uniform_info.name)),
+                                .unwrap_or_else(|| panic!("Could not get uniform {}", &uniform_info.name)),
                         ) {
                             (ShaderDataType::Float, ShaderValue::Float(v)) => {
                                 let zone = zone_scoped!("gl::Uniform1f");

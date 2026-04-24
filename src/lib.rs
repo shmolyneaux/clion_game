@@ -10,7 +10,6 @@
 )]
 
 #[macro_use]
-use gl;
 use gl::types::*;
 use glam::{Mat4, Vec2, Vec3, Vec4};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -194,7 +193,7 @@ pub(crate) fn logc(s: CString) {
 }
 
 const fn compile_time_checks() {
-    assert!(2 + 2 == 4);
+    assert!(size_of::<u8>() == 1);
 }
 
 fn draw_frame_captures(
@@ -526,9 +525,11 @@ fn init_state() -> State {
     )
     .expect("Can't create screen quad mesh");
 
-    let mut debug_state = DebugState::default();
-    debug_state.sphere_radius = 1.0;
-    debug_state.sdf_box_size = Vec3::new(0.5, 0.7, 1.0);
+    let debug_state = DebugState {
+        sphere_radius: 1.0,
+        sdf_box_size: Vec3::new(0.5, 0.7, 1.0),
+        ..Default::default()
+    };
 
     let default_shader_program = create_default_shader();
     log_opengl_errors!();
@@ -587,7 +588,9 @@ fn init_state() -> State {
     let default_texture = gen_cpu_texture(128, 128, |x, y| [0xff, 0xff, 0xff, 0xff]);
 
     println!("State initialized!");
-    let mut state = State {
+    
+
+    State {
         script_bridge,
         frame_num,
         debug_vao,
@@ -618,9 +621,7 @@ fn init_state() -> State {
         debug_state,
         shimlang_texture_handle_to_gl_texture: HashMap::new(),
         default_texture,
-    };
-
-    state
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -686,7 +687,7 @@ fn frame(state: &mut State, delta: f32) {
                 0.5,
                 0.5,
                 0.5,
-                CString::new(format!("{}", err)).unwrap().as_ptr(),
+                CString::new(err.to_string()).unwrap().as_ptr(),
             );
         }
 
@@ -699,13 +700,13 @@ fn frame(state: &mut State, delta: f32) {
             0.5,
             0.5,
             0.5,
-            CString::new(format!("BG text")).unwrap().as_ptr(),
+            CString::new("BG text".to_string()).unwrap().as_ptr(),
         );
 
         let _zone = zone_scoped!("rust frame unsafe block");
         update_keys(state);
 
-        let test = vec![0.1, 0.1, 0.12, 1.0];
+        let test = [0.1, 0.1, 0.12, 1.0];
         gl::ClearColor(test[0], test[1], test[2], test[3]);
 
         debug_line_loop(
