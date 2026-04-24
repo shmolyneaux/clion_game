@@ -145,7 +145,6 @@ pub struct State {
     //#[facet(readonly)]
     mouse_captured: bool,
 
-    test_mesh: StaticMesh,
     meshes: HashMap<String, StaticMesh>,
 
     keys: KeyState,
@@ -154,7 +153,6 @@ pub struct State {
     frame_capture_shader: Rc<ShaderProgram>,
     frame_capture_mesh: StaticMesh,
     frame_capture_fbo: GLuint,
-    texture_shader: Rc<ShaderProgram>,
     screen_quad_shader: Rc<ShaderProgram>,
     screen_quad_mesh: StaticMesh,
 
@@ -193,32 +191,6 @@ pub(crate) fn logc(s: CString) {
 }
 
 
-fn state_test_mesh() -> MeshDataRaw {
-    let mut my_box = box_mesh(Vec3::new(1.0, 1.0, 1.0));
-    let len = my_box.verts.get("aPos").unwrap().len();
-
-    let mut uvs = vec![Vec2::new(0.0, 0.0); len];
-    match my_box.verts.get("aPos").unwrap() {
-        VertVec::Vec3(positions) => {
-            for (uv, pos) in uvs.iter_mut().zip(positions.iter()) {
-                uv.x = pos.x + 0.5;
-                uv.y = pos.y + 0.5;
-            }
-        },
-        _ => panic!("Why is aPos not a Vec3?"),
-    }
-    my_box.verts.insert("aUV".to_string(), VertVec::Vec2(uvs));
-
-    let mut color = vec![Vec3::new(1.0, 0.0, 1.0); len];
-    for (idx, vert_color) in color.iter_mut().enumerate() {
-        vert_color.x = idx as f32 / len as f32;
-        vert_color.y = idx as f32 / len as f32;
-        vert_color.z = idx as f32 / len as f32;
-    }
-    my_box.verts.insert("aColor".to_string(), VertVec::Vec3(color));
-
-    my_box
-}
 
 const fn compile_time_checks() {
     assert!(2 + 2 == 4);
@@ -422,55 +394,6 @@ fn init_state() -> State {
         ).expect("Could not build color shader");
     let vert_color_shader = Rc::new(vert_color_shader);
 
-    let texture_shader = ShaderProgram::create(
-        ShaderBuilder::new()
-            .with_input(ShaderSymbol::new(ShaderDataType::Vec3, "aPos"))
-            .with_input(ShaderSymbol::new(ShaderDataType::Vec2, "aUV"))
-            .with_uniform(ShaderSymbol::new(ShaderDataType::Mat4, "model"))
-            .with_uniform(ShaderSymbol::new(ShaderDataType::Mat4, "projection"))
-            .with_uniform(ShaderSymbol::new(ShaderDataType::Mat4, "view"))
-            .with_output(ShaderSymbol::new(ShaderDataType::Vec2, "uv"))
-            .with_code(
-                r#"
-                    void main() {
-                        gl_Position = projection * view * model * vec4(aPos, 1.0);
-                        uv = aUV;
-                    }
-                "#.to_string()
-            ).build_vertex_shader().unwrap(),
-        ShaderBuilder::new()
-            .with_input(ShaderSymbol::new(ShaderDataType::Vec2, "uv"))
-            .with_output(ShaderSymbol::new(ShaderDataType::Vec4, "FragColor"))
-            .with_uniform(ShaderSymbol::new(ShaderDataType::Sampler2D, "texture1"))
-            .with_code(
-                r#"
-                    void main() {
-                        FragColor = texture(texture1, uv);
-                    }
-                "#.to_string()
-            ).build_fragment_shader().unwrap()
-        ).expect("Could not build texture shader");
-    let texture_shader = Rc::new(texture_shader);
-
-    println!("Creating test mesh");
-    let mut test_mesh = StaticMesh::create(
-        texture_shader.clone(),
-        Rc::new(Mesh::create(&state_test_mesh()).unwrap()),
-    ).expect("Can't create the test mesh");
-
-
-    let texture: GLuint = gen_fbo_texture(
-         r#"
-             void main() {
-                 float value = smoothstep(0.8, 1.0, uv.x*uv.x + uv.y*uv.y);
-                 FragColor = vec4(value, value, value, 1.0);
-             }
-         "#
-    );
-    log_opengl_errors!();
-
-    test_mesh.uniform_override.insert("texture1".to_string(), gpu::ShaderValue::Sampler2D(texture));
-
     let mut numkeys: i32 = 0;
     unsafe { SDL_GetKeyboardState(&mut numkeys as *mut i32) };
     let keys = KeyState::new();
@@ -631,14 +554,12 @@ fn init_state() -> State {
         pitch,
         yaw,
         mouse_captured,
-        test_mesh,
         keys,
         meshes,
         frame_captures,
         frame_capture_shader,
         frame_capture_mesh,
         frame_capture_fbo,
-        texture_shader,
         screen_quad_shader,
         screen_quad_mesh,
         debug_state,
@@ -828,52 +749,11 @@ fn frame(state: &mut State, delta: f32) {
         }
 
         {
-            let _zone = zone_scoped!("Draw Test Mesh");
-            state.test_mesh.transform = Mat4::from_translation(Vec3::new(1.2, 0.2, -0.2));
-            {
-                let _zone = zone_scoped!("state.test_mesh.draw");
-                state.test_mesh.draw(&mut ctx);
-            }
-
-            let my_box = {
-                let _zone = zone_scoped!("Create box mesh");
-                box_mesh(Vec3::new(1.0, 1.0, 1.0))
-            };
-            let positions = match my_box.verts.get("aPos").unwrap() {
-                VertVec::Vec3(v) => v,
-                _ => panic!("Expected aPos to be a Vec3"),
-            };
-            let normals = match my_box.verts.get("aNormal").unwrap() {
-                VertVec::Vec3(v) => v,
-                _ => panic!("Expected aNormal to be a Vec3"),
-            };
-            for (pos, norm) in positions.iter().zip(normals.iter()) {
-                let start = state.test_mesh.transform.transform_point3(*pos);
-                let end = state.test_mesh.transform.transform_point3(pos + norm*0.2);
-                debug_line(state, &[start, end]);
-            }
-        }
-
-        {
             let _zone = zone_scoped!("draw_debug_shapes");
             draw_debug_shapes(state);
         }
 
-        {
-            let _zone = zone_scoped!("capture frame");
-            const MAX_FRAME_CAPTURES: usize = 1000;
-            let existing_texture = if state.frame_captures.len() >= MAX_FRAME_CAPTURES {
-                Some(state.frame_captures.pop_front().unwrap())
-            } else {
-                None
-            };
-            let texture = capture_frame_texture(display_w, display_h, state.frame_capture_fbo, existing_texture);
-            state.test_mesh.uniform_override.insert("texture1".to_string(), gpu::ShaderValue::Sampler2D(texture));
-            state.frame_captures.push_back(texture);
-        }
-
         gl::Disable(gl::DEPTH_TEST);
-        draw_frame_captures(&state.frame_captures, &mut state.frame_capture_mesh, &mut ctx);
 
         gl::Enable(gl::BLEND);
         gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
@@ -923,6 +803,19 @@ fn frame(state: &mut State, delta: f32) {
             }
         }
         gl::Disable(gl::BLEND);
+
+        {
+            let _zone = zone_scoped!("capture frame");
+            const MAX_FRAME_CAPTURES: usize = 1000;
+            let existing_texture = if state.frame_captures.len() >= MAX_FRAME_CAPTURES {
+                Some(state.frame_captures.pop_front().unwrap())
+            } else {
+                None
+            };
+            let texture = capture_frame_texture(display_w, display_h, state.frame_capture_fbo, existing_texture);
+            state.frame_captures.push_back(texture);
+        }
+        draw_frame_captures(&state.frame_captures, &mut state.frame_capture_mesh, &mut ctx);
 
         gl::Enable(gl::DEPTH_TEST);
 
