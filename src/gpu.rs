@@ -73,36 +73,35 @@ pub fn texture_from_rgba(width: u32, height: u32, rgba_bytes: &[u8]) -> GLuint {
     texture
 }
 
+pub fn alloc_capture_texture() -> GLuint {
+    let mut texture: GLuint = 0;
+    unsafe {
+        gl::GenTextures(1, &mut texture as *mut u32);
+        gl::BindTexture(gl::TEXTURE_2D, texture);
+        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as i32);
+        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as i32);
+        gl::TexImage2D(
+            gl::TEXTURE_2D,
+            0,
+            gl::RGBA as i32,
+            128,
+            128,
+            0,
+            gl::RGBA,
+            gl::UNSIGNED_BYTE,
+            std::ptr::null_mut(),
+        );
+    }
+    texture
+}
+
 pub fn capture_frame_texture(
     resolution_x: i32,
     resolution_y: i32,
     fbo: GLuint,
     existing_texture: Option<GLuint>,
 ) -> u32 {
-    let texture = match existing_texture {
-        Some(t) => t,
-        None => {
-            let mut texture: GLuint = 0;
-            unsafe {
-                gl::GenTextures(1, &mut texture as *mut u32);
-                gl::BindTexture(gl::TEXTURE_2D, texture);
-                gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as i32);
-                gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as i32);
-                gl::TexImage2D(
-                    gl::TEXTURE_2D,
-                    0,
-                    gl::RGBA as i32,
-                    128,
-                    128,
-                    0,
-                    gl::RGBA,
-                    gl::UNSIGNED_BYTE,
-                    std::ptr::null_mut(),
-                );
-            }
-            texture
-        }
-    };
+    let texture = existing_texture.unwrap_or_else(alloc_capture_texture);
     unsafe {
         gl::BindFramebuffer(gl::FRAMEBUFFER, fbo);
         gl::FramebufferTexture2D(

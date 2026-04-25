@@ -48,6 +48,8 @@ mod shimlang_imgui;
 
 use crate::debug_draw::*;
 use crate::gpu::*;
+
+const MAX_FRAME_CAPTURES: usize = 1000;
 use crate::imgui::*;
 use crate::mesh_gen::{box_mesh, quad_mesh, screen_quad_mesh};
 use crate::script_bridge::*;
@@ -534,7 +536,9 @@ fn init_state() -> State {
     let default_shader_program = create_default_shader();
     log_opengl_errors!();
 
-    let frame_captures = VecDeque::new();
+    let frame_captures: VecDeque<GLuint> = (0..MAX_FRAME_CAPTURES)
+        .map(|_| alloc_capture_texture())
+        .collect();
 
     let frame_capture_shader = ShaderProgram::create(
         ShaderBuilder::new()
@@ -908,17 +912,12 @@ fn frame(state: &mut State, delta: f32) {
 
         {
             let _zone = zone_scoped!("capture frame");
-            const MAX_FRAME_CAPTURES: usize = 1000;
-            let existing_texture = if state.frame_captures.len() >= MAX_FRAME_CAPTURES {
-                Some(state.frame_captures.pop_front().unwrap())
-            } else {
-                None
-            };
+            let recycled = state.frame_captures.pop_front().unwrap();
             let texture = capture_frame_texture(
                 display_w,
                 display_h,
                 state.frame_capture_fbo,
-                existing_texture,
+                Some(recycled),
             );
             state.frame_captures.push_back(texture);
         }
