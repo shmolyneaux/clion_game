@@ -12,8 +12,6 @@ use crate::*;
 use std::fs;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::mpsc::{Receiver, Sender, channel};
-#[cfg(not(target_arch = "wasm32"))]
-use std::time::SystemTime;
 
 // TODO: Probably shouldn't be cloned?
 #[derive(Debug, Clone)]
@@ -269,6 +267,13 @@ pub enum ScriptResponse {
     Error(Interpreter, Environment, ShimValue, String),
 }
 
+/// Messages sent from the file watcher thread to the Engine
+#[cfg(not(target_arch = "wasm32"))]
+enum ScriptWatcherMessage {
+    Loaded(Interpreter, Environment, ShimValue),
+    Error(String),
+}
+
 enum BridgeState {
     #[cfg(not(target_arch = "wasm32"))]
     Running,
@@ -281,11 +286,11 @@ pub struct ScriptBridge {
     pub draw_list: Vec<DrawListItem>,
     script_path: String,
     #[cfg(not(target_arch = "wasm32"))]
-    mtime: SystemTime,
-    #[cfg(not(target_arch = "wasm32"))]
     tx: Sender<ScriptRequest>,
     #[cfg(not(target_arch = "wasm32"))]
     rx: Receiver<ScriptResponse>,
+    #[cfg(not(target_arch = "wasm32"))]
+    watcher_rx: Receiver<ScriptWatcherMessage>,
 }
 
 fn shim_ig_begin(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
@@ -508,9 +513,15 @@ impl ScriptBridge {
         {
             let (request_tx, request_rx) = channel();
             let (response_tx, response_rx) = channel();
+            let (watcher_tx, watcher_rx) = channel();
 
             std::thread::spawn(move || {
                 script_thread_logic(request_rx, response_tx);
+            });
+
+            std::thread::spawn({
+                let path = script_path.clone();
+                move || file_watcher_logic(path, watcher_tx)
             });
 
             Self {
@@ -518,9 +529,9 @@ impl ScriptBridge {
                 interpreter_errors: Vec::new(),
                 draw_list: Vec::new(),
                 script_path,
-                mtime: SystemTime::UNIX_EPOCH,
                 tx: request_tx,
                 rx: response_rx,
+                watcher_rx,
             }
         }
 
@@ -538,43 +549,16 @@ impl ScriptBridge {
     pub fn step(&mut self, keys: &[u8], last_keys: &[u8]) {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            // Check for file changes and reload
-            match fs::metadata(&self.script_path) {
-                Ok(metadata) => match metadata.modified() {
-                    Ok(time) => {
-                        if self.mtime != time {
-                            self.mtime = time;
-                            match fs::read(&self.script_path) {
-                                Ok(bytes) => {
-                                    println!("{}", debug_u8s(&bytes));
-                                    match load_script(&bytes) {
-                                        Ok((interpreter, env, loop_fn)) => {
-                                            self.state =
-                                                BridgeState::Paused(Box::new(interpreter), env, loop_fn);
-                                            self.interpreter_errors = Vec::new();
-                                        }
-                                        Err(msg) => {
-                                            self.interpreter_errors.push(msg);
-                                        }
-                                    }
-                                }
-                                Err(_) => {
-                                    self.interpreter_errors
-                                        .push(format!("Could not read {}", self.script_path));
-                                }
-                            }
-                        }
+            // Apply any script reloads from the watcher thread
+            while let Ok(msg) = self.watcher_rx.try_recv() {
+                match msg {
+                    ScriptWatcherMessage::Loaded(interpreter, env, loop_fn) => {
+                        self.state = BridgeState::Paused(Box::new(interpreter), env, loop_fn);
+                        self.interpreter_errors = Vec::new();
                     }
-                    Err(e) => {
-                        self.interpreter_errors.push(format!(
-                            "Could not get modification time for {}: {}",
-                            self.script_path, e
-                        ));
+                    ScriptWatcherMessage::Error(msg) => {
+                        self.interpreter_errors.push(msg);
                     }
-                },
-                Err(_) => {
-                    println!("file not found {}", &self.script_path);
-                    // File not found yet; silently wait
                 }
             }
 
@@ -595,14 +579,17 @@ impl ScriptBridge {
                     }
                 }
 
-                match self.rx.recv().unwrap() {
-                    ScriptResponse::Error(interpreter, env, loop_fn, msg) => {
-                        self.state = BridgeState::Paused(Box::new(interpreter), env, loop_fn);
-                        self.interpreter_errors.push(msg);
-                    }
-                    ScriptResponse::LoopComplete(interpreter, env, loop_fn, draw_list) => {
-                        self.state = BridgeState::Paused(Box::new(interpreter), env, loop_fn);
-                        self.draw_list = draw_list;
+                {
+                    let _zone = zone_scoped!("Wait for interpreter response");
+                    match self.rx.recv().unwrap() {
+                        ScriptResponse::Error(interpreter, env, loop_fn, msg) => {
+                            self.state = BridgeState::Paused(Box::new(interpreter), env, loop_fn);
+                            self.interpreter_errors.push(msg);
+                        }
+                        ScriptResponse::LoopComplete(interpreter, env, loop_fn, draw_list) => {
+                            self.state = BridgeState::Paused(Box::new(interpreter), env, loop_fn);
+                            self.draw_list = draw_list;
+                        }
                     }
                 }
             }
@@ -665,6 +652,61 @@ impl ScriptBridge {
             BridgeState::Paused(interpreter, env, _loop_fn) => {
                 shimlang_debug_window.debug_window(interpreter, env);
             }
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn file_watcher_logic(script_path: String, tx: Sender<ScriptWatcherMessage>) {
+    use std::time::{Duration, SystemTime};
+    let mut mtime = SystemTime::UNIX_EPOCH;
+    loop {
+        std::thread::sleep(Duration::from_millis(200));
+        match fs::metadata(&script_path) {
+            Ok(metadata) => match metadata.modified() {
+                Ok(time) => {
+                    if mtime != time {
+                        mtime = time;
+                        match fs::read(&script_path) {
+                            Ok(bytes) => {
+                                println!("{}", debug_u8s(&bytes));
+                                let msg = match load_script(&bytes) {
+                                    Ok((interp, env, loop_fn)) => {
+                                        ScriptWatcherMessage::Loaded(interp, env, loop_fn)
+                                    }
+                                    Err(msg) => ScriptWatcherMessage::Error(msg),
+                                };
+                                if tx.send(msg).is_err() {
+                                    break;
+                                }
+                            }
+                            Err(_) => {
+                                if tx
+                                    .send(ScriptWatcherMessage::Error(format!(
+                                        "Could not read {}",
+                                        script_path
+                                    )))
+                                    .is_err()
+                                {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    if tx
+                        .send(ScriptWatcherMessage::Error(format!(
+                            "Could not get modification time for {}: {}",
+                            script_path, e
+                        )))
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            },
+            Err(_) => {} // File not found yet; silently wait
         }
     }
 }
