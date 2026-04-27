@@ -661,52 +661,58 @@ fn file_watcher_logic(script_path: String, tx: Sender<ScriptWatcherMessage>) {
     use std::time::{Duration, SystemTime};
     let mut mtime = SystemTime::UNIX_EPOCH;
     loop {
-        std::thread::sleep(Duration::from_millis(200));
-        match fs::metadata(&script_path) {
-            Ok(metadata) => match metadata.modified() {
-                Ok(time) => {
-                    if mtime != time {
-                        mtime = time;
-                        match fs::read(&script_path) {
-                            Ok(bytes) => {
-                                println!("{}", debug_u8s(&bytes));
-                                let msg = match load_script(&bytes) {
-                                    Ok((interp, env, loop_fn)) => {
-                                        ScriptWatcherMessage::Loaded(interp, env, loop_fn)
+        {
+            let _zone = zone_scoped!("Script update poll wait");
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        {
+            let _zone = zone_scoped!("Get script update");
+            match fs::metadata(&script_path) {
+                Ok(metadata) => match metadata.modified() {
+                    Ok(time) => {
+                        if mtime != time {
+                            mtime = time;
+                            match fs::read(&script_path) {
+                                Ok(bytes) => {
+                                    println!("{}", debug_u8s(&bytes));
+                                    let msg = match load_script(&bytes) {
+                                        Ok((interp, env, loop_fn)) => {
+                                            ScriptWatcherMessage::Loaded(interp, env, loop_fn)
+                                        }
+                                        Err(msg) => ScriptWatcherMessage::Error(msg),
+                                    };
+                                    if tx.send(msg).is_err() {
+                                        break;
                                     }
-                                    Err(msg) => ScriptWatcherMessage::Error(msg),
-                                };
-                                if tx.send(msg).is_err() {
-                                    break;
                                 }
-                            }
-                            Err(_) => {
-                                if tx
-                                    .send(ScriptWatcherMessage::Error(format!(
-                                        "Could not read {}",
-                                        script_path
-                                    )))
-                                    .is_err()
-                                {
-                                    break;
+                                Err(_) => {
+                                    if tx
+                                        .send(ScriptWatcherMessage::Error(format!(
+                                            "Could not read {}",
+                                            script_path
+                                        )))
+                                        .is_err()
+                                    {
+                                        break;
+                                    }
                                 }
                             }
                         }
                     }
-                }
-                Err(e) => {
-                    if tx
-                        .send(ScriptWatcherMessage::Error(format!(
-                            "Could not get modification time for {}: {}",
-                            script_path, e
-                        )))
-                        .is_err()
-                    {
-                        break;
+                    Err(e) => {
+                        if tx
+                            .send(ScriptWatcherMessage::Error(format!(
+                                "Could not get modification time for {}: {}",
+                                script_path, e
+                            )))
+                            .is_err()
+                        {
+                            break;
+                        }
                     }
-                }
-            },
-            Err(_) => {} // File not found yet; silently wait
+                },
+                Err(_) => {} // File not found yet; silently wait
+            }
         }
     }
 }
