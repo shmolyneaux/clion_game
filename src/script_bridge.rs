@@ -547,6 +547,7 @@ impl ScriptBridge {
     }
 
     pub fn step(&mut self, keys: &[u8], last_keys: &[u8]) {
+        let _zone = zone_scoped!("Run interpreter");
         #[cfg(not(target_arch = "wasm32"))]
         {
             // Apply any script reloads from the watcher thread
@@ -646,6 +647,7 @@ impl ScriptBridge {
     }
 
     pub fn debug_window(&mut self, shimlang_debug_window: &mut shimlang_imgui::Navigation) {
+        let _zone = zone_scoped!("ShimLang Debug");
         match &mut self.state {
             #[cfg(not(target_arch = "wasm32"))]
             BridgeState::Running => {}

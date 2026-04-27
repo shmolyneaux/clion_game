@@ -6,6 +6,7 @@ use crate::*;
 use glam::Vec3;
 
 pub fn draw_debug_shapes(state: &mut State) {
+    let _zone = zone_scoped!("draw_debug_shapes");
     unsafe {
         {
             let _zone = zone_scoped!("Bind Debug Vertex Data");

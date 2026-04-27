@@ -50,20 +50,19 @@ void error_window() {
     ImGui::SetNextWindowSize(ImVec2(600, 300), ImGuiCond_FirstUseEver);       // Set default size: 400x300
     ImGui::SetNextWindowPos(ImVec2(20, 350), ImGuiCond_FirstUseEver);        // Set default position: (100, 100)
 
-    ImGui::Begin("C++ message log", nullptr, ImGuiWindowFlags_NoFocusOnAppearing);
-
-    for (const auto &error : logs) {
-        ImGui::Text("%s", error.c_str());
+    if (!logs.empty()) {
+        ImGui::Begin("C++ message log", nullptr, ImGuiWindowFlags_NoFocusOnAppearing);
+        for (const auto &error : logs) {
+            ImGui::Text("%s", error.c_str());
+        }
+        ImGui::End();
     }
-
-    ImGui::End();
 }
 
 // Main code
 int main(int, char**)
 {
     bool startup_error = false;
-    log_error("Starting game....");
 
     // Setup SDL
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_GAMECONTROLLER | SDL_INIT_AUDIO) != 0)
@@ -76,7 +75,6 @@ int main(int, char**)
 
     // Decide GL+GLSL versions
 #if defined(IMGUI_IMPL_OPENGL_ES2)
-    log_error("Using OpenGL ES2");
     // GL ES 2.0 + GLSL 100 (WebGL 1.0)
     const char* glsl_version = "#version 100";
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, 0);
@@ -84,7 +82,6 @@ int main(int, char**)
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
 #elif defined(IMGUI_IMPL_OPENGL_ES3)
-    log_error("Using OpenGL ES3");
     // GL ES 3.0 + GLSL 300 es (WebGL 2.0)
     const char* glsl_version = "#version 300 es";
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, 0);
@@ -92,7 +89,6 @@ int main(int, char**)
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
 #elif defined(__APPLE__)
-    log_error("Apple or something?");
     // GL 3.2 Core + GLSL 150
     const char* glsl_version = "#version 150";
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG); // Always required on Mac
@@ -100,7 +96,6 @@ int main(int, char**)
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
 #else
-    log_error("Using OpenGL ES3 else case");
     // GL 3.0 + GLSL 130
     const char* glsl_version = "#version 300 es";
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, 0);
@@ -253,7 +248,7 @@ int main(int, char**)
     while (glGetError() != GL_NO_ERROR) {}
 
     // Our state
-    bool show_demo_window = true;
+    bool show_demo_window = false;
     ImVec4 clear_color = ImVec4(0.102f, 0.102f, 0.114f, 1.00f);
     glClearColor(clear_color.x * clear_color.w, clear_color.y * clear_color.w, clear_color.z * clear_color.w, clear_color.w);
 

@@ -6,6 +6,9 @@ use std::fmt;
 use std::fmt::Formatter;
 use std::os::raw::c_int;
 
+use crate::zone_scoped;
+use crate::___tracy_source_location_data;
+
 pub type ImGuiWindowFlags = c_int;
 
 #[repr(C)]
@@ -473,17 +476,20 @@ pub unsafe fn imgui_debug_inner(peek: &Peek, attributes: &[FieldAttribute], path
 }
 
 pub fn draw_log_window() {
+    let zone = zone_scoped!("IMGUI Debug Windows");
     crate::DEBUG_LOG.with_borrow(|logs| unsafe {
-        let mut open = true;
-        igBegin(
-            c"Rust Log Window".as_ptr(),
-            &mut open as *mut bool,
-            IMGUI_WINDOW_FLAGS_NO_FOCUS_ON_APPEARING,
-        );
-        for line in logs.iter() {
-            igText(line.as_ptr());
+        if !logs.is_empty() {
+            let mut open = true;
+            igBegin(
+                c"Rust Log Window".as_ptr(),
+                &mut open as *mut bool,
+                IMGUI_WINDOW_FLAGS_NO_FOCUS_ON_APPEARING,
+            );
+            for line in logs.iter() {
+                igText(line.as_ptr());
+            }
+            igEnd();
         }
-        igEnd();
     });
 }
 

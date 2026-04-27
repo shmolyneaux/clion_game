@@ -110,7 +110,6 @@ pub struct DebugState {
     normal_shift: f32,
     sdf_test_draw_normals: bool,
     sdf_test_draw_hoop: bool,
-    sdf_test_draw_wireframe: bool,
     sdf_box_size: Vec3,
     shimlang_debug_window: shimlang_imgui::Navigation,
 }
@@ -123,6 +122,9 @@ pub struct State {
     frame_num: u64,
     view: Mat4,
     projection: Mat4,
+
+    display_w: i32,
+    display_h: i32,
 
     debug_shader_program: Rc<ShaderProgram>,
     default_shader_program: Rc<ShaderProgram>,
@@ -167,6 +169,161 @@ pub struct State {
     default_texture: GLuint,
 }
 
+impl State {
+    fn move_camera_and_update_matrices(&mut self, delta: f32) {
+        let base_camera_speed = 2.0f32;
+        let camera_speed = if self.keys.pressed(SDL_SCANCODE_LCTRL) {
+            base_camera_speed * 0.2
+        } else if self.keys.pressed(SDL_SCANCODE_LSHIFT) {
+            base_camera_speed * 5.0
+        } else {
+            base_camera_speed
+        };
+
+        let mut xrel: i32 = 0;
+        let mut yrel: i32 = 0;
+
+        unsafe {
+            let button_bitmask =
+                SDL_GetRelativeMouseState(&mut xrel as *mut i32, &mut yrel as *mut i32);
+            if self.keys.pressed(SDL_SCANCODE_ESCAPE) {
+                SDL_SetRelativeMouseMode(false);
+                self.mouse_captured = false;
+            }
+
+            if button_bitmask.bit(0) && !igWantCaptureMouse() {
+                SDL_SetRelativeMouseMode(true);
+                self.mouse_captured = true;
+            }
+        }
+
+        let camera_sensitivity = 0.1;
+        if self.mouse_captured {
+            self.yaw += (xrel as f32) * camera_sensitivity;
+            self.pitch -= (yrel as f32) * camera_sensitivity;
+            self.pitch = self.pitch.clamp(-89.0, 89.0);
+
+            if self.keys.pressed(SDL_SCANCODE_S) {
+                self.camera_pos -= delta * camera_speed * self.camera_front;
+            }
+            if self.keys.pressed(SDL_SCANCODE_W) {
+                self.camera_pos += delta * camera_speed * self.camera_front;
+            }
+            if self.keys.pressed(SDL_SCANCODE_D) {
+                self.camera_pos +=
+                    self.camera_front.cross(self.camera_up).normalize() * delta * camera_speed;
+            }
+            if self.keys.pressed(SDL_SCANCODE_A) {
+                self.camera_pos -=
+                    self.camera_front.cross(self.camera_up).normalize() * delta * camera_speed;
+            }
+        }
+
+        let pitch = self.pitch;
+        let yaw = self.yaw;
+        let direction = Vec3::new(
+            yaw.to_radians().cos() * pitch.to_radians().cos(),
+            pitch.to_radians().sin(),
+            yaw.to_radians().sin() * pitch.to_radians().cos(),
+        );
+        self.camera_front = direction.normalize();
+
+        self.view = Mat4::look_at_rh(
+            self.camera_pos,
+            self.camera_pos + self.camera_front,
+            self.camera_up,
+        );
+        self.projection = Mat4::perspective_rh_gl(
+            f32::to_radians(45.0),
+            self.display_w as f32 / self.display_h as f32,
+            0.1f32,
+            100.0f32,
+        );
+    }
+
+    fn capture_frame(&mut self) {
+        {
+            let _zone = zone_scoped!("capture frame");
+            let recycled = self.frame_captures.pop_front().unwrap();
+            let texture = capture_frame_texture(
+                self.display_w,
+                self.display_h,
+                self.frame_capture_fbo,
+                Some(recycled),
+            );
+            self.frame_captures.push_back(texture);
+        }
+    }
+    fn handle_draw_list(
+        &mut self,
+        ctx: &mut HashMap<String, ShaderValue>,
+    ) {
+        unsafe {
+            gl::Disable(gl::DEPTH_TEST);
+            gl::Enable(gl::BLEND);
+            gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
+        }
+        for item in self.script_bridge.draw_list.iter() {
+            match item {
+                DrawListItem::Rect(rect) => {
+                    let texture: u32 = match &rect.texture {
+                        Some(id) => *self
+                            .shimlang_texture_handle_to_gl_texture
+                            .get(&id.texture_id)
+                            .unwrap() as u32,
+                        None => self.default_texture,
+                    };
+                    self.screen_quad_mesh.uniform_override.insert(
+                        "uResolution".to_string(),
+                        ShaderValue::Vec2(Vec2::new(self.display_w as f32, self.display_h as f32)),
+                    );
+                    self.screen_quad_mesh.uniform_override.insert(
+                        "uRectPos".to_string(),
+                        ShaderValue::Vec2(Vec2::new(rect.x.round(), rect.y.round())),
+                    );
+                    self.screen_quad_mesh.uniform_override.insert(
+                        "uRectSize".to_string(),
+                        ShaderValue::Vec2(Vec2::new(rect.w.round(), rect.h.round())),
+                    );
+                    self
+                        .screen_quad_mesh
+                        .uniform_override
+                        .insert("texture1".to_string(), ShaderValue::Sampler2D(texture));
+                    let [mr, mg, mb, ma] = rect.modulate;
+                    self.screen_quad_mesh.uniform_override.insert(
+                        "uModulate".to_string(),
+                        ShaderValue::Vec4(Vec4::new(
+                            mr as f32 / 255.0,
+                            mg as f32 / 255.0,
+                            mb as f32 / 255.0,
+                            ma as f32 / 255.0,
+                        )),
+                    );
+                    self.screen_quad_mesh.draw(ctx);
+                }
+                DrawListItem::CreateTexture(shimlang_texture_handle, w, h, rgba_bytes) => {
+                    let gl_texture_id = gen_cpu_texture(*w, *h, |x, y| {
+                        let i = ((y * w + x) * 4) as usize;
+                        [
+                            rgba_bytes[i],
+                            rgba_bytes[i + 1],
+                            rgba_bytes[i + 2],
+                            rgba_bytes[i + 3],
+                        ]
+                    });
+                    self
+                        .shimlang_texture_handle_to_gl_texture
+                        .insert(*shimlang_texture_handle, gl_texture_id as i32);
+                }
+            }
+        }
+        unsafe {
+            gl::Disable(gl::BLEND);
+            gl::Enable(gl::DEPTH_TEST);
+        }
+    }
+}
+
 thread_local! {
     static STATE_REFCELL: RefCell<Option<State>> = RefCell::default();
 }
@@ -203,6 +360,9 @@ fn draw_frame_captures(
     frame_capture_mesh: &mut StaticMesh,
     ctx: &mut HashMap<String, ShaderValue>,
 ) {
+    unsafe {
+        gl::Disable(gl::DEPTH_TEST);
+    }
     for (idx, frame_texture) in frame_captures.iter().enumerate() {
         if (idx as isize) < frame_captures.len() as isize - 10 {
             continue;
@@ -228,6 +388,96 @@ fn draw_frame_captures(
             .insert("h".to_string(), ShaderValue::Float(0.1));
         frame_capture_mesh.draw(ctx);
     }
+    unsafe {
+        gl::Enable(gl::DEPTH_TEST);
+    }
+}
+
+fn create_screen_quad_shader() -> Rc<ShaderProgram> {
+    let screen_quad_shader = ShaderProgram::create(
+        ShaderBuilder::new()
+            .with_input(ShaderSymbol::new(ShaderDataType::Vec3, "aPos"))
+            .with_input(ShaderSymbol::new(ShaderDataType::Vec2, "aUV"))
+            .with_uniform(ShaderSymbol::new(ShaderDataType::Vec2, "uResolution"))
+            .with_uniform(ShaderSymbol::new(ShaderDataType::Vec2, "uRectPos"))
+            .with_uniform(ShaderSymbol::new(ShaderDataType::Vec2, "uRectSize"))
+            .with_output(ShaderSymbol::new(ShaderDataType::Vec2, "uv"))
+            .with_code(
+                r#"
+                    void main() {
+                        vec2 pixel_pos = uRectPos + aPos.xy * uRectSize;
+                        gl_Position = vec4(
+                            pixel_pos.x * (2.0/uResolution.x) - 1.0,
+                            pixel_pos.y * (-2.0/uResolution.y) + 1.0,
+                            aPos.z,
+                            1.0
+                        );
+                        uv = aUV;
+                    }
+                "#
+                .to_string(),
+            )
+            .build_vertex_shader()
+            .unwrap(),
+        ShaderBuilder::new()
+            .with_input(ShaderSymbol::new(ShaderDataType::Vec2, "uv"))
+            .with_output(ShaderSymbol::new(ShaderDataType::Vec4, "FragColor"))
+            .with_uniform(ShaderSymbol::new(ShaderDataType::Sampler2D, "texture1"))
+            .with_uniform(ShaderSymbol::new(ShaderDataType::Vec4, "uModulate"))
+            .with_code(
+                r#"
+                    void main() {
+                        FragColor = texture(texture1, uv) * uModulate;
+                    }
+                "#
+                .to_string(),
+            )
+            .build_fragment_shader()
+            .unwrap(),
+    )
+    .expect("Could not build screen quad shader");
+    Rc::new(screen_quad_shader)
+}
+
+fn create_frame_capture_shader() -> Rc<ShaderProgram> {
+    let frame_capture_shader = ShaderProgram::create(
+        ShaderBuilder::new()
+            .with_input(ShaderSymbol::new(ShaderDataType::Vec3, "aPos"))
+            .with_input(ShaderSymbol::new(ShaderDataType::Vec2, "aUV"))
+            .with_output(ShaderSymbol::new(ShaderDataType::Vec2, "uv"))
+            .with_uniform(ShaderSymbol::new(ShaderDataType::Float, "x"))
+            .with_uniform(ShaderSymbol::new(ShaderDataType::Float, "y"))
+            .with_uniform(ShaderSymbol::new(ShaderDataType::Float, "w"))
+            .with_uniform(ShaderSymbol::new(ShaderDataType::Float, "h"))
+            .with_code(
+                r#"
+                    void main() {
+                        gl_Position = vec4(aPos.x*w, aPos.y*h, aPos.z, 1.0) + vec4(x, y, 0.0, 0.0);
+                        uv = aUV;
+                    }
+                "#
+                .to_string(),
+            )
+            .build_vertex_shader()
+            .unwrap(),
+        ShaderBuilder::new()
+            .with_input(ShaderSymbol::new(ShaderDataType::Vec2, "uv"))
+            .with_output(ShaderSymbol::new(ShaderDataType::Vec4, "FragColor"))
+            .with_uniform(ShaderSymbol::new(ShaderDataType::Sampler2D, "texture1"))
+            .with_code(
+                r#"
+                    void main() {
+                        FragColor = texture(texture1, uv);
+                    }
+                "#
+                .to_string(),
+            )
+            .build_fragment_shader()
+            .unwrap(),
+    )
+    .expect("Could not build frame capture shader");
+
+    Rc::new(frame_capture_shader)
 }
 
 fn create_default_shader() -> Rc<ShaderProgram> {
@@ -290,6 +540,12 @@ fn init_state() -> State {
 
     let view = Mat4::IDENTITY;
     let projection = Mat4::IDENTITY;
+
+    let mut display_w = 0;
+    let mut display_h = 0;
+    unsafe {
+        SHM_GetDrawableSize(&mut display_w as *mut i32, &mut display_h as *mut i32);
+    }
 
     let debug_verts = Vec::new();
     let debug_vert_indices = Vec::new();
@@ -354,172 +610,13 @@ fn init_state() -> State {
 
     let mouse_captured = true;
 
-    let default_vertex_shader = ShaderBuilder::new()
-        .with_input(ShaderSymbol::new(ShaderDataType::Vec3, "aPos"))
-        .with_uniform(ShaderSymbol::new(ShaderDataType::Mat4, "model"))
-        .with_uniform(ShaderSymbol::new(ShaderDataType::Mat4, "projection"))
-        .with_uniform(ShaderSymbol::new(ShaderDataType::Mat4, "view"))
-        .with_code(
-            r#"
-                void main() {
-                    gl_Position = projection * view * model * vec4(aPos, 1.0);
-                }
-            "#
-            .to_string(),
-        )
-        .build_vertex_shader()
-        .expect("Could not compile default vertex shader");
-
-    let default_fragment_shader = ShaderBuilder::new()
-        .with_output(ShaderSymbol::new(ShaderDataType::Vec4, "FragColor"))
-        .with_code(
-            r#"
-                void main() {
-                    FragColor = vec4(0.0, 1.0, 0.0, 1.0);
-                }
-            "#
-            .to_string(),
-        )
-        .build_fragment_shader()
-        .expect("Could not compiled default fragment shader");
-    log_opengl_errors!();
-
-    println!("Starting default shader compilation");
-    let default_shader = ShaderProgram::create(default_vertex_shader, default_fragment_shader)
-        .expect("Could not link default shader");
-    println!("Default shader created");
-    let _default_shader = Rc::new(default_shader);
-
-    println!("Creating vert color shader");
-    let vert_color_shader = ShaderProgram::create(
-        ShaderBuilder::new()
-            .with_input(ShaderSymbol::new(ShaderDataType::Vec3, "aPos"))
-            .with_input(ShaderSymbol::new(ShaderDataType::Vec3, "aColor"))
-            .with_uniform(ShaderSymbol::new(ShaderDataType::Mat4, "model"))
-            .with_uniform(ShaderSymbol::new(ShaderDataType::Mat4, "projection"))
-            .with_uniform(ShaderSymbol::new(ShaderDataType::Mat4, "view"))
-            .with_output(ShaderSymbol::new(ShaderDataType::Vec3, "color"))
-            .with_code(
-                r#"
-                    void main() {
-                        gl_Position = projection * view * model * vec4(aPos, 1.0);
-                        color = aColor;
-                    }
-                "#
-                .to_string(),
-            )
-            .build_vertex_shader()
-            .unwrap(),
-        ShaderBuilder::new()
-            .with_input(ShaderSymbol::new(ShaderDataType::Vec3, "color"))
-            .with_output(ShaderSymbol::new(ShaderDataType::Vec4, "FragColor"))
-            .with_code(
-                r#"
-                    void main() {
-                        FragColor = vec4(color, 1.0);
-                    }
-                "#
-                .to_string(),
-            )
-            .build_fragment_shader()
-            .unwrap(),
-    )
-    .expect("Could not build color shader");
-    let vert_color_shader = Rc::new(vert_color_shader);
-
     let mut numkeys: i32 = 0;
     unsafe { SDL_GetKeyboardState(&mut numkeys as *mut i32) };
     let keys = KeyState::new();
 
     let mut meshes = HashMap::new();
 
-    let red_shader = ShaderProgram::create(
-        ShaderBuilder::new()
-            .with_input(ShaderSymbol::new(ShaderDataType::Vec3, "aPos"))
-            .with_input(ShaderSymbol::new(ShaderDataType::Vec3, "aNormal"))
-            .with_uniform(ShaderSymbol::new(ShaderDataType::Mat4, "model"))
-            .with_uniform(ShaderSymbol::new(ShaderDataType::Mat4, "projection"))
-            .with_uniform(ShaderSymbol::new(ShaderDataType::Mat4, "view"))
-            .with_output(ShaderSymbol::new(ShaderDataType::Vec3, "normal"))
-            .with_code(
-                r#"
-                    void main() {
-                        gl_Position = projection * view * model * vec4(aPos, 1.0);
-                        normal = aNormal;
-                    }
-                "#
-                .to_string(),
-            )
-            .build_vertex_shader()
-            .unwrap(),
-        ShaderBuilder::new()
-            .with_input(ShaderSymbol::new(ShaderDataType::Vec3, "normal"))
-            .with_output(ShaderSymbol::new(ShaderDataType::Vec4, "FragColor"))
-            .with_uniform(ShaderSymbol::new(ShaderDataType::Vec3, "color"))
-            .with_code(
-                r#"
-                    void main() {
-                        FragColor = vec4(color, 1.0);
-                    }
-                "#
-                .to_string(),
-            )
-            .build_fragment_shader()
-            .unwrap(),
-    )
-    .expect("Could not build red shader");
-    let red_shader = Rc::new(red_shader);
-
-    let mut my_box = box_mesh(Vec3::new(1.0, 1.0, 1.0));
-    let mut box_static_mesh =
-        StaticMesh::create(red_shader.clone(), Rc::new(Mesh::create(&my_box).unwrap()))
-            .expect("Can't create the test mesh");
-
-    meshes.insert("red box".to_string(), box_static_mesh);
-
-    let screen_quad_shader = ShaderProgram::create(
-        ShaderBuilder::new()
-            .with_input(ShaderSymbol::new(ShaderDataType::Vec3, "aPos"))
-            .with_input(ShaderSymbol::new(ShaderDataType::Vec2, "aUV"))
-            .with_uniform(ShaderSymbol::new(ShaderDataType::Vec2, "uResolution"))
-            .with_uniform(ShaderSymbol::new(ShaderDataType::Vec2, "uRectPos"))
-            .with_uniform(ShaderSymbol::new(ShaderDataType::Vec2, "uRectSize"))
-            .with_output(ShaderSymbol::new(ShaderDataType::Vec2, "uv"))
-            .with_code(
-                r#"
-                    void main() {
-                        vec2 pixel_pos = uRectPos + aPos.xy * uRectSize;
-                        gl_Position = vec4(
-                            pixel_pos.x * (2.0/uResolution.x) - 1.0,
-                            pixel_pos.y * (-2.0/uResolution.y) + 1.0,
-                            aPos.z,
-                            1.0
-                        );
-                        uv = aUV;
-                    }
-                "#
-                .to_string(),
-            )
-            .build_vertex_shader()
-            .unwrap(),
-        ShaderBuilder::new()
-            .with_input(ShaderSymbol::new(ShaderDataType::Vec2, "uv"))
-            .with_output(ShaderSymbol::new(ShaderDataType::Vec4, "FragColor"))
-            .with_uniform(ShaderSymbol::new(ShaderDataType::Sampler2D, "texture1"))
-            .with_uniform(ShaderSymbol::new(ShaderDataType::Vec4, "uModulate"))
-            .with_code(
-                r#"
-                    void main() {
-                        FragColor = texture(texture1, uv) * uModulate;
-                    }
-                "#
-                .to_string(),
-            )
-            .build_fragment_shader()
-            .unwrap(),
-    )
-    .expect("Could not build screen quad shader");
-    let screen_quad_shader = Rc::new(screen_quad_shader);
+    let screen_quad_shader = create_screen_quad_shader();
 
     let screen_quad_mesh = StaticMesh::create(
         screen_quad_shader.clone(),
@@ -539,44 +636,7 @@ fn init_state() -> State {
     let frame_captures: VecDeque<GLuint> = (0..MAX_FRAME_CAPTURES)
         .map(|_| alloc_capture_texture())
         .collect();
-
-    let frame_capture_shader = ShaderProgram::create(
-        ShaderBuilder::new()
-            .with_input(ShaderSymbol::new(ShaderDataType::Vec3, "aPos"))
-            .with_input(ShaderSymbol::new(ShaderDataType::Vec2, "aUV"))
-            .with_output(ShaderSymbol::new(ShaderDataType::Vec2, "uv"))
-            .with_uniform(ShaderSymbol::new(ShaderDataType::Float, "x"))
-            .with_uniform(ShaderSymbol::new(ShaderDataType::Float, "y"))
-            .with_uniform(ShaderSymbol::new(ShaderDataType::Float, "w"))
-            .with_uniform(ShaderSymbol::new(ShaderDataType::Float, "h"))
-            .with_code(
-                r#"
-                    void main() {
-                        gl_Position = vec4(aPos.x*w, aPos.y*h, aPos.z, 1.0) + vec4(x, y, 0.0, 0.0);
-                        uv = aUV;
-                    }
-                "#
-                .to_string(),
-            )
-            .build_vertex_shader()
-            .unwrap(),
-        ShaderBuilder::new()
-            .with_input(ShaderSymbol::new(ShaderDataType::Vec2, "uv"))
-            .with_output(ShaderSymbol::new(ShaderDataType::Vec4, "FragColor"))
-            .with_uniform(ShaderSymbol::new(ShaderDataType::Sampler2D, "texture1"))
-            .with_code(
-                r#"
-                    void main() {
-                        FragColor = texture(texture1, uv);
-                    }
-                "#
-                .to_string(),
-            )
-            .build_fragment_shader()
-            .unwrap(),
-    )
-    .expect("Could not build frame capture shader");
-    let frame_capture_shader = Rc::new(frame_capture_shader);
+    let frame_capture_shader = create_frame_capture_shader();
 
     let frame_capture_mesh = StaticMesh::create(
         frame_capture_shader.clone(),
@@ -593,7 +653,6 @@ fn init_state() -> State {
 
     println!("State initialized!");
     
-
     State {
         script_bridge,
         frame_num,
@@ -602,6 +661,8 @@ fn init_state() -> State {
         debug_ebo,
         view,
         projection,
+        display_w,
+        display_h,
         debug_view_loc,
         debug_projection_loc,
         debug_shader_program,
@@ -657,142 +718,43 @@ fn update_keys(state: &mut State) {
 }
 
 fn frame(state: &mut State, delta: f32) {
-    if state.frame_num == 00 {
+    if state.frame_num == 0 {
         println!("Starting first frame");
     }
 
-    {
-        let _zone = zone_scoped!("imgui_debug");
-        //imgui_debug(state);
-    }
-
     unsafe {
-        let mut open = true;
-        igBegin(
-            c"From Rust".as_ptr(),
-            &mut open as *mut bool,
-            IMGUI_WINDOW_FLAGS_NO_FOCUS_ON_APPEARING,
-        );
-
-        {
-            let _zone = zone_scoped!("Run interpreter");
-            state
-                .script_bridge
-                .step(&state.keys.keys, &state.keys.last_keys);
-        }
-
-        for err in state.script_bridge.errors() {
-            igTextColoredBC(
-                0.7,
-                0.0,
-                0.0,
-                1.0,
-                0.5,
-                0.5,
-                0.5,
-                0.5,
-                CString::new(err.to_string()).unwrap().as_ptr(),
-            );
-        }
-
-        igTextColoredBC(
-            1.0,
-            1.0,
-            1.0,
-            1.0,
-            0.5,
-            0.5,
-            0.5,
-            0.5,
-            CString::new("BG text".to_string()).unwrap().as_ptr(),
-        );
-
         let _zone = zone_scoped!("rust frame unsafe block");
+
+        state
+            .script_bridge
+            .step(&state.keys.keys, &state.keys.last_keys);
+
         update_keys(state);
 
-        let test = [0.1, 0.1, 0.12, 1.0];
-        gl::ClearColor(test[0], test[1], test[2], test[3]);
-
-        debug_line_loop(
-            state,
-            &[
-                Vec3::new(-1.0f32, 1.0f32, 0.0f32),
-                Vec3::new(1.0f32, 1.0f32, 0.0f32),
-                Vec3::new(1.0f32, -1.0f32, 0.0f32),
-                Vec3::new(-1.0f32, -1.0f32, 0.0f32),
-            ],
+        gl::ClearColor(
+            0.1,
+            0.1,
+            0.12,
+            1.0,
         );
 
-        let base_camera_speed = 2.0f32;
-        let camera_speed = if state.keys.pressed(SDL_SCANCODE_LCTRL) {
-            base_camera_speed * 0.2
-        } else if state.keys.pressed(SDL_SCANCODE_LSHIFT) {
-            base_camera_speed * 5.0
-        } else {
-            base_camera_speed
-        };
+        state.move_camera_and_update_matrices(delta);
 
-        let mut xrel: i32 = 0;
-        let mut yrel: i32 = 0;
-
-        let button_bitmask =
-            SDL_GetRelativeMouseState(&mut xrel as *mut i32, &mut yrel as *mut i32);
-        if state.keys.pressed(SDL_SCANCODE_ESCAPE) {
-            SDL_SetRelativeMouseMode(false);
-            state.mouse_captured = false;
+        // Draw RGB axes
+        for axis in [
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+        ] {
+            debug_line_color(
+                state,
+                &[
+                    Vec3::new(0.0, 0.0, 0.0),
+                    axis,
+                ],
+                axis,
+            );
         }
-
-        if button_bitmask.bit(0) && !igWantCaptureMouse() {
-            SDL_SetRelativeMouseMode(true);
-            state.mouse_captured = true;
-        }
-
-        let camera_sensitivity = 0.1;
-        if state.mouse_captured {
-            state.yaw += (xrel as f32) * camera_sensitivity;
-            state.pitch -= (yrel as f32) * camera_sensitivity;
-            state.pitch = state.pitch.clamp(-89.0, 89.0);
-
-            if state.keys.pressed(SDL_SCANCODE_S) {
-                state.camera_pos -= delta * camera_speed * state.camera_front;
-            }
-            if state.keys.pressed(SDL_SCANCODE_W) {
-                state.camera_pos += delta * camera_speed * state.camera_front;
-            }
-            if state.keys.pressed(SDL_SCANCODE_D) {
-                state.camera_pos +=
-                    state.camera_front.cross(state.camera_up).normalize() * delta * camera_speed;
-            }
-            if state.keys.pressed(SDL_SCANCODE_A) {
-                state.camera_pos -=
-                    state.camera_front.cross(state.camera_up).normalize() * delta * camera_speed;
-            }
-        }
-
-        let pitch = state.pitch;
-        let yaw = state.yaw;
-        let direction = Vec3::new(
-            yaw.to_radians().cos() * pitch.to_radians().cos(),
-            pitch.to_radians().sin(),
-            yaw.to_radians().sin() * pitch.to_radians().cos(),
-        );
-        state.camera_front = direction.normalize();
-
-        state.view = Mat4::look_at_rh(
-            state.camera_pos,
-            state.camera_pos + state.camera_front,
-            state.camera_up,
-        );
-
-        let mut display_w: i32 = 0;
-        let mut display_h: i32 = 0;
-        SHM_GetDrawableSize(&mut display_w as *mut i32, &mut display_h as *mut i32);
-        state.projection = Mat4::perspective_rh_gl(
-            f32::to_radians(45.0),
-            display_w as f32 / display_h as f32,
-            0.1f32,
-            100.0f32,
-        );
 
         let mut ctx = HashMap::new();
         ctx.insert("view".to_string(), ShaderValue::Mat4(state.view));
@@ -801,147 +763,35 @@ fn frame(state: &mut State, delta: f32) {
             ShaderValue::Mat4(state.projection),
         );
 
-        igText(
-            CString::new(format!("Display size: {}x{}", display_w, display_h))
-                .unwrap()
-                .as_ptr(),
-        );
+        draw_debug_shapes(state);
 
-        #[cfg(target_arch = "wasm32")]
-        {
-            igBeginDisabled();
-        }
+        // TODO: I feel like this doesn't need to use the context since it's
+        // not using the camera
+        state.handle_draw_list(&mut ctx);
+        state.capture_frame();
 
-        igText(
-            CString::new(format!("Frame Rate: {:.2}ms/frame", 1000.0 / igFrameRate()))
-                .unwrap()
-                .as_ptr(),
-        );
-
-        igCheckbox(
-            c"Show SDF Wireframe".as_ptr(),
-            &mut state.debug_state.sdf_test_draw_wireframe as *mut bool,
-        );
-
-        #[cfg(target_arch = "wasm32")]
-        {
-            igEndDisabled();
-            if igIsItemHovered(IMGUI_HOVERED_FLAGS_ALLOW_WHEN_DISABLED) {
-                igSetTooltip(c"WebGL 2 does not support LINE polygon mode".as_ptr())
-            }
-        }
-
-        igEnd();
-
-        {
-            let zone = zone_scoped!("IMGUI Debug Windows");
-            {
-                let _zone = zone_scoped!("ShimLang Debug");
-                state
-                    .script_bridge
-                    .debug_window(&mut state.debug_state.shimlang_debug_window);
-
-                draw_log_window();
-            }
-        }
-
-        {
-            let _zone = zone_scoped!("draw_debug_shapes");
-            draw_debug_shapes(state);
-        }
-
-        gl::Disable(gl::DEPTH_TEST);
-
-        gl::Enable(gl::BLEND);
-        gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
-        for item in state.script_bridge.draw_list.iter() {
-            match item {
-                DrawListItem::Rect(rect) => {
-                    let texture: u32 = match &rect.texture {
-                        Some(id) => *state
-                            .shimlang_texture_handle_to_gl_texture
-                            .get(&id.texture_id)
-                            .unwrap() as u32,
-                        None => state.default_texture,
-                    };
-                    state.screen_quad_mesh.uniform_override.insert(
-                        "uResolution".to_string(),
-                        ShaderValue::Vec2(Vec2::new(display_w as f32, display_h as f32)),
-                    );
-                    state.screen_quad_mesh.uniform_override.insert(
-                        "uRectPos".to_string(),
-                        ShaderValue::Vec2(Vec2::new(rect.x.round(), rect.y.round())),
-                    );
-                    state.screen_quad_mesh.uniform_override.insert(
-                        "uRectSize".to_string(),
-                        ShaderValue::Vec2(Vec2::new(rect.w.round(), rect.h.round())),
-                    );
-                    state
-                        .screen_quad_mesh
-                        .uniform_override
-                        .insert("texture1".to_string(), ShaderValue::Sampler2D(texture));
-                    let [mr, mg, mb, ma] = rect.modulate;
-                    state.screen_quad_mesh.uniform_override.insert(
-                        "uModulate".to_string(),
-                        ShaderValue::Vec4(Vec4::new(
-                            mr as f32 / 255.0,
-                            mg as f32 / 255.0,
-                            mb as f32 / 255.0,
-                            ma as f32 / 255.0,
-                        )),
-                    );
-                    state.screen_quad_mesh.draw(&mut ctx);
-                }
-                DrawListItem::CreateTexture(shimlang_texture_handle, w, h, rgba_bytes) => {
-                    let gl_texture_id = gen_cpu_texture(*w, *h, |x, y| {
-                        let i = ((y * w + x) * 4) as usize;
-                        [
-                            rgba_bytes[i],
-                            rgba_bytes[i + 1],
-                            rgba_bytes[i + 2],
-                            rgba_bytes[i + 3],
-                        ]
-                    });
-                    state
-                        .shimlang_texture_handle_to_gl_texture
-                        .insert(*shimlang_texture_handle, gl_texture_id as i32);
-                }
-            }
-        }
-        gl::Disable(gl::BLEND);
-
-        {
-            let _zone = zone_scoped!("capture frame");
-            let recycled = state.frame_captures.pop_front().unwrap();
-            let texture = capture_frame_texture(
-                display_w,
-                display_h,
-                state.frame_capture_fbo,
-                Some(recycled),
-            );
-            state.frame_captures.push_back(texture);
-        }
+        // TODO: only show debug info when in a debug state
+        /*
+        state
+            .script_bridge
+            .debug_window(&mut state.debug_state.shimlang_debug_window);
+        draw_log_window();
         draw_frame_captures(
             &state.frame_captures,
             &mut state.frame_capture_mesh,
             &mut ctx,
         );
+        */
 
-        gl::Enable(gl::DEPTH_TEST);
+        log_opengl_errors!();
 
-        {
-            // let _zone = zone_scoped!("Log OpenGL Error Macro");
-            // // Log errors each frame. This call can be copied to wherever necessary to trace back to the bad call.
-            // log_opengl_errors!();
+        // The log window only displays if it has content
+        draw_log_window();
+
+        if state.frame_num == 0 {
+            println!("Finished first frame");
         }
-
-        {
-            let _zone = zone_scoped!("Increment frame counter");
-            if state.frame_num == 0 {
-                println!("Finished first frame");
-            }
-            state.frame_num += 1;
-        }
+        state.frame_num += 1;
     }
 }
 
