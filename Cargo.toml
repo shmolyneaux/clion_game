@@ -12,6 +12,7 @@ facet = { version = "0.27.14", optional = true}
 facet-reflect = { version = "0.27.14", optional = true }
 gl = "0.14.0"
 glam = "0.30.4"
+png = "0.18.1"
 shimlang = { path = "shimlang" }
 shm-tracy = { path = "shm-tracy" }
 

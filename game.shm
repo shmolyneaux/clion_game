@@ -131,7 +131,7 @@ fn debug_texture() {
     )
 }
 
-fn draw_text(x, y, text, color=None, scale=1.0, max_width=None) {
+fn scripted_draw_text(x, y, text, color=None, scale=1.0, max_width=None) {
     let font_width = 7*scale;
     let row = 0;
     let column = 0;
@@ -163,6 +163,8 @@ let texture = None;
 
 let y = 20;
 
+let message = "THE QUICK BROWN FOX\nJUMPS OVER THE LAZY DOG\nthe quick brown fox\njumps over the lazy dog";
+
 let frame_num = 0;
 fn loop() {
     frame_num += 1;
@@ -186,10 +188,23 @@ fn loop() {
         300,
     );
 
-    draw_text(
+    scripted_draw_text(
         x=200,
         y=40,
         text="HELLO, WORLD!",
         scale=2,
+    );
+
+    let char_count = int(frame_num / 5).min(message.len());
+
+    let substr = "";
+    for idx in 0..char_count {
+        substr += message[idx];
+    }
+    draw_text(
+        300,
+        400,
+        substr,
+        size=3.0,
     );
 }

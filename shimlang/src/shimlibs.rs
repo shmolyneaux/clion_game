@@ -2893,3 +2893,39 @@ pub(crate) fn shim_clamp(
     // Otherwise it's between the range, so we can return the value itself
     Ok(value)
 }
+
+
+pub(crate) fn shim_min(
+    _interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"self")?;
+    let min = unpacker.required(b"min")?;
+    unpacker.end()?;
+    match (value, min) {
+        (ShimValue::Integer(v), ShimValue::Integer(m)) => Ok(ShimValue::Integer(v.min(m))),
+        (ShimValue::Integer(v), ShimValue::Float(m)) => Ok(ShimValue::Float((v as f32).min(m))),
+        (ShimValue::Float(v), ShimValue::Integer(m)) => Ok(ShimValue::Float(v.min(m as f32))),
+        (ShimValue::Float(v), ShimValue::Float(m)) => Ok(ShimValue::Float(v.min(m))),
+        _ => Err("pow: expected int or float arguments".to_string()),
+    }
+}
+
+
+pub(crate) fn shim_max(
+    _interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"self")?;
+    let max = unpacker.required(b"max")?;
+    unpacker.end()?;
+    match (value, max) {
+        (ShimValue::Integer(v), ShimValue::Integer(m)) => Ok(ShimValue::Integer(v.max(m))),
+        (ShimValue::Integer(v), ShimValue::Float(m)) => Ok(ShimValue::Float((v as f32).max(m))),
+        (ShimValue::Float(v), ShimValue::Integer(m)) => Ok(ShimValue::Float(v.max(m as f32))),
+        (ShimValue::Float(v), ShimValue::Float(m)) => Ok(ShimValue::Float(v.max(m))),
+        _ => Err("pow: expected int or float arguments".to_string()),
+    }
+}

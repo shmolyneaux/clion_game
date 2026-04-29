@@ -52,8 +52,17 @@ pub struct DrawRect {
     pub region: Option<[f32; 4]>,
 }
 
+#[derive(Debug, Clone)]
+pub struct DrawText {
+    pub x: f32,
+    pub y: f32,
+    pub size: f32,
+    pub text: String,
+}
+
 pub enum DrawListItem {
     Rect(DrawRect),
+    Text(DrawText),
     CreateTexture(u32, u32, u32, Vec<u8>, bool),
 }
 
@@ -248,6 +257,10 @@ impl DrawList {
         self.items.push(DrawListItem::Rect(DrawRect { x, y, w, h, texture, modulate, region }));
     }
 
+    fn push_text(&mut self, x: f32, y: f32, size: f32, text: String) {
+        self.items.push(DrawListItem::Text(DrawText { x, y, size, text }));
+    }
+
     fn push_texture(&mut self, w: u32, h: u32, data: Vec<u8>, nearest: bool) -> TextureHandle {
         let id = self.next_texture_handle;
         self.next_texture_handle += 1;
@@ -383,7 +396,26 @@ fn shim_rect(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValu
     Ok(interpreter.mem.alloc_native(Rect { x1: clamp01(x1), y1: clamp01(y1), x2: clamp01(x2), y2: clamp01(y2) }))
 }
 
-fn shim_create_texture(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+fn shim_draw_text(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let x = unpacker.required_number(b"x")?;
+    let y = unpacker.required_number(b"y")?;
+    let size = unpacker.required_number(b"size")?;
+    let text_val = unpacker.required(b"text")?;
+    unpacker.end()?;
+
+    let text = text_val.to_string(interpreter);
+
+    interpreter
+        .fetch_mut::<DrawList>()
+        .push_text(x, y, size, text);
+    Ok(ShimValue::None)
+}
+
+fn shim_create_texture(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let w = unpacker.required_int(b"w")?;
     let h = unpacker.required_int(b"h")?;
@@ -460,6 +492,7 @@ fn load_script(bytes: &[u8]) -> Result<(Interpreter, Environment, ShimValue), St
         (b"ig_end", shim_ig_end),
         (b"ig_text", shim_ig_text),
         (b"draw_rect", shim_draw_rect),
+        (b"draw_text", shim_draw_text),
         (b"create_texture", shim_create_texture),
         (b"Rect", shim_rect),
     ];

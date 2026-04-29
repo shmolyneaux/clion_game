@@ -167,6 +167,7 @@ pub struct State {
 
     shimlang_texture_handle_to_gl_texture: HashMap<u32, i32>,
     default_texture: GLuint,
+    font_texture: GLuint,
 }
 
 impl State {
@@ -285,6 +286,14 @@ impl State {
                         "uRectSize".to_string(),
                         ShaderValue::Vec2(Vec2::new(rect.w.round(), rect.h.round())),
                     );
+                    self.screen_quad_mesh.uniform_override.insert(
+                        "uUVOffset".to_string(),
+                        ShaderValue::Vec2(Vec2::new(0.0, 0.0)),
+                    );
+                    self.screen_quad_mesh.uniform_override.insert(
+                        "uUVScale".to_string(),
+                        ShaderValue::Vec2(Vec2::new(1.0, 1.0)),
+                    );
                     self
                         .screen_quad_mesh
                         .uniform_override
@@ -306,6 +315,60 @@ impl State {
                     self.screen_quad_mesh.uniform_override.insert("uUVOffset".to_string(), ShaderValue::Vec2(uv_offset));
                     self.screen_quad_mesh.uniform_override.insert("uUVScale".to_string(), ShaderValue::Vec2(uv_scale));
                     self.screen_quad_mesh.draw(ctx);
+                }
+                DrawListItem::Text(text_item) => {
+                    const FONT_COLS: f32 = 16.0;
+                    const FONT_ROWS: f32 = 6.0;
+                    const CHAR_PX: f32 = 8.0;
+
+                    let char_w = (CHAR_PX * text_item.size).round();
+                    let char_h = (CHAR_PX * text_item.size).round();
+                    let origin_x = text_item.x;
+                    let mut cur_x = text_item.x;
+                    let mut cur_y = text_item.y;
+
+                    self.screen_quad_mesh.uniform_override.insert(
+                        "uResolution".to_string(),
+                        ShaderValue::Vec2(Vec2::new(self.display_w as f32, self.display_h as f32)),
+                    );
+                    self.screen_quad_mesh.uniform_override.insert(
+                        "uRectSize".to_string(),
+                        ShaderValue::Vec2(Vec2::new(char_w, char_h)),
+                    );
+                    self.screen_quad_mesh.uniform_override.insert(
+                        "texture1".to_string(),
+                        ShaderValue::Sampler2D(self.font_texture),
+                    );
+                    self.screen_quad_mesh.uniform_override.insert(
+                        "uModulate".to_string(),
+                        ShaderValue::Vec4(Vec4::new(1.0, 1.0, 1.0, 1.0)),
+                    );
+                    self.screen_quad_mesh.uniform_override.insert(
+                        "uUVScale".to_string(),
+                        ShaderValue::Vec2(Vec2::new(1.0 / FONT_COLS, 1.0 / FONT_ROWS)),
+                    );
+
+                    for byte in text_item.text.bytes() {
+                        if byte == b'\n' {
+                            cur_y += CHAR_PX * text_item.size;
+                            cur_x = origin_x;
+                            continue;
+                        }
+                        let glyph = if byte >= 32 && byte <= 127 { byte } else { 127 };
+                        let index = (glyph - 32) as f32;
+                        let col = (index as u32 % 16) as f32;
+                        let row = (index as u32 / 16) as f32;
+                        self.screen_quad_mesh.uniform_override.insert(
+                            "uRectPos".to_string(),
+                            ShaderValue::Vec2(Vec2::new(cur_x.round(), cur_y.round())),
+                        );
+                        self.screen_quad_mesh.uniform_override.insert(
+                            "uUVOffset".to_string(),
+                            ShaderValue::Vec2(Vec2::new(col / FONT_COLS, row / FONT_ROWS)),
+                        );
+                        self.screen_quad_mesh.draw(ctx);
+                        cur_x += char_w;
+                    }
                 }
                 DrawListItem::CreateTexture(shimlang_texture_handle, w, h, rgba_bytes, nearest) => {
                     let gl_texture_id = gen_cpu_texture(*w, *h, *nearest, |x, y| {
@@ -359,6 +422,30 @@ pub(crate) fn logc(s: CString) {
 
 const fn compile_time_checks() {
     assert!(size_of::<u8>() == 1);
+}
+
+use png::{Decoder, Transformations};
+use std::io::Cursor;
+
+static FONT_BYTES: &[u8] = include_bytes!("../font_atlas_1bit.png");
+
+fn load_png_from_bytes(bytes: &[u8]) -> (Vec<(u8, u8, u8, u8)>, u32, u32) {
+    let mut decoder = Decoder::new(Cursor::new(bytes));
+    decoder.set_transformations(Transformations::EXPAND | Transformations::STRIP_16 | Transformations::ALPHA);
+    let mut reader = decoder.read_info().expect("Failed to read PNG info");
+
+    let mut buf = vec![0u8; reader.output_buffer_size().expect("Failed to read output buffer size")];
+
+    let info = reader.next_frame(&mut buf).expect("Failed to read PNG frame");
+    let width = info.width;
+    let height = info.height;
+
+    let pixels = buf[..info.buffer_size()]
+        .chunks_exact(4)
+        .map(|c| (c[0], c[1], c[2], c[3]))
+        .collect();
+
+    (pixels, width, height)
 }
 
 fn draw_frame_captures(
@@ -536,6 +623,11 @@ fn create_default_shader() -> Rc<ShaderProgram> {
 
 fn init_state() -> State {
     log_opengl_errors!();
+    let (font_pixels, font_w, font_h) = load_png_from_bytes(FONT_BYTES);
+    let font_texture = gen_cpu_texture(font_w, font_h, true, |x, y| {
+        let (r, g, b, a) = font_pixels[(y * font_w + x) as usize];
+        [r, g, b, if r == 255 { 255 } else { 0 }]
+    });
     println!("Starting Rust state initialization");
 
     println!("Creating interpreter");
@@ -694,6 +786,7 @@ fn init_state() -> State {
         debug_state,
         shimlang_texture_handle_to_gl_texture: HashMap::new(),
         default_texture,
+        font_texture,
     }
 }
 
