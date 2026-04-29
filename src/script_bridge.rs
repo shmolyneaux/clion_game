@@ -25,6 +25,22 @@ impl ShimNative for TextureHandle {
     }
 }
 
+/// A UV rectangle with all values in the range [0.0, 1.0], (0,0) = top-left.
+/// (x1, y1) is the top-left corner; (x2, y2) is the bottom-right corner.
+#[derive(Debug, Clone)]
+pub struct Rect {
+    pub x1: f32,
+    pub y1: f32,
+    pub x2: f32,
+    pub y2: f32,
+}
+
+impl ShimNative for Rect {
+    fn gc_vals(&self) -> Vec<ShimValue> {
+        Vec::new()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct DrawRect {
     pub x: f32,
@@ -33,11 +49,12 @@ pub struct DrawRect {
     pub h: f32,
     pub texture: Option<TextureHandle>,
     pub modulate: [u8; 4],
+    pub region: Option<[f32; 4]>,
 }
 
 pub enum DrawListItem {
     Rect(DrawRect),
-    CreateTexture(u32, u32, u32, Vec<u8>),
+    CreateTexture(u32, u32, u32, Vec<u8>, bool),
 }
 
 #[derive(Default)]
@@ -227,29 +244,14 @@ impl DrawList {
         }
     }
 
-    fn push_rect(
-        &mut self,
-        x: f32,
-        y: f32,
-        w: f32,
-        h: f32,
-        texture: Option<TextureHandle>,
-        modulate: [u8; 4],
-    ) {
-        self.items.push(DrawListItem::Rect(DrawRect {
-            x,
-            y,
-            w,
-            h,
-            texture,
-            modulate,
-        }));
+    fn push_rect(&mut self, x: f32, y: f32, w: f32, h: f32, texture: Option<TextureHandle>, modulate: [u8; 4], region: Option<[f32; 4]>) {
+        self.items.push(DrawListItem::Rect(DrawRect { x, y, w, h, texture, modulate, region }));
     }
 
-    fn push_texture(&mut self, w: u32, h: u32, data: Vec<u8>) -> TextureHandle {
+    fn push_texture(&mut self, w: u32, h: u32, data: Vec<u8>, nearest: bool) -> TextureHandle {
         let id = self.next_texture_handle;
         self.next_texture_handle += 1;
-        self.items.push(DrawListItem::CreateTexture(id, w, h, data));
+        self.items.push(DrawListItem::CreateTexture(id, w, h, data, nearest));
         TextureHandle { texture_id: id }
     }
 }
@@ -356,22 +358,37 @@ fn shim_draw_rect(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shi
     let g = optional_channel(unpacker.optional(b"g"))?;
     let b = optional_channel(unpacker.optional(b"b"))?;
     let a = optional_channel(unpacker.optional(b"a"))?;
+    let region: Option<[f32; 4]> = match unpacker.optional(b"region") {
+        Some(val) => {
+            let rect = val.as_native::<Rect>(interpreter)?;
+            Some([rect.x1, rect.y1, rect.x2, rect.y2])
+        }
+        None => None,
+    };
     unpacker.end()?;
 
-    interpreter
-        .fetch_mut::<DrawList>()
-        .push_rect(x, y, w, h, texture, [r, g, b, a]);
+    interpreter.fetch_mut::<DrawList>().push_rect(x, y, w, h, texture, [r, g, b, a], region);
     Ok(ShimValue::None)
 }
 
-fn shim_create_texture(
-    interpreter: &mut Interpreter,
-    args: &ArgBundle,
-) -> Result<ShimValue, String> {
+fn shim_rect(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let x1 = unpacker.required_number(b"x1")?;
+    let y1 = unpacker.required_number(b"y1")?;
+    let x2 = unpacker.required_number(b"x2")?;
+    let y2 = unpacker.required_number(b"y2")?;
+    unpacker.end()?;
+
+    fn clamp01(v: f32) -> f32 { v.clamp(0.0, 1.0) }
+    Ok(interpreter.mem.alloc_native(Rect { x1: clamp01(x1), y1: clamp01(y1), x2: clamp01(x2), y2: clamp01(y2) }))
+}
+
+fn shim_create_texture(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let w = unpacker.required_int(b"w")?;
     let h = unpacker.required_int(b"h")?;
     let data = unpacker.required_list(interpreter, b"rgba_bytes")?;
+    let nearest = matches!(unpacker.optional(b"nearest"), Some(ShimValue::Bool(true)));
     unpacker.end()?;
 
     let w: u32 = if w < 0 {
@@ -427,9 +444,7 @@ fn shim_create_texture(
         });
     }
 
-    let handle = interpreter
-        .fetch_mut::<DrawList>()
-        .push_texture(w, h, rgba_bytes);
+    let handle = interpreter.fetch_mut::<DrawList>().push_texture(w, h, rgba_bytes, nearest);
 
     Ok(interpreter.mem.alloc_native(handle))
 }
@@ -446,6 +461,7 @@ fn load_script(bytes: &[u8]) -> Result<(Interpreter, Environment, ShimValue), St
         (b"ig_text", shim_ig_text),
         (b"draw_rect", shim_draw_rect),
         (b"create_texture", shim_create_texture),
+        (b"Rect", shim_rect),
     ];
     for (name, func) in builtins {
         let position = interpreter.mem.alloc_and_set(

@@ -299,10 +299,16 @@ impl State {
                             ma as f32 / 255.0,
                         )),
                     );
+                    let (uv_offset, uv_scale) = match rect.region {
+                        Some([x1, y1, x2, y2]) => (Vec2::new(x1, y1), Vec2::new(x2 - x1, y2 - y1)),
+                        None => (Vec2::new(0.0, 0.0), Vec2::new(1.0, 1.0)),
+                    };
+                    self.screen_quad_mesh.uniform_override.insert("uUVOffset".to_string(), ShaderValue::Vec2(uv_offset));
+                    self.screen_quad_mesh.uniform_override.insert("uUVScale".to_string(), ShaderValue::Vec2(uv_scale));
                     self.screen_quad_mesh.draw(ctx);
                 }
-                DrawListItem::CreateTexture(shimlang_texture_handle, w, h, rgba_bytes) => {
-                    let gl_texture_id = gen_cpu_texture(*w, *h, |x, y| {
+                DrawListItem::CreateTexture(shimlang_texture_handle, w, h, rgba_bytes, nearest) => {
+                    let gl_texture_id = gen_cpu_texture(*w, *h, *nearest, |x, y| {
                         let i = ((y * w + x) * 4) as usize;
                         [
                             rgba_bytes[i],
@@ -401,6 +407,8 @@ fn create_screen_quad_shader() -> Rc<ShaderProgram> {
             .with_uniform(ShaderSymbol::new(ShaderDataType::Vec2, "uResolution"))
             .with_uniform(ShaderSymbol::new(ShaderDataType::Vec2, "uRectPos"))
             .with_uniform(ShaderSymbol::new(ShaderDataType::Vec2, "uRectSize"))
+            .with_uniform(ShaderSymbol::new(ShaderDataType::Vec2, "uUVOffset"))
+            .with_uniform(ShaderSymbol::new(ShaderDataType::Vec2, "uUVScale"))
             .with_output(ShaderSymbol::new(ShaderDataType::Vec2, "uv"))
             .with_code(
                 r#"
@@ -412,7 +420,7 @@ fn create_screen_quad_shader() -> Rc<ShaderProgram> {
                             aPos.z,
                             1.0
                         );
-                        uv = aUV;
+                        uv = uUVOffset + aUV * uUVScale;
                     }
                 "#
                 .to_string(),
@@ -649,7 +657,7 @@ fn init_state() -> State {
         gl::GenFramebuffers(1, &mut frame_capture_fbo as *mut u32);
     }
 
-    let default_texture = gen_cpu_texture(128, 128, |x, y| [0xff, 0xff, 0xff, 0xff]);
+    let default_texture = gen_cpu_texture(128, 128, false, |x, y| [0xff, 0xff, 0xff, 0xff]);
 
     println!("State initialized!");
     

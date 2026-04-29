@@ -29,7 +29,7 @@ macro_rules! log_opengl_errors {
     };
 }
 
-pub fn gen_cpu_texture(width: u32, height: u32, f: impl Fn(u32, u32) -> [u8; 4]) -> GLuint {
+pub fn gen_cpu_texture(width: u32, height: u32, nearest: bool, f: impl Fn(u32, u32) -> [u8; 4]) -> GLuint {
     let mut my_data: Vec<u8> = vec![0u8; (width * height * 4) as usize];
 
     for x in 0..width {
@@ -42,19 +42,20 @@ pub fn gen_cpu_texture(width: u32, height: u32, f: impl Fn(u32, u32) -> [u8; 4])
         }
     }
 
-    texture_from_rgba(width, height, &my_data)
+    texture_from_rgba(width, height, nearest, &my_data)
 }
 
-pub fn texture_from_rgba(width: u32, height: u32, rgba_bytes: &[u8]) -> GLuint {
+pub fn texture_from_rgba(width: u32, height: u32, nearest: bool, rgba_bytes: &[u8]) -> GLuint {
     let mut texture: GLuint = 0;
+    let filter = if nearest { gl::NEAREST } else { gl::LINEAR } as i32;
     unsafe {
         gl::GenTextures(1, &mut texture as *mut u32);
         gl::BindTexture(gl::TEXTURE_2D, texture);
 
         gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE as i32);
         gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE as i32);
-        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32);
-        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32);
+        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, filter);
+        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, filter);
 
         gl::TexImage2D(
             gl::TEXTURE_2D,
