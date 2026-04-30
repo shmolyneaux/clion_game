@@ -813,6 +813,10 @@ fn frame(state: &mut State, delta: f32) {
     unsafe {
         let _zone = zone_scoped!("rust frame unsafe block");
 
+        unsafe {
+            SHM_GetDrawableSize(&mut state.display_w as *mut i32, &mut state.display_h as *mut i32);
+        }
+
         if !state.edit_mode {
             state
                 .script_bridge

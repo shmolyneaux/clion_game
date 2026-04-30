@@ -1,210 +1,156 @@
-struct Point {
-    x,
-    y,
-}
-
-let p = Point(1, 3);
-
-let frame_num = 0;
-
-let char_width = 7;
-let char_height = 7;
-let text_data = [
-    "                                                                   ",
-    "  ###  ####   ###  ####  ##### #####  ###  #   # ##### ##### #   # ",
-    " #   # #   # #   # #   # #     #     #     #   #   #      #  #  #  ",
-    " #   # ####  #     #   # ####  ####  # ### #####   #      #  ###   ",
-    " ##### #   # #   # #   # #     #     #   # #   #   #   #  #  #  #  ",
-    " #   # ####   ###  ####  ##### #      ###  #   # #####  ##   #   # ",
-    "                                                                   ",
-    " #     ####  #   #  ###  ####   ###  ####   #### ##### #   # #   # ",
-    " #     # # # ##  # #   # #   # #   # #   # #       #   #   # #   # ",
-    " #     # # # # # # #   # ####  # # # ####   ###    #   #   # #   # ",
-    " #     # # # #  ## #   # #     #  #  #  #      #   #   #   #  # #  ",
-    " ##### # # # #   #  ###  #      ## # #   # ####    #    ###    #   ",
-    "                                                                   ",
-    " #   # #   # #   # #####  ##    ###   ###   ###  #####  ###  ##### ",
-    " #   #  # #  #   #    #  # #   #   # #   # #  #  #     #         # ",
-    " # # #   #    # #    #     #       #   ##  #  #  ####  ####     #  ",
-    " # # #  # #    #    #      #      #  #   # #####     # #   #   #   ",
-    "  # #  #   #   #   ##### ##### #####  ###     #  ####   ###   #    ",
-    "                                                                   ",
-    "  ###   ###   ###  #####              ###                          ",
-    " #   # #   # #  ## #####              ###   ###                    ",
-    "  ###   #### # # # #####               #    ###                    ",
-    " #   #     # ##  # #####        ###           #                    ",
-    "  ###   ###   ###  #####        ###    #     #                     ",
-    "                                                                   ",
-];
-
-let char_spacing_x = 6.0/text_data[0].len();
-let char_spacing_y = 6.0/text_data.len();
-
-let char_width_clip = 7.0/text_data[0].len();
-let char_height_clip = 7.0/text_data.len();
-let font_clip = dict();
-
-let font_map = [
-    ["A", 0],
-    ["B", 1],
-    ["C", 2],
-    ["D", 3],
-    ["E", 4],
-    ["F", 5],
-    ["G", 6],
-    ["H", 7],
-    ["I", 8],
-    ["J", 9],
-    ["K", 10],
-    ["L", 11],
-    ["M", 12],
-    ["N", 13],
-    ["O", 14],
-    ["P", 15],
-    ["Q", 16],
-    ["R", 17],
-    ["S", 18],
-    ["T", 19],
-    ["U", 20],
-    ["V", 21],
-    ["W", 22],
-    ["X", 23],
-    ["Y", 24],
-    ["Z", 25],
-    ["1", 26],
-    ["2", 27],
-    ["3", 28],
-    ["4", 29],
-    ["5", 30],
-    ["6", 31],
-    ["7", 32],
-    ["8", 33],
-    ["9", 34],
-    ["0", 35],
-    ["#", 36],
-    [" ", 37],
-    [".", 38],
-    ["!", 39],
-    [",", 40],
-];
-
-for char_info in font_map {
-    let char = char_info[0];
-    let pos = char_info[1];
-
-    let atlas_pos_x = pos % 11;
-    let atlas_pos_y = (pos / 11).floor();
-
-    font_clip[char] = Rect(
-        atlas_pos_x*char_spacing_x,
-        atlas_pos_y*char_spacing_y,
-        atlas_pos_x*char_spacing_x + char_width_clip,
-        atlas_pos_y*char_spacing_y + char_height_clip,
-    );
-}
-
-fn debug_texture() {
+let PADDLE_TEXTURE = {
     let data = [];
-    let width = text_data[0].len();
-    let height = text_data.len();
-    let pound = "#";
-    for line in text_data {
-        for char in line {
-            if char == pound {
-                data.append(255);
-                data.append(255);
-                data.append(255);
-                data.append(255);
-            } else {
-                data.append(0);
-                data.append(0);
-                data.append(0);
-                data.append(255);
-            }
+    let width = 100;
+    let height = 50;
+
+    for y in 0..height {
+        for x in 0..width {
+            data.append(x);
+            data.append(0);
+            data.append(0);
+            data.append(255);
         }
     }
+
     create_texture(
         width,
         height,
         data,
-        nearest=true,
     )
+};
+
+let BUTTON_WIDTH = 500;
+let BUTTON_HEIGHT = 50;
+let BUTTON_TEXTURE = {
+    let data = [];
+    let width = BUTTON_WIDTH;
+    let height = BUTTON_HEIGHT;
+
+    for y in 0..height {
+        for x in 0..width {
+            data.append(x);
+            data.append(0);
+            data.append(0);
+            data.append(255);
+        }
+    }
+
+    create_texture(
+        width,
+        height,
+        data,
+    )
+};
+
+let MENU_BUTTONS = [
+    "START",
+    "OPTIONS",
+];
+let BUTTON_PADDING = 10;
+struct Menu {
+    button_highlight_start_frame = 0,
+    selected_button = 0,
+
+    fn tick(self) {
+        let viewport = window_size();
+        let button_num = 0;
+
+        self.selected_button += if key.W.just_pressed { self.button_highlight_start_frame = frame_num; -1 } else { 0 };
+        self.selected_button += if key.S.just_pressed { self.button_highlight_start_frame = frame_num; 1 } else { 0 };
+        self.selected_button %= MENU_BUTTONS.len();
+
+        let total_height = MENU_BUTTONS.len()*BUTTON_HEIGHT + (MENU_BUTTONS.len() - 1)*BUTTON_PADDING;
+
+        if ig_begin("game") {
+            ig_text("Selected button: \(self.selected_button)");
+            ig_text("(-1) %% 2 == \((-1) % 2)");
+            ig_text("self: \(self)");
+            ig_end();
+        }
+        let font_size = 4.0;
+        let font_size_pixels = font_size*8.0;
+        let label_height = font_size*7.0;
+
+        // The top row of pixels for the font is transparent, so we want to
+        // have a 1 pixel (times the font size) offset to have the font appear
+        // precisely centered in the button. 
+        let label_offset = font_size;
+
+        let y = 0;
+        for label in MENU_BUTTONS {
+            draw_rect(
+                (viewport[0] - BUTTON_WIDTH)/2,
+                (viewport[1] - total_height)/2 + y,
+                BUTTON_WIDTH,
+                BUTTON_HEIGHT,
+                texture=BUTTON_TEXTURE,
+                r=if (self.selected_button == button_num) {
+                    (((frame_num - self.button_highlight_start_frame)/15).sin()+1.0)/2
+                } else {
+                    0.5
+                },
+                g=1.0,
+                b=1.0,
+                a=1.0,
+            );
+            let label_width = label.len()*font_size_pixels;
+            draw_text(
+                (viewport[0] - BUTTON_WIDTH)/2 + (BUTTON_WIDTH - label_width)/2,
+                (viewport[1] - total_height)/2 + (BUTTON_HEIGHT - label_height)/2 - label_offset + y,
+                label,
+                size=font_size,
+            );
+            y += BUTTON_HEIGHT + BUTTON_PADDING;
+            button_num += 1;
+        }
+    }
 }
 
-fn scripted_draw_text(x, y, text, color=None, scale=1.0, max_width=None) {
-    let font_width = 7*scale;
-    let row = 0;
-    let column = 0;
-    for c in text{
-        if c == "\n" {
-            column = 0;
-            row += 1;
-            continue;
-        }
+struct Game {
+    fn tick(self) {
+        let speed = if key.LeftShift.pressed { 5 } else { 1 };
+        y += if key.W.pressed { -speed } else { 0 };
+        y += if key.S.pressed { speed } else { 0 };
 
-        if max_width and column == max_width {
-            column = 0;
-            row += 1;
+        if ig_begin("from shimlang") {
+            ig_text(p);
+            ig_end();
         }
 
         draw_rect(
-            x+column*font_width,
-            y+row*font_width,
-            font_width,
-            font_width,
-            texture=texture,
-            region=font_clip.get(c) or font_clip["#"],
+            10,
+            y,
+            200,
+            300,
         );
-        column += 1;
+
+        scripted_draw_text(
+            x=200,
+            y=40,
+            text="HELLO, WORLD!",
+            scale=2,
+        );
+
+        let char_count = int(frame_num / 5).min(message.len());
+
+        let substr = "";
+        for idx in 0..char_count {
+            substr += message[idx];
+        }
+        draw_text(
+            300,
+            400,
+            substr,
+            size=3.0,
+        );
     }
 }
 
-let texture = None;
-
-let y = 20;
-
-let message = "THE QUICK BROWN FOX\nJUMPS OVER THE LAZY DOG\nthe quick brown fox\njumps over the lazy dog";
+let state = Menu();
 
 let frame_num = 0;
 fn loop() {
+    state.tick();
+
     frame_num += 1;
-    if frame_num == 1 {
-        texture = debug_texture();
-    }
-
-    let speed = if key.LeftShift.pressed { 5 } else { 1 };
-    y += if key.W.pressed { -speed } else { 0 };
-    y += if key.S.pressed { speed } else { 0 };
-
-    if ig_begin("from shimlang") {
-        ig_text(p);
-        ig_end();
-    }
-
-    draw_rect(
-        10,
-        y,
-        200,
-        300,
-    );
-
-    scripted_draw_text(
-        x=200,
-        y=40,
-        text="HELLO, WORLD!",
-        scale=2,
-    );
-
-    let char_count = int(frame_num / 5).min(message.len());
-
-    let substr = "";
-    for idx in 0..char_count {
-        substr += message[idx];
-    }
-    draw_text(
-        300,
-        400,
-        substr,
-        size=3.0,
-    );
 }

@@ -481,6 +481,27 @@ fn shim_create_texture(
     Ok(interpreter.mem.alloc_native(handle))
 }
 
+fn shim_window_size(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
+    ArgUnpacker::new(args).end()?;
+
+    let mut display_w = 0;
+    let mut display_h = 0;
+    unsafe {
+        SHM_GetDrawableSize(&mut display_w as *mut i32, &mut display_h as *mut i32);
+    }
+
+    let new_lst_val = interpreter.mem.alloc_list();
+    let new_lst = new_lst_val.list_mut(interpreter)?;
+
+    new_lst.push(&mut interpreter.mem, ShimValue::Integer(display_w));
+    new_lst.push(&mut interpreter.mem, ShimValue::Integer(display_h));
+
+    Ok(new_lst_val)
+}
+
 fn load_script(bytes: &[u8]) -> Result<(Interpreter, Environment, ShimValue), String> {
     let ast = shimlang::ast_from_text(bytes)?;
     let program = shimlang::compile_ast(&ast)?;
@@ -495,6 +516,7 @@ fn load_script(bytes: &[u8]) -> Result<(Interpreter, Environment, ShimValue), St
         (b"draw_text", shim_draw_text),
         (b"create_texture", shim_create_texture),
         (b"Rect", shim_rect),
+        (b"window_size", shim_window_size),
     ];
     for (name, func) in builtins {
         let position = interpreter.mem.alloc_and_set(

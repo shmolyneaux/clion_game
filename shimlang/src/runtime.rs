@@ -1162,7 +1162,7 @@ impl ShimValue {
         }
     }
 
-    pub(crate) fn attr_call(
+    pub fn attr_call(
         &self,
         ident: &[u8],
         interpreter: &mut Interpreter,
@@ -1193,7 +1193,7 @@ impl ShimValue {
         }
     }
 
-    pub(crate) fn dict_mut(&self, interpreter: &mut Interpreter) -> Result<&mut ShimDict, String> {
+    pub fn dict_mut(&self, interpreter: &mut Interpreter) -> Result<&mut ShimDict, String> {
         match self {
             ShimValue::Dict(position) => {
                 let dict: &mut ShimDict = unsafe {
@@ -1205,7 +1205,7 @@ impl ShimValue {
         }
     }
 
-    pub(crate) fn dict(&self, interpreter: &Interpreter) -> Result<&ShimDict, String> {
+    pub fn dict(&self, interpreter: &Interpreter) -> Result<&ShimDict, String> {
         match self {
             ShimValue::Dict(position) => {
                 let dict: &ShimDict =
@@ -1216,7 +1216,7 @@ impl ShimValue {
         }
     }
 
-    pub(crate) fn list_mut(&self, interpreter: &mut Interpreter) -> Result<&mut ShimList, String> {
+    pub fn list_mut(&self, interpreter: &mut Interpreter) -> Result<&mut ShimList, String> {
         match self {
             ShimValue::List(position) => unsafe {
                 Ok(std::mem::transmute::<&mut u64, &mut ShimList>(
@@ -1227,7 +1227,7 @@ impl ShimValue {
         }
     }
 
-    pub(crate) fn list_from_mem(&self, mem: &MMU) -> Result<&ShimList, String> {
+    pub fn list_from_mem(&self, mem: &MMU) -> Result<&ShimList, String> {
         match self {
             ShimValue::List(position) => unsafe {
                 Ok(std::mem::transmute::<&u64, &ShimList>(&mem.mem[usize::from(*position)]))
@@ -1236,7 +1236,7 @@ impl ShimValue {
         }
     }
 
-    pub(crate) fn list(&self, interpreter: &Interpreter) -> Result<&ShimList, String> {
+    pub fn list(&self, interpreter: &Interpreter) -> Result<&ShimList, String> {
         self.list_from_mem(&interpreter.mem)
     }
 
