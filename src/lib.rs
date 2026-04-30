@@ -149,9 +149,6 @@ pub struct State {
     camera_front: Vec3,
     camera_up: Vec3,
 
-    //#[facet(readonly)]
-    mouse_captured: bool,
-
     edit_mode: bool,
 
     meshes: HashMap<String, StaticMesh>,
@@ -210,7 +207,7 @@ impl State {
         let mut yrel: i32 = 0;
 
         let camera_sensitivity = 0.1;
-        if self.mouse_captured {
+        if self.edit_mode {
             self.yaw += (xrel as f32) * camera_sensitivity;
             self.pitch -= (yrel as f32) * camera_sensitivity;
             self.pitch = self.pitch.clamp(-89.0, 89.0);
@@ -700,8 +697,6 @@ fn init_state() -> State {
     let pitch = -20.;
     let yaw = -90.;
 
-    let mouse_captured = true;
-
     let mut numkeys: i32 = 0;
     unsafe { SDL_GetKeyboardState(&mut numkeys as *mut i32) };
     let keys = KeyState::new();
@@ -766,7 +761,6 @@ fn init_state() -> State {
         camera_up,
         pitch,
         yaw,
-        mouse_captured,
         edit_mode: false,
         keys,
         meshes,
@@ -841,13 +835,12 @@ fn frame(state: &mut State, delta: f32) {
                 SDL_GetRelativeMouseState(&mut xrel as *mut i32, &mut yrel as *mut i32);
             if state.keys.pressed(SDL_SCANCODE_GRAVE) {
                 SDL_SetRelativeMouseMode(false);
-                state.mouse_captured = false;
                 state.edit_mode = true;
+                // TODO: stash mouse capture setting
             }
 
             if button_bitmask.bit(0) && !igWantCaptureMouse() {
-                SDL_SetRelativeMouseMode(true);
-                state.mouse_captured = true;
+                // TODO: restore mouse capture setting
                 state.edit_mode = false;
             }
         }

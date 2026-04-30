@@ -127,10 +127,6 @@ int main(int, char**)
         return -1;
     }
 
-    #ifndef __EMSCRIPTEN__
-    SDL_SetRelativeMouseMode(SDL_TRUE);
-    #endif
-
     SDL_GLContext gl_context = SDL_GL_CreateContext(window);
     if (gl_context == nullptr)
     {
