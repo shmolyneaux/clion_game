@@ -55,6 +55,7 @@ pub static SDL_SCANCODE_W: usize = 26;
 pub static SDL_SCANCODE_X: usize = 27;
 pub static SDL_SCANCODE_Y: usize = 28;
 pub static SDL_SCANCODE_Z: usize = 29;
+pub static SDL_SCANCODE_GRAVE: usize = 53;
 pub static SDL_SCANCODE_ESCAPE: usize = 41;
 pub static SDL_SCANCODE_LCTRL: usize = 224;
 pub static SDL_SCANCODE_LSHIFT: usize = 225;

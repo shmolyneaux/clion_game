@@ -152,6 +152,8 @@ pub struct State {
     //#[facet(readonly)]
     mouse_captured: bool,
 
+    edit_mode: bool,
+
     meshes: HashMap<String, StaticMesh>,
 
     keys: KeyState,
@@ -171,6 +173,29 @@ pub struct State {
 }
 
 impl State {
+    fn update_camera_matrices(&mut self) {
+        let pitch = self.pitch;
+        let yaw = self.yaw;
+        let direction = Vec3::new(
+            yaw.to_radians().cos() * pitch.to_radians().cos(),
+            pitch.to_radians().sin(),
+            yaw.to_radians().sin() * pitch.to_radians().cos(),
+        );
+        self.camera_front = direction.normalize();
+
+        self.view = Mat4::look_at_rh(
+            self.camera_pos,
+            self.camera_pos + self.camera_front,
+            self.camera_up,
+        );
+        self.projection = Mat4::perspective_rh_gl(
+            f32::to_radians(45.0),
+            self.display_w as f32 / self.display_h as f32,
+            0.1f32,
+            100.0f32,
+        );
+    }
+
     fn move_camera_and_update_matrices(&mut self, delta: f32) {
         let base_camera_speed = 2.0f32;
         let camera_speed = if self.keys.pressed(SDL_SCANCODE_LCTRL) {
@@ -183,20 +208,6 @@ impl State {
 
         let mut xrel: i32 = 0;
         let mut yrel: i32 = 0;
-
-        unsafe {
-            let button_bitmask =
-                SDL_GetRelativeMouseState(&mut xrel as *mut i32, &mut yrel as *mut i32);
-            if self.keys.pressed(SDL_SCANCODE_ESCAPE) {
-                SDL_SetRelativeMouseMode(false);
-                self.mouse_captured = false;
-            }
-
-            if button_bitmask.bit(0) && !igWantCaptureMouse() {
-                SDL_SetRelativeMouseMode(true);
-                self.mouse_captured = true;
-            }
-        }
 
         let camera_sensitivity = 0.1;
         if self.mouse_captured {
@@ -220,26 +231,7 @@ impl State {
             }
         }
 
-        let pitch = self.pitch;
-        let yaw = self.yaw;
-        let direction = Vec3::new(
-            yaw.to_radians().cos() * pitch.to_radians().cos(),
-            pitch.to_radians().sin(),
-            yaw.to_radians().sin() * pitch.to_radians().cos(),
-        );
-        self.camera_front = direction.normalize();
-
-        self.view = Mat4::look_at_rh(
-            self.camera_pos,
-            self.camera_pos + self.camera_front,
-            self.camera_up,
-        );
-        self.projection = Mat4::perspective_rh_gl(
-            f32::to_radians(45.0),
-            self.display_w as f32 / self.display_h as f32,
-            0.1f32,
-            100.0f32,
-        );
+        self.update_camera_matrices();
     }
 
     fn capture_frame(&mut self) {
@@ -775,6 +767,7 @@ fn init_state() -> State {
         pitch,
         yaw,
         mouse_captured,
+        edit_mode: false,
         keys,
         meshes,
         frame_captures,
@@ -826,9 +819,11 @@ fn frame(state: &mut State, delta: f32) {
     unsafe {
         let _zone = zone_scoped!("rust frame unsafe block");
 
-        state
-            .script_bridge
-            .step(&state.keys.keys, &state.keys.last_keys);
+        if !state.edit_mode {
+            state
+                .script_bridge
+                .step(&state.keys.keys, &state.keys.last_keys);
+        }
 
         update_keys(state);
 
@@ -839,22 +834,43 @@ fn frame(state: &mut State, delta: f32) {
             1.0,
         );
 
-        state.move_camera_and_update_matrices(delta);
+        unsafe {
+            let mut xrel = 0;
+            let mut yrel = 0;
+            let button_bitmask =
+                SDL_GetRelativeMouseState(&mut xrel as *mut i32, &mut yrel as *mut i32);
+            if state.keys.pressed(SDL_SCANCODE_GRAVE) {
+                SDL_SetRelativeMouseMode(false);
+                state.mouse_captured = false;
+                state.edit_mode = true;
+            }
+
+            if button_bitmask.bit(0) && !igWantCaptureMouse() {
+                SDL_SetRelativeMouseMode(true);
+                state.mouse_captured = true;
+                state.edit_mode = false;
+            }
+        }
+
+        //state.move_camera_and_update_matrices(delta);
+        state.update_camera_matrices();
 
         // Draw RGB axes
-        for axis in [
-            Vec3::new(1.0, 0.0, 0.0),
-            Vec3::new(0.0, 1.0, 0.0),
-            Vec3::new(0.0, 0.0, 1.0),
-        ] {
-            debug_line_color(
-                state,
-                &[
-                    Vec3::new(0.0, 0.0, 0.0),
+        if state.edit_mode {
+            for axis in [
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+                Vec3::new(0.0, 0.0, 1.0),
+            ] {
+                debug_line_color(
+                    state,
+                    &[
+                        Vec3::new(0.0, 0.0, 0.0),
+                        axis,
+                    ],
                     axis,
-                ],
-                axis,
-            );
+                );
+            }
         }
 
         let mut ctx = HashMap::new();
@@ -868,21 +884,18 @@ fn frame(state: &mut State, delta: f32) {
 
         // TODO: I feel like this doesn't need to use the context since it's
         // not using the camera
-        state.handle_draw_list(&mut ctx);
-        state.capture_frame();
+        if !state.edit_mode {
+            state.handle_draw_list(&mut ctx);
+            state.capture_frame();
+        }
 
-        // TODO: only show debug info when in a debug state
-        /*
-        state
-            .script_bridge
-            .debug_window(&mut state.debug_state.shimlang_debug_window);
-        draw_log_window();
-        draw_frame_captures(
-            &state.frame_captures,
-            &mut state.frame_capture_mesh,
-            &mut ctx,
-        );
-        */
+        if state.edit_mode {
+            draw_frame_captures(
+                &state.frame_captures,
+                &mut state.frame_capture_mesh,
+                &mut ctx,
+            );
+        }
 
         log_opengl_errors!();
 
