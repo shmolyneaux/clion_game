@@ -28,7 +28,7 @@ let BUTTON_TEXTURE = {
 
     for y in 0..height {
         for x in 0..width {
-            data.append(x);
+            data.append(255 - (x - BUTTON_WIDTH/2).abs().int());
             data.append(0);
             data.append(0);
             data.append(255);
@@ -69,6 +69,7 @@ struct Menu {
             ig_text("(-1) %% 2 == \((-1) % 2)");
             ig_text("self: \(self)");
             ig_text("Mouse pos: \(mouse_pos())");
+            ig_text("Button texture: \(BUTTON_TEXTURE)");
             ig_end();
         }
         let font_size = 4.0;

@@ -1070,6 +1070,10 @@ impl ShimValue {
             }
             ShimValue::Integer(_) => {
                 let func = match ident {
+                    b"bool" => shim_bool,
+                    b"int" => shim_int,
+                    b"float" => shim_float,
+                    b"abs" => shim_abs,
                     b"min" => shim_min,
                     b"max" => shim_max,
                     b"clamp" => shim_clamp,
@@ -1113,6 +1117,10 @@ impl ShimValue {
             }
             ShimValue::Float(_) => {
                 let func = match ident {
+                    b"bool" => shim_bool,
+                    b"int" => shim_int,
+                    b"float" => shim_float,
+                    b"abs" => shim_abs,
                     b"min" => shim_min,
                     b"max" => shim_max,
                     b"clamp" => shim_clamp,

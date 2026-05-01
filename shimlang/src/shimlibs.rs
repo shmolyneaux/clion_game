@@ -2349,6 +2349,17 @@ pub(crate) fn shim_str(
     Ok(interpreter.mem.alloc_str(bytes))
 }
 
+pub(crate) fn shim_bool(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"value")?;
+    unpacker.end()?;
+
+    Ok(ShimValue::Bool(value.is_truthy(interpreter)?))
+}
+
 pub(crate) fn shim_int(
     interpreter: &mut Interpreter,
     args: &ArgBundle,
@@ -2855,6 +2866,22 @@ pub(crate) fn shim_to_degrees(
         _ => return Err("to_degrees: expected int or float".to_string()),
     };
     Ok(ShimValue::Float(f.to_degrees()))
+}
+
+pub(crate) fn shim_abs(
+    _interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"self")?;
+    unpacker.end()?;
+    Ok(
+        match value {
+            ShimValue::Integer(i) => ShimValue::Integer(i.abs()),
+            ShimValue::Float(f) => ShimValue::Float(f.abs()),
+            _ => return Err("abs: expected int or float".to_string()),
+        }
+    )
 }
 
 pub(crate) fn shim_to_radians(
