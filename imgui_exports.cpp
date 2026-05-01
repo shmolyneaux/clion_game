@@ -152,6 +152,21 @@ extern "C" {
         SDL_GL_GetDrawableSize(window, display_w, display_h);
     }
 
+    void SHM_SetCursorVisible(bool visible) {
+        ZoneScoped;
+        ImGui::SetMouseCursor(visible ? ImGuiMouseCursor_Arrow : ImGuiMouseCursor_None);
+    }
+
+    void SHM_SetWindowTitle(const char* title) {
+        ZoneScoped;
+        SDL_SetWindowTitle(window, title);
+    }
+
+    uint32_t SHM_GetWindowFlags() {
+        ZoneScoped;
+        return SDL_GetWindowFlags(window);
+    }
+
     void igSHMNextItemOpenOnce() {
         ZoneScoped;
         ImGui::SetNextItemOpen(true, ImGuiCond_Once);

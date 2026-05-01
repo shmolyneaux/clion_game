@@ -66,10 +66,22 @@ pub enum DrawListItem {
     CreateTexture(u32, u32, u32, Vec<u8>, bool),
 }
 
+const KEY_REPEAT_INITIAL_DELAY: f32 = 0.4;
+const KEY_REPEAT_RATE: f32 = 0.08;
+
+/// Keyboard state for the current and previous frame, indexed by SDL scancode.
+///
+/// - `keys` — pressed state this frame (1 = pressed, 0 = released)
+/// - `last_keys` — pressed state last frame; diff against `keys` gives just-pressed/released
+/// - `held_time` — seconds each key has been continuously held; resets to 0 on release
+/// - `delta` — frame time in seconds, mirrored here so `KeyValue::get_attr` can compute repeat
+///   boundaries without a separate lookup
 #[derive(Default)]
 pub struct KeyState {
     pub keys: Vec<u8>,
     pub last_keys: Vec<u8>,
+    pub held_time: Vec<f32>,
+    pub delta: f32,
 }
 
 
@@ -222,8 +234,27 @@ impl ShimNative for KeyValue {
             b"released" => Ok(ShimValue::Bool(cur == 0)),
             b"just_pressed" => Ok(ShimValue::Bool(cur == 1 && cur != last)),
             b"just_released" => Ok(ShimValue::Bool(cur == 0 && cur != last)),
+            b"just_pressed_with_repeat" => {
+                let just_pressed = cur == 1 && cur != last;
+                let repeat = if cur == 1 && !just_pressed {
+                    let held = ks.held_time.get(self.scancode).copied().unwrap_or(0.0);
+                    let delta = ks.delta;
+                    let prev = held - delta;
+                    let repeat_idx = |t: f32| -> u32 {
+                        if t > KEY_REPEAT_INITIAL_DELAY {
+                            ((t - KEY_REPEAT_INITIAL_DELAY) / KEY_REPEAT_RATE) as u32 + 1
+                        } else {
+                            0
+                        }
+                    };
+                    repeat_idx(held) > repeat_idx(prev)
+                } else {
+                    false
+                };
+                Ok(ShimValue::Bool(just_pressed || repeat))
+            }
             _ => Err(format!(
-                "KeyValue has pressed/released/just_pressed/just_released, not '{}'",
+                "KeyValue has pressed/released/just_pressed/just_released/just_pressed_with_repeat, not '{}'",
                 debug_u8s(ident)
             )),
         }
@@ -272,7 +303,7 @@ impl DrawList {
 /// Messages sent from the Engine (Main Thread) to the Script Thread
 #[cfg(not(target_arch = "wasm32"))]
 pub enum ScriptRequest {
-    ExecuteLoop(Interpreter, Environment, ShimValue, Vec<u8>, Vec<u8>),
+    ExecuteLoop(Interpreter, Environment, ShimValue, Vec<u8>, Vec<u8>, f32),
 }
 
 /// Messages sent from the Script Thread to the Engine
@@ -481,6 +512,74 @@ fn shim_create_texture(
     Ok(interpreter.mem.alloc_native(handle))
 }
 
+fn shim_mouse_pos(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
+    ArgUnpacker::new(args).end()?;
+
+    let mut x = 0;
+    let mut y = 0;
+    unsafe {
+        SDL_GetMouseState(&mut x as *mut i32, &mut y as *mut i32);
+    }
+
+    let new_lst_val = interpreter.mem.alloc_list();
+    let new_lst = new_lst_val.list_mut(interpreter)?;
+    new_lst.push(&mut interpreter.mem, ShimValue::Integer(x));
+    new_lst.push(&mut interpreter.mem, ShimValue::Integer(y));
+    Ok(new_lst_val)
+}
+
+fn shim_show_cursor(
+    _interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
+    ArgUnpacker::new(args).end()?;
+    unsafe { SHM_SetCursorVisible(true); }
+    Ok(ShimValue::None)
+}
+
+fn shim_hide_cursor(
+    _interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
+    ArgUnpacker::new(args).end()?;
+    unsafe { SHM_SetCursorVisible(false); }
+    Ok(ShimValue::None)
+}
+
+fn shim_set_window_title(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let title_val = unpacker.required(b"title")?;
+    unpacker.end()?;
+    let title_bytes = title_val.to_string(interpreter);
+    let c_title = CString::new(title_bytes).map_err(|_| "set_window_title: title contains null byte".to_string())?;
+    unsafe { SHM_SetWindowTitle(c_title.as_ptr()); }
+    Ok(ShimValue::None)
+}
+
+fn shim_mouse_focus(
+    _interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
+    ArgUnpacker::new(args).end()?;
+    let flags = unsafe { SHM_GetWindowFlags() };
+    Ok(ShimValue::Bool(flags & 0x00000400 != 0))
+}
+
+fn shim_input_focus(
+    _interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
+    ArgUnpacker::new(args).end()?;
+    let flags = unsafe { SHM_GetWindowFlags() };
+    Ok(ShimValue::Bool(flags & 0x00000200 != 0))
+}
+
 fn shim_window_size(
     interpreter: &mut Interpreter,
     args: &ArgBundle,
@@ -517,6 +616,12 @@ fn load_script(bytes: &[u8]) -> Result<(Interpreter, Environment, ShimValue), St
         (b"create_texture", shim_create_texture),
         (b"Rect", shim_rect),
         (b"window_size", shim_window_size),
+        (b"mouse_pos", shim_mouse_pos),
+        (b"show_cursor", shim_show_cursor),
+        (b"hide_cursor", shim_hide_cursor),
+        (b"set_window_title", shim_set_window_title),
+        (b"mouse_focus", shim_mouse_focus),
+        (b"input_focus", shim_input_focus),
     ];
     for (name, func) in builtins {
         let position = interpreter.mem.alloc_and_set(
@@ -617,7 +722,7 @@ impl ScriptBridge {
         }
     }
 
-    pub fn step(&mut self, keys: &[u8], last_keys: &[u8]) {
+    pub fn step(&mut self, keys: &[u8], last_keys: &[u8], delta: f32) {
         let _zone = zone_scoped!("Run interpreter");
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -646,6 +751,7 @@ impl ScriptBridge {
                                 loop_fn,
                                 keys.to_vec(),
                                 last_keys.to_vec(),
+                                delta,
                             ))
                             .unwrap();
                     }
@@ -698,6 +804,15 @@ impl ScriptBridge {
             if self.interpreter_errors.is_empty() {
                 if let BridgeState::Paused(ref mut interpreter, ref mut env, loop_fn) = self.state {
                     let ks = interpreter.fetch_mut::<KeyState>();
+                    ks.held_time.resize(keys.len(), 0.0);
+                    for (i, &pressed) in keys.iter().enumerate() {
+                        if pressed == 1 {
+                            ks.held_time[i] += delta;
+                        } else {
+                            ks.held_time[i] = 0.0;
+                        }
+                    }
+                    ks.delta = delta;
                     ks.keys = keys.to_vec();
                     ks.last_keys = last_keys.to_vec();
                     if let Err(msg) = call_loop_fn(interpreter, env, loop_fn) {
@@ -795,8 +910,17 @@ fn script_thread_logic(rx: Receiver<ScriptRequest>, tx: Sender<ScriptResponse>) 
     loop {
         if let Ok(request) = rx.recv() {
             match request {
-                ScriptRequest::ExecuteLoop(mut interpreter, mut env, loop_fn, keys, last_keys) => {
+                ScriptRequest::ExecuteLoop(mut interpreter, mut env, loop_fn, keys, last_keys, delta) => {
                     let ks = interpreter.fetch_mut::<KeyState>();
+                    ks.held_time.resize(keys.len(), 0.0);
+                    for (i, &pressed) in keys.iter().enumerate() {
+                        if pressed == 1 {
+                            ks.held_time[i] += delta;
+                        } else {
+                            ks.held_time[i] = 0.0;
+                        }
+                    }
+                    ks.delta = delta;
                     ks.keys = keys;
                     ks.last_keys = last_keys;
                     tx.send(match call_loop_fn(&mut interpreter, &mut env, loop_fn) {

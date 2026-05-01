@@ -820,7 +820,7 @@ fn frame(state: &mut State, delta: f32) {
         if !state.edit_mode {
             state
                 .script_bridge
-                .step(&state.keys.keys, &state.keys.last_keys);
+                .step(&state.keys.keys, &state.keys.last_keys, delta);
         }
 
         update_keys(state);

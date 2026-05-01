@@ -45,6 +45,9 @@ let BUTTON_TEXTURE = {
 let MENU_BUTTONS = [
     "START",
     "OPTIONS",
+    "THIRD",
+    "Fourth",
+    "5th",
 ];
 let BUTTON_PADDING = 10;
 struct Menu {
@@ -55,8 +58,8 @@ struct Menu {
         let viewport = window_size();
         let button_num = 0;
 
-        self.selected_button += if key.W.just_pressed { self.button_highlight_start_frame = frame_num; -1 } else { 0 };
-        self.selected_button += if key.S.just_pressed { self.button_highlight_start_frame = frame_num; 1 } else { 0 };
+        self.selected_button += if key.W.just_pressed_with_repeat { self.button_highlight_start_frame = frame_num; -1 } else { 0 };
+        self.selected_button += if key.S.just_pressed_with_repeat { self.button_highlight_start_frame = frame_num; 1 } else { 0 };
         self.selected_button %= MENU_BUTTONS.len();
 
         let total_height = MENU_BUTTONS.len()*BUTTON_HEIGHT + (MENU_BUTTONS.len() - 1)*BUTTON_PADDING;
@@ -65,6 +68,7 @@ struct Menu {
             ig_text("Selected button: \(self.selected_button)");
             ig_text("(-1) %% 2 == \((-1) % 2)");
             ig_text("self: \(self)");
+            ig_text("Mouse pos: \(mouse_pos())");
             ig_end();
         }
         let font_size = 4.0;
@@ -85,7 +89,7 @@ struct Menu {
                 BUTTON_HEIGHT,
                 texture=BUTTON_TEXTURE,
                 r=if (self.selected_button == button_num) {
-                    (((frame_num - self.button_highlight_start_frame)/15).sin()+1.0)/2
+                    (((frame_num - self.button_highlight_start_frame)/15).cos()+1.0)/2
                 } else {
                     0.5
                 },
@@ -102,6 +106,17 @@ struct Menu {
             );
             y += BUTTON_HEIGHT + BUTTON_PADDING;
             button_num += 1;
+        }
+
+        if mouse_focus() {
+            hide_cursor();
+            let pos = mouse_pos();
+            draw_rect(
+                pos[0],
+                pos[1],
+                10,
+                10,
+            );
         }
     }
 }
@@ -146,8 +161,9 @@ struct Game {
     }
 }
 
-let state = Menu();
+set_window_title("Ball Game");
 
+let state = Menu();
 let frame_num = 0;
 fn loop() {
     state.tick();

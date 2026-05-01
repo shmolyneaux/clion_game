@@ -4,6 +4,10 @@ unsafe extern "C" {
     pub fn SDL_GetKeyboardState(numkeys: *mut i32) -> *const u8;
     pub fn SDL_GetRelativeMouseState(x: *mut i32, y: *mut i32) -> u32;
     pub fn SDL_SetRelativeMouseMode(enabled: bool) -> i32;
+    pub fn SDL_GetMouseState(x: *mut i32, y: *mut i32) -> u32;
+    pub fn SHM_SetCursorVisible(visible: bool);
+    pub fn SHM_SetWindowTitle(title: *const i8);
+    pub fn SHM_GetWindowFlags() -> u32;
     pub fn SHM_GetDrawableSize(display_w: *mut i32, display_h: *mut i32);
 }
 
@@ -20,6 +24,18 @@ mod test_mocks {
     }
     pub fn SDL_SetRelativeMouseMode(enabled: bool) -> i32 {
         panic!("Can't call SDL_SetRelativeMouseMode in test context")
+    }
+    pub fn SDL_GetMouseState(x: *mut i32, y: *mut i32) -> u32 {
+        panic!("Can't call SDL_GetMouseState in test context")
+    }
+    pub fn SHM_SetCursorVisible(visible: bool) {
+        panic!("Can't call SHM_SetCursorVisible in test context")
+    }
+    pub fn SHM_SetWindowTitle(title: *const i8) {
+        panic!("Can't call SHM_SetWindowTitle in test context")
+    }
+    pub fn SHM_GetWindowFlags() -> u32 {
+        panic!("Can't call SHM_GetWindowFlags in test context")
     }
     pub fn SHM_GetDrawableSize(display_w: *mut i32, display_h: *mut i32) {
         panic!("Can't call SHM_GetDrawableSize in test context")
