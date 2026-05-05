@@ -628,7 +628,7 @@ impl DictEntry {
 const MIN_NON_ZERO_SIZE_POW: u8 = 3;
 
 #[derive(Debug)]
-pub(crate) struct ShimDict {
+pub struct ShimDict {
     // Size of the index array, always a power of 2
     pub(crate) size_pow: u8,
 
