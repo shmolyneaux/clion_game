@@ -30,7 +30,7 @@ let COLOR_PICKER_TEXTURE = {
             let v = ((y / height) - 0.5) * 2;
 
             let h = (x / width) * 360;
-            let s = 0.5;
+            let s = 1.0;
             let l = 0.5;
 
             let c = (1 - (2*l - 1).abs()) * s;
@@ -91,21 +91,23 @@ struct Menu {
     selected_button = 0,
 
     fn tick(self) {
-        let viewport = window_size();
         let button_num = 0;
 
-        self.selected_button += if key.W.just_pressed_with_repeat { self.button_highlight_start_frame = frame_num; -1 } else { 0 };
-        self.selected_button += if key.S.just_pressed_with_repeat { self.button_highlight_start_frame = frame_num; 1 } else { 0 };
+        self.selected_button += if key.W.just_pressed_with_repeat or key.Up.just_pressed_with_repeat { self.button_highlight_start_frame = frame_num; -1 } else { 0 };
+        self.selected_button += if key.S.just_pressed_with_repeat or key.Down.just_pressed_with_repeat { self.button_highlight_start_frame = frame_num; 1 } else { 0 };
         self.selected_button %= MENU_BUTTONS.len();
 
         let total_height = MENU_BUTTONS.len()*BUTTON_HEIGHT + (MENU_BUTTONS.len() - 1)*BUTTON_PADDING;
 
         if ig_begin("game") {
+            ig_text("Frame Time (ms): \(delta * 1000)");
             ig_text("Selected button: \(self.selected_button)");
             ig_text("(-1) %% 2 == \((-1) % 2)");
             ig_text("self: \(self)");
             ig_text("Mouse pos: \(mouse_pos())");
             ig_text("Button texture: \(BUTTON_TEXTURE)");
+            ig_text("");
+            ig_text("Ticker count: \(tick_fns.len())");
             ig_end();
         }
         let font_size = 4.0;
@@ -143,17 +145,6 @@ struct Menu {
             );
             y += BUTTON_HEIGHT + BUTTON_PADDING;
             button_num += 1;
-        }
-
-        if mouse_focus() {
-            hide_cursor();
-            let pos = mouse_pos();
-            draw_rect(
-                pos[0],
-                pos[1],
-                10,
-                10,
-            );
         }
 
         draw_rect(
@@ -206,12 +197,164 @@ struct Game {
     }
 }
 
+let tick_fns = [];
+fn add_tick_fn(func) {
+    tick_fns.append(func);
+}
+fn remove_tick_fn(func) {
+    for idx in 0..tick_fns.len() {
+        if tick_fns[idx] == func {
+            tick_fns.pop(idx);
+            return;
+        }
+    }
+}
+
+let BALL_SIZE = 10;
+struct Ball {
+    x,
+    y,
+    vx,
+    vy,
+
+    fn tick(self) {
+        // Kinematic step under constant gravity: y(t) = y0 + v0*t + 0.5*g*t²
+        let v0 = self.vy;
+        let y0 = self.y;
+        let y_end = y0 + v0 + 0.5 * g;
+        let v_end = v0 + g;
+
+        let floor = viewport[1] - BALL_SIZE;
+        if y_end > floor {
+            // Solve 0.5*g*t² + v0*t + (y0 - floor) = 0 for t in (0, 1]
+            let a = 0.5 * g;
+            let b = v0;
+            let c = y0 - floor;
+            let t_hit = (-b + (b*b - 4*a*c).sqrt()) / (2*a);
+            let v_hit = v0 + g * t_hit;
+            let dt_rem = 1.0 - t_hit;
+            // Reflect at the floor, then finish the frame
+            let v_after = -v_hit;
+            self.vy = v_after + g * dt_rem;
+            self.y = floor + v_after * dt_rem + 0.5 * g * dt_rem * dt_rem;
+        } else {
+            self.y = y_end;
+            self.vy = v_end;
+        }
+
+        self.x += self.vx;
+        if self.x < 0 {
+            self.x = -self.x;
+            self.vx = -self.vx;
+        }
+        if self.x + BALL_SIZE > viewport[0] {
+            self.x -= 2 * ((self.x + BALL_SIZE) - viewport[0]);
+            self.vx = -self.vx;
+        }
+        if self.y < 0 {
+            self.y = -self.y;
+            self.vy = -self.vy;
+        }
+
+        draw_rect(
+            self.x,
+            self.y,
+            BALL_SIZE,
+            BALL_SIZE,
+            r=1.0,
+            g=0.5,
+            b=0.5,
+        );
+    }
+}
+
+let vx = -5.0;
+let vy = 0.0;
+
+let g = 1.0;
+
+fn cursor() {
+    if !mouse_focus() {
+        return;
+    }
+    let pos = mouse_pos();
+    hide_cursor();
+    draw_rect(
+        pos[0],
+        pos[1],
+        10,
+        10,
+    );
+
+    if mouse_pressed(MOUSE_LEFT) {
+        for idx in 0..11 {
+            let b = Ball(
+                pos[0] + idx*2,
+                pos[1] + idx*2,
+                vx,
+                vy,
+            );
+            add_tick_fn(b.tick);
+        }
+    }
+}
+
+add_tick_fn(cursor);
+
 set_window_title("Ball Game");
 
+let frame_times = [];
+for _ in 0..60 {
+    frame_times.append(0.0);
+}
+
+let viewport = None;
 let state = Menu();
 let frame_num = 0;
 fn loop() {
+    viewport = window_size();
     state.tick();
+    for func in tick_fns {
+        func();
+    }
+
+    frame_times[frame_num % frame_times.len()] = delta;
+    let BAR_WIDTH = 10;
+    let sum = 0;
+    for idx in 0..frame_times.len() {
+        let t = frame_times[idx];
+        sum += t;
+        let height = t * 10000;
+        draw_rect(
+            idx*(BAR_WIDTH+2),
+            viewport[1]-height,
+            BAR_WIDTH,
+            height,
+            r=0.5,
+            g=0.5,
+            b=1.0,
+        );
+    }
+
+    let avg = sum / frame_times.len();
+    draw_rect(
+        0,
+        viewport[1]-167,
+        59*(BAR_WIDTH*2),
+        1,
+        r=0.5,
+        g=1.0,
+        b=0.5,
+    );
+    draw_rect(
+        0,
+        viewport[1]-avg*10000,
+        59*(BAR_WIDTH*2),
+        1,
+        r=1.0,
+        g=0.5,
+        b=1.0,
+    );
 
     frame_num += 1;
 }

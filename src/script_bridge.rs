@@ -84,6 +84,24 @@ pub struct KeyState {
     pub delta: f32,
 }
 
+/// Mouse button state for the current and previous frame, as SDL button bitmasks.
+/// Button N (1 = left, 2 = middle, 3 = right, 4 = x1, 5 = x2) is bit `1 << (N - 1)`.
+#[derive(Default)]
+pub struct MouseState {
+    pub buttons: u32,
+    pub last_buttons: u32,
+}
+
+fn mouse_button_mask(button: i32) -> Result<u32, String> {
+    if !(1..=5).contains(&button) {
+        return Err(format!(
+            "mouse button must be 1 (left), 2 (middle), 3 (right), 4 (x1), or 5 (x2); got {}",
+            button
+        ));
+    }
+    Ok(1u32 << (button - 1))
+}
+
 
 fn scancode_from_name(name: &[u8]) -> Option<usize> {
     match name {
@@ -531,6 +549,46 @@ fn shim_mouse_pos(
     Ok(new_lst_val)
 }
 
+fn shim_mouse_pressed(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let button = unpacker.required_int(b"button")?;
+    unpacker.end()?;
+    let mask = mouse_button_mask(button)?;
+    let ms = interpreter.fetch_mut::<MouseState>();
+    Ok(ShimValue::Bool(ms.buttons & mask != 0))
+}
+
+fn shim_mouse_just_pressed(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let button = unpacker.required_int(b"button")?;
+    unpacker.end()?;
+    let mask = mouse_button_mask(button)?;
+    let ms = interpreter.fetch_mut::<MouseState>();
+    Ok(ShimValue::Bool(
+        ms.buttons & mask != 0 && ms.last_buttons & mask == 0,
+    ))
+}
+
+fn shim_mouse_just_released(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let button = unpacker.required_int(b"button")?;
+    unpacker.end()?;
+    let mask = mouse_button_mask(button)?;
+    let ms = interpreter.fetch_mut::<MouseState>();
+    Ok(ShimValue::Bool(
+        ms.buttons & mask == 0 && ms.last_buttons & mask != 0,
+    ))
+}
+
 fn shim_show_cursor(
     _interpreter: &mut Interpreter,
     args: &ArgBundle,
@@ -617,6 +675,9 @@ fn load_script(bytes: &[u8]) -> Result<(Interpreter, Environment, ShimValue), St
         (b"Rect", shim_rect),
         (b"window_size", shim_window_size),
         (b"mouse_pos", shim_mouse_pos),
+        (b"mouse_pressed", shim_mouse_pressed),
+        (b"mouse_just_pressed", shim_mouse_just_pressed),
+        (b"mouse_just_released", shim_mouse_just_released),
         (b"show_cursor", shim_show_cursor),
         (b"hide_cursor", shim_hide_cursor),
         (b"set_window_title", shim_set_window_title),
@@ -637,6 +698,18 @@ fn load_script(bytes: &[u8]) -> Result<(Interpreter, Environment, ShimValue), St
 
     let key_val = interpreter.mem.alloc_native(KeyMap);
     env.insert_new(&mut interpreter, b"key".to_vec(), key_val);
+    env.insert_new(&mut interpreter, b"delta".to_vec(), ShimValue::Float(0.0));
+
+    let mouse_buttons: &[(&[u8], i32)] = &[
+        (b"MOUSE_LEFT", 1),
+        (b"MOUSE_MIDDLE", 2),
+        (b"MOUSE_RIGHT", 3),
+        (b"MOUSE_X1", 4),
+        (b"MOUSE_X2", 5),
+    ];
+    for (name, value) in mouse_buttons {
+        env.insert_new(&mut interpreter, name.to_vec(), ShimValue::Integer(*value));
+    }
 
     let mut pc = 0;
     interpreter.execute_bytecode_extended(&mut pc, shimlang::ArgBundle::new(), &mut env)?;
@@ -815,6 +888,12 @@ impl ScriptBridge {
                     ks.delta = delta;
                     ks.keys = keys.to_vec();
                     ks.last_keys = last_keys.to_vec();
+                    let buttons = unsafe {
+                        SDL_GetMouseState(std::ptr::null_mut(), std::ptr::null_mut())
+                    };
+                    let ms = interpreter.fetch_mut::<MouseState>();
+                    ms.last_buttons = ms.buttons;
+                    ms.buttons = buttons;
                     if let Err(msg) = call_loop_fn(interpreter, env, loop_fn) {
                         self.interpreter_errors.push(msg);
                     }
@@ -923,6 +1002,13 @@ fn script_thread_logic(rx: Receiver<ScriptRequest>, tx: Sender<ScriptResponse>) 
                     ks.delta = delta;
                     ks.keys = keys;
                     ks.last_keys = last_keys;
+                    let buttons = unsafe {
+                        SDL_GetMouseState(std::ptr::null_mut(), std::ptr::null_mut())
+                    };
+                    let ms = interpreter.fetch_mut::<MouseState>();
+                    ms.last_buttons = ms.buttons;
+                    ms.buttons = buttons;
+                    env.update(&mut interpreter, b"delta", ShimValue::Float(delta));
                     tx.send(match call_loop_fn(&mut interpreter, &mut env, loop_fn) {
                         Ok(()) => {
                             let draw_list = interpreter

@@ -321,7 +321,7 @@ impl Environment {
         }
     }
 
-    fn update(
+    pub fn update(
         &mut self,
         interpreter: &mut Interpreter,
         key: &[u8],
