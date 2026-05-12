@@ -344,6 +344,51 @@ fn shim_draw_rectangle(_interpreter: &mut Interpreter, args: &ArgBundle) -> Resu
     Ok(ShimValue::None)
 }
 
+fn shim_draw_text(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let text_val = unpacker
+        .optional(b"text")
+        .ok_or_else(|| "Missing required argument: 'text'".to_string())?;
+    let x = unpacker.required_number(b"x")?;
+    let y = unpacker.required_number(b"y")?;
+    let font_size = unpacker.required_number(b"font_size")?;
+    let r = unpacker.required_number(b"r")?;
+    let g = unpacker.required_number(b"g")?;
+    let b = unpacker.required_number(b"b")?;
+    let a = unpacker.required_number(b"a")?;
+    unpacker.end()?;
+
+    let text_bytes: Vec<u8> = text_val.string(interpreter)?.to_vec();
+    let text = std::str::from_utf8(&text_bytes)
+        .map_err(|e| format!("draw_text: invalid UTF-8: {}", e))?;
+    draw_text(text, x, y, font_size, Color::new(r, g, b, a));
+    Ok(ShimValue::None)
+}
+
+// JS → WASM source bridge (web playground).
+//
+// shimlang_source_len() returns -1 when no new source is pending, else the
+// length in bytes of an internally-cached UTF-8 buffer that
+// shimlang_take_source(ptr) will copy into WASM linear memory.
+#[cfg(target_arch = "wasm32")]
+unsafe extern "C" {
+    fn shimlang_source_len() -> i32;
+    fn shimlang_take_source(ptr: *mut u8);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn try_take_pending_source() -> Option<Vec<u8>> {
+    unsafe {
+        let len = shimlang_source_len();
+        if len <= 0 {
+            return None;
+        }
+        let mut buf = vec![0u8; len as usize];
+        shimlang_take_source(buf.as_mut_ptr());
+        Some(buf)
+    }
+}
+
 fn load_script(text: &[u8]) -> Result<(Interpreter, Environment, ShimValue), String> {
     let interpreter_config = shimlang::Config::default();
     let ast = shimlang::ast_from_text(text)?;
@@ -356,6 +401,7 @@ fn load_script(text: &[u8]) -> Result<(Interpreter, Environment, ShimValue), Str
         (b"draw_circle", Box::new(shim_draw_circle)),
         (b"draw_rectangle", Box::new(shim_draw_rectangle)),
         (b"draw_line", Box::new(shim_draw_line)),
+        (b"draw_text", Box::new(shim_draw_text)),
         (b"clear_background", Box::new(shim_clear_background)),
         (b"new_bloop", Box::new(shim_new_bloop)),
     ];
@@ -450,12 +496,18 @@ async fn main() {
     let (mut interpreter, mut env, mut loop_fn) = load_script(b"fn loop() {}").expect("Should be able to load hardcoded script");
     let mut script_errors = Vec::new();
 
+    #[cfg(not(target_arch = "wasm32"))]
     let script_path = "game.shm";
 
-    // On wasm, load the script once via load_file
-    #[cfg(target_arch = "wasm32")]
-    match load_file(script_path).await {
-        Ok(bytes) => {
+    // On native, track mtime for auto-reloading
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut mtime = SystemTime::now();
+
+    loop {
+        // On wasm, hot-reload from JS-supplied source whenever the host page
+        // marks one ready (e.g. when the user clicks Run in the playground).
+        #[cfg(target_arch = "wasm32")]
+        if let Some(bytes) = try_take_pending_source() {
             match load_script(&bytes) {
                 Ok(res) => {
                     (interpreter, env, loop_fn) = res;
@@ -464,18 +516,9 @@ async fn main() {
                 Err(msg) => {
                     script_errors.push(msg);
                 }
-            };
-        },
-        Err(_msg) => {
-            script_errors.push(format!("Could not read {script_path}"));
+            }
         }
-    }
 
-    // On native, track mtime for auto-reloading
-    #[cfg(not(target_arch = "wasm32"))]
-    let mut mtime = SystemTime::now();
-
-    loop {
         // Auto-reload script on native when file changes
         #[cfg(not(target_arch = "wasm32"))]
         match fs::metadata(script_path) {
