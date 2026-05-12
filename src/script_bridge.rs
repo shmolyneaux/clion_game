@@ -283,6 +283,46 @@ impl ShimNative for KeyValue {
     }
 }
 
+#[derive(Debug, Default, Clone, Copy)]
+pub struct PerfTimer {
+    pub script: f32,
+    pub gc: f32,
+    pub render: f32,
+    pub vsync: f32,
+}
+
+#[derive(Debug)]
+struct PerfModule;
+
+impl ShimNative for PerfModule {
+    fn get_attr(
+        &self,
+        _self_as_val: &ShimValue,
+        interpreter: &mut Interpreter,
+        ident: &[u8],
+    ) -> Result<ShimValue, String> {
+        let times = interpreter.fetch_mut::<PerfTimer>();
+        let (script, gc, render, vsync) = match times {
+            PerfTimer { script, gc, render, vsync } => (script, gc, render, vsync)
+        };
+        Ok(ShimValue::Float(match ident {
+            b"total" => *script + *gc + *render + *vsync,
+            b"script" => *script,
+            b"gc" => *gc,
+            b"render" => *render,
+            b"vsync" => *vsync,
+            _ => return Err(format!(
+                "PerfModule has no attribute '{}'",
+                debug_u8s(ident)
+            )),
+        }))
+    }
+
+    fn gc_vals(&self) -> Vec<ShimValue> {
+        Vec::new()
+    }
+}
+
 pub struct DrawList {
     next_texture_handle: u32,
     items: Vec<DrawListItem>,
@@ -321,13 +361,13 @@ impl DrawList {
 /// Messages sent from the Engine (Main Thread) to the Script Thread
 #[cfg(not(target_arch = "wasm32"))]
 pub enum ScriptRequest {
-    ExecuteLoop(Interpreter, Environment, ShimValue, Vec<u8>, Vec<u8>, f32),
+    ExecuteLoop(Interpreter, Environment, ShimValue, Vec<u8>, Vec<u8>, f32, PerfTimer),
 }
 
 /// Messages sent from the Script Thread to the Engine
 #[cfg(not(target_arch = "wasm32"))]
 pub enum ScriptResponse {
-    LoopComplete(Interpreter, Environment, ShimValue, Vec<DrawListItem>),
+    LoopComplete(Interpreter, Environment, ShimValue, Vec<DrawListItem>, f32),
     Error(Interpreter, Environment, ShimValue, String),
 }
 
@@ -348,6 +388,7 @@ pub struct ScriptBridge {
     state: BridgeState,
     pub interpreter_errors: Vec<String>,
     pub draw_list: Vec<DrawListItem>,
+    pub last_gc_time: f32,
     script_path: String,
     #[cfg(not(target_arch = "wasm32"))]
     tx: Sender<ScriptRequest>,
@@ -700,6 +741,9 @@ fn load_script(bytes: &[u8]) -> Result<(Interpreter, Environment, ShimValue), St
     env.insert_new(&mut interpreter, b"key".to_vec(), key_val);
     env.insert_new(&mut interpreter, b"delta".to_vec(), ShimValue::Float(0.0));
 
+    let perf_module = interpreter.mem.alloc_native(PerfModule);
+    env.insert_new(&mut interpreter, b"perf".to_vec(), perf_module);
+
     let mouse_buttons: &[(&[u8], i32)] = &[
         (b"MOUSE_LEFT", 1),
         (b"MOUSE_MIDDLE", 2),
@@ -728,11 +772,12 @@ fn call_loop_fn(
     interpreter: &mut Interpreter,
     env: &mut Environment,
     loop_fn: ShimValue,
-) -> Result<(), String> {
+) -> Result<f32, String> {
     match loop_fn.call(interpreter, &mut shimlang::ArgBundle::new()) {
         Ok(CallResult::ReturnValue(_)) => {
+            let gc_start = std::time::Instant::now();
             interpreter.gc(env);
-            Ok(())
+            Ok(gc_start.elapsed().as_secs_f32())
         }
         Ok(CallResult::PC(pc, captured_scope)) => {
             let mut new_env = Environment::with_scope(captured_scope);
@@ -743,8 +788,9 @@ fn call_loop_fn(
             ) {
                 Err(msg) => Err(msg),
                 Ok(_) => {
+                    let gc_start = std::time::Instant::now();
                     interpreter.gc(env);
-                    Ok(())
+                    Ok(gc_start.elapsed().as_secs_f32())
                 }
             }
         }
@@ -777,6 +823,7 @@ impl ScriptBridge {
                 state: BridgeState::Paused(Box::new(interpreter), env, loop_fn),
                 interpreter_errors: Vec::new(),
                 draw_list: Vec::new(),
+                last_gc_time: 0.0,
                 script_path,
                 tx: request_tx,
                 rx: response_rx,
@@ -790,12 +837,13 @@ impl ScriptBridge {
                 state: BridgeState::Paused(Box::new(interpreter), env, loop_fn),
                 interpreter_errors: Vec::new(),
                 draw_list: Vec::new(),
+                last_gc_time: 0.0,
                 script_path,
             }
         }
     }
 
-    pub fn step(&mut self, keys: &[u8], last_keys: &[u8], delta: f32) {
+    pub fn step(&mut self, keys: &[u8], last_keys: &[u8], delta: f32, perf: PerfTimer) {
         let _zone = zone_scoped!("Run interpreter");
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -825,6 +873,7 @@ impl ScriptBridge {
                                 keys.to_vec(),
                                 last_keys.to_vec(),
                                 delta,
+                                perf,
                             ))
                             .unwrap();
                     }
@@ -837,9 +886,10 @@ impl ScriptBridge {
                             self.state = BridgeState::Paused(Box::new(interpreter), env, loop_fn);
                             self.interpreter_errors.push(msg);
                         }
-                        ScriptResponse::LoopComplete(interpreter, env, loop_fn, draw_list) => {
+                        ScriptResponse::LoopComplete(interpreter, env, loop_fn, draw_list, gc_time) => {
                             self.state = BridgeState::Paused(Box::new(interpreter), env, loop_fn);
                             self.draw_list = draw_list;
+                            self.last_gc_time = gc_time;
                         }
                     }
                 }
@@ -894,8 +944,10 @@ impl ScriptBridge {
                     let ms = interpreter.fetch_mut::<MouseState>();
                     ms.last_buttons = ms.buttons;
                     ms.buttons = buttons;
-                    if let Err(msg) = call_loop_fn(interpreter, env, loop_fn) {
-                        self.interpreter_errors.push(msg);
+                    *interpreter.fetch_mut::<PerfTimer>() = perf;
+                    match call_loop_fn(interpreter, env, loop_fn) {
+                        Ok(gc_time) => self.last_gc_time = gc_time,
+                        Err(msg) => self.interpreter_errors.push(msg),
                     }
                     self.draw_list = interpreter
                         .fetch_mut::<DrawList>()
@@ -989,7 +1041,7 @@ fn script_thread_logic(rx: Receiver<ScriptRequest>, tx: Sender<ScriptResponse>) 
     loop {
         if let Ok(request) = rx.recv() {
             match request {
-                ScriptRequest::ExecuteLoop(mut interpreter, mut env, loop_fn, keys, last_keys, delta) => {
+                ScriptRequest::ExecuteLoop(mut interpreter, mut env, loop_fn, keys, last_keys, delta, perf) => {
                     let ks = interpreter.fetch_mut::<KeyState>();
                     ks.held_time.resize(keys.len(), 0.0);
                     for (i, &pressed) in keys.iter().enumerate() {
@@ -1008,15 +1060,16 @@ fn script_thread_logic(rx: Receiver<ScriptRequest>, tx: Sender<ScriptResponse>) 
                     let ms = interpreter.fetch_mut::<MouseState>();
                     ms.last_buttons = ms.buttons;
                     ms.buttons = buttons;
-                    env.update(&mut interpreter, b"delta", ShimValue::Float(delta));
+                    *interpreter.fetch_mut::<PerfTimer>() = perf;
+                    env.update(&mut interpreter, b"delta", ShimValue::Float(delta)).expect("delta should be in env");
                     tx.send(match call_loop_fn(&mut interpreter, &mut env, loop_fn) {
-                        Ok(()) => {
+                        Ok(gc_time) => {
                             let draw_list = interpreter
                                 .fetch_mut::<DrawList>()
                                 .items
                                 .drain(..)
                                 .collect();
-                            ScriptResponse::LoopComplete(interpreter, env, loop_fn, draw_list)
+                            ScriptResponse::LoopComplete(interpreter, env, loop_fn, draw_list, gc_time)
                         }
                         Err(msg) => ScriptResponse::Error(interpreter, env, loop_fn, msg),
                     })
