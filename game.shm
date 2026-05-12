@@ -1,24 +1,3 @@
-let PADDLE_TEXTURE = {
-    let data = [];
-    let width = 100;
-    let height = 50;
-
-    for y in 0..height {
-        for x in 0..width {
-            data.append(x);
-            data.append(0);
-            data.append(0);
-            data.append(255);
-        }
-    }
-
-    create_texture(
-        width,
-        height,
-        data,
-    )
-};
-
 let COLOR_PICKER_TEXTURE = {
     let data = [];
     let width = 256;
@@ -77,6 +56,73 @@ let BUTTON_TEXTURE = {
         data,
     )
 };
+
+let BLOCK_SIZE = 64;
+fn block_texture(r, g, b) {
+    let data = [];
+    let size = BLOCK_SIZE;
+    let bevel = 6;
+
+    for y in 0..size {
+        for x in 0..size {
+            // Distance from each edge
+            let from_left = x;
+            let from_right = size - 1 - x;
+            let from_top = y;
+            let from_bottom = size - 1 - y;
+
+            let hmix = 0.5;
+            let r_highlight = r*(1-hmix) + hmix;
+            let g_highlight = g*(1-hmix) + hmix;
+            let b_highlight = b*(1-hmix) + hmix;
+
+            let smix = 0.5;
+            let r_shadow = r*(1-smix);
+            let g_shadow = g*(1-smix);
+            let b_shadow = b*(1-smix);
+
+            let r = r;
+            let g = g;
+            let b = b;
+
+            // Top/left highlight, bottom/right shadow for a 3D bevel
+            if from_top < bevel and from_top <= from_left and from_top <= from_right {
+                r = r_highlight;
+                g = g_highlight;
+                b = b_highlight;
+            } else if from_left < bevel and from_left <= from_bottom {
+                r = r_highlight;
+                g = g_highlight;
+                b = b_highlight;
+            } else if from_bottom < bevel and from_bottom <= from_right {
+                r = r_shadow;
+                g = g_shadow;
+                b = b_shadow;
+            } else if from_right < bevel {
+                r = r_shadow;
+                g = g_shadow;
+                b = b_shadow;
+            }
+
+            data.append(r);
+            data.append(g);
+            data.append(b);
+            data.append(1.0);
+        }
+    }
+
+    create_texture(
+        size,
+        size,
+        data,
+    )
+}
+
+let CYAN_BLOCK_TEXTURE = block_texture(
+    r=0.157,
+    g=0.627,
+    b=0.863,
+);
 
 let MENU_BUTTONS = [
     "START",
@@ -156,9 +202,14 @@ struct Menu {
             256,
             texture=COLOR_PICKER_TEXTURE,
         );
+
+        if key.Enter.just_pressed and self.selected_button == MENU_BUTTONS.index("START") {
+            state = Game();
+        }
     }
 }
 
+let y = 50;
 struct Game {
     fn tick(self) {
         let speed = if key.LeftShift.pressed { 5 } else { 1 };
@@ -166,7 +217,7 @@ struct Game {
         y += if key.S.pressed { speed } else { 0 };
 
         if ig_begin("from shimlang") {
-            ig_text(p);
+            ig_text("test");
             ig_end();
         }
 
@@ -177,25 +228,24 @@ struct Game {
             300,
         );
 
-        scripted_draw_text(
-            x=200,
-            y=40,
-            text="HELLO, WORLD!",
-            scale=2,
-        );
-
-        let char_count = int(frame_num / 5).min(message.len());
-
-        let substr = "";
-        for idx in 0..char_count {
-            substr += message[idx];
-        }
         draw_text(
             300,
             400,
-            substr,
+            "Hello, World!",
             size=3.0,
         );
+
+        draw_rect(
+            (viewport[0] - BLOCK_SIZE)/2,
+            (viewport[1] - BLOCK_SIZE)/2,
+            BLOCK_SIZE,
+            BLOCK_SIZE,
+            texture=CYAN_BLOCK_TEXTURE,
+        );
+
+        if key.Escape.just_pressed {
+            state = Menu();
+        }
     }
 }
 
@@ -318,16 +368,7 @@ for _ in 0..60 {
     vsync_times.append(0.0);
 }
 
-let viewport = None;
-let state = Menu();
-let frame_num = 0;
-fn loop() {
-    viewport = window_size();
-    state.tick();
-    for func in tick_fns {
-        func();
-    }
-
+fn debug_frame_times() {
     let slot = frame_num % frame_times.len();
     frame_times[slot] = delta;
     script_times[slot] = perf.script;
@@ -381,6 +422,20 @@ fn loop() {
         g=0.5,
         b=1.0,
     );
+}
+
+add_tick_fn(debug_frame_times);
+
+let viewport = None;
+let state = Menu();
+let frame_num = 0;
+fn loop() {
+    viewport = window_size();
+    state.tick();
+
+    for func in tick_fns {
+        func();
+    }
 
     frame_num += 1;
 }
