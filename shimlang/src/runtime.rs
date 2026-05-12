@@ -1591,9 +1591,31 @@ impl ShimValue {
                 }
             }
             (ShimValue::Fn(pos_a), ShimValue::Fn(pos_b)) => Ok(pos_a == pos_b),
-            (ShimValue::BoundMethod(_pos_a), ShimValue::BoundMethod(_pos_b)) => {
-                // The pos's might not match up but still have an equivalent obj/func
-                Err("Can't yet check equality between bound methods".to_string())
+            (ShimValue::BoundMethod(pos_a), ShimValue::BoundMethod(pos_b)) => {
+                if pos_a == pos_b {
+                    // Trivial case
+                    return Ok(true);
+                }
+
+                let pos_a: usize = (*pos_a).into();
+                let pos_b: usize = (*pos_b).into();
+
+                let obj_a = unsafe { ShimValue::from_u64(interpreter.mem.mem[pos_a]) };
+                let fn_a: u64 = interpreter.mem.mem[pos_a + 1];
+
+                let obj_b = unsafe { ShimValue::from_u64(interpreter.mem.mem[pos_b]) };
+                let fn_b: u64 = interpreter.mem.mem[pos_b + 1];
+
+                Ok(
+                    match (obj_a, obj_b) {
+                        (ShimValue::Struct(_, pa), ShimValue::Struct(_, pb)) => {
+                            // Same memory for objects, same memory for fn
+                            pa == pb && fn_a == fn_b
+                        }
+                        _ => return Err("TODO bound method equality".to_string())
+                    }
+                )
+
             }
             (ShimValue::BoundNativeMethod(_pos_a), ShimValue::BoundNativeMethod(_pos_b)) => {
                 // The pos's might not match up but still have an equivalent obj/func

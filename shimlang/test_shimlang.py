@@ -26,7 +26,7 @@ for p in cli_paths:
         )
     else:
         # Otherwise assume it's a direct path to a script
-        cli_script.append(p)
+        cli_scripts.append(p)
 
 start_time = time()
 if wasm:
