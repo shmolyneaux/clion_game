@@ -359,27 +359,6 @@ fn shim_draw_rectangle(_interpreter: &mut Interpreter, args: &ArgBundle) -> Resu
     Ok(ShimValue::None)
 }
 
-fn shim_draw_text(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
-    let mut unpacker = ArgUnpacker::new(args);
-    let text_val = unpacker
-        .optional(b"text")
-        .ok_or_else(|| "Missing required argument: 'text'".to_string())?;
-    let x = unpacker.required_number(b"x")?;
-    let y = unpacker.required_number(b"y")?;
-    let font_size = unpacker.required_number(b"font_size")?;
-    let r = unpacker.required_number(b"r")?;
-    let g = unpacker.required_number(b"g")?;
-    let b = unpacker.required_number(b"b")?;
-    let a = unpacker.required_number(b"a")?;
-    unpacker.end()?;
-
-    let text_bytes: Vec<u8> = text_val.string(interpreter)?.to_vec();
-    let text = std::str::from_utf8(&text_bytes)
-        .map_err(|e| format!("draw_text: invalid UTF-8: {}", e))?;
-    draw_text(text, x, y, font_size, Color::new(r, g, b, a));
-    Ok(ShimValue::None)
-}
-
 // JS → WASM source bridge (web playground).
 //
 // shimlang_source_len() returns -1 when no new source is pending, else the
