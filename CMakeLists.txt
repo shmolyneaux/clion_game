@@ -13,6 +13,7 @@ if (NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         GIT_SHALLOW TRUE
         GIT_PROGRESS TRUE
     )
+    set(TRACY_ON_DEMAND ON CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(tracy)
 endif()
 
@@ -88,7 +89,7 @@ add_dependencies(game generate_object regen_obj)
 if (NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     # Tracy
     target_include_directories(game PRIVATE "${tracy_SOURCE_DIR}/public/tracy")
-    target_compile_definitions(game PRIVATE TRACY_ENABLE)
+    target_compile_definitions(game PRIVATE TRACY_ENABLE TRACY_ON_DEMAND)
     find_package(Threads REQUIRED) 
 endif()
 

@@ -84,6 +84,24 @@ pub struct KeyState {
     pub delta: f32,
 }
 
+/// Mouse button state for the current and previous frame, as SDL button bitmasks.
+/// Button N (1 = left, 2 = middle, 3 = right, 4 = x1, 5 = x2) is bit `1 << (N - 1)`.
+#[derive(Default)]
+pub struct MouseState {
+    pub buttons: u32,
+    pub last_buttons: u32,
+}
+
+fn mouse_button_mask(button: i32) -> Result<u32, String> {
+    if !(1..=5).contains(&button) {
+        return Err(format!(
+            "mouse button must be 1 (left), 2 (middle), 3 (right), 4 (x1), or 5 (x2); got {}",
+            button
+        ));
+    }
+    Ok(1u32 << (button - 1))
+}
+
 
 fn scancode_from_name(name: &[u8]) -> Option<usize> {
     match name {
@@ -265,6 +283,46 @@ impl ShimNative for KeyValue {
     }
 }
 
+#[derive(Debug, Default, Clone, Copy)]
+pub struct PerfTimer {
+    pub script: f32,
+    pub gc: f32,
+    pub render: f32,
+    pub vsync: f32,
+}
+
+#[derive(Debug)]
+struct PerfModule;
+
+impl ShimNative for PerfModule {
+    fn get_attr(
+        &self,
+        _self_as_val: &ShimValue,
+        interpreter: &mut Interpreter,
+        ident: &[u8],
+    ) -> Result<ShimValue, String> {
+        let times = interpreter.fetch_mut::<PerfTimer>();
+        let (script, gc, render, vsync) = match times {
+            PerfTimer { script, gc, render, vsync } => (script, gc, render, vsync)
+        };
+        Ok(ShimValue::Float(match ident {
+            b"total" => *script + *gc + *render + *vsync,
+            b"script" => *script,
+            b"gc" => *gc,
+            b"render" => *render,
+            b"vsync" => *vsync,
+            _ => return Err(format!(
+                "PerfModule has no attribute '{}'",
+                debug_u8s(ident)
+            )),
+        }))
+    }
+
+    fn gc_vals(&self) -> Vec<ShimValue> {
+        Vec::new()
+    }
+}
+
 pub struct DrawList {
     next_texture_handle: u32,
     items: Vec<DrawListItem>,
@@ -303,13 +361,13 @@ impl DrawList {
 /// Messages sent from the Engine (Main Thread) to the Script Thread
 #[cfg(not(target_arch = "wasm32"))]
 pub enum ScriptRequest {
-    ExecuteLoop(Interpreter, Environment, ShimValue, Vec<u8>, Vec<u8>, f32),
+    ExecuteLoop(Interpreter, Environment, ShimValue, Vec<u8>, Vec<u8>, f32, PerfTimer),
 }
 
 /// Messages sent from the Script Thread to the Engine
 #[cfg(not(target_arch = "wasm32"))]
 pub enum ScriptResponse {
-    LoopComplete(Interpreter, Environment, ShimValue, Vec<DrawListItem>),
+    LoopComplete(Interpreter, Environment, ShimValue, Vec<DrawListItem>, f32),
     Error(Interpreter, Environment, ShimValue, String),
 }
 
@@ -330,6 +388,7 @@ pub struct ScriptBridge {
     state: BridgeState,
     pub interpreter_errors: Vec<String>,
     pub draw_list: Vec<DrawListItem>,
+    pub last_gc_time: f32,
     script_path: String,
     #[cfg(not(target_arch = "wasm32"))]
     tx: Sender<ScriptRequest>,
@@ -531,6 +590,46 @@ fn shim_mouse_pos(
     Ok(new_lst_val)
 }
 
+fn shim_mouse_pressed(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let button = unpacker.required_int(b"button")?;
+    unpacker.end()?;
+    let mask = mouse_button_mask(button)?;
+    let ms = interpreter.fetch_mut::<MouseState>();
+    Ok(ShimValue::Bool(ms.buttons & mask != 0))
+}
+
+fn shim_mouse_just_pressed(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let button = unpacker.required_int(b"button")?;
+    unpacker.end()?;
+    let mask = mouse_button_mask(button)?;
+    let ms = interpreter.fetch_mut::<MouseState>();
+    Ok(ShimValue::Bool(
+        ms.buttons & mask != 0 && ms.last_buttons & mask == 0,
+    ))
+}
+
+fn shim_mouse_just_released(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let button = unpacker.required_int(b"button")?;
+    unpacker.end()?;
+    let mask = mouse_button_mask(button)?;
+    let ms = interpreter.fetch_mut::<MouseState>();
+    Ok(ShimValue::Bool(
+        ms.buttons & mask == 0 && ms.last_buttons & mask != 0,
+    ))
+}
+
 fn shim_show_cursor(
     _interpreter: &mut Interpreter,
     args: &ArgBundle,
@@ -617,6 +716,9 @@ fn load_script(bytes: &[u8]) -> Result<(Interpreter, Environment, ShimValue), St
         (b"Rect", shim_rect),
         (b"window_size", shim_window_size),
         (b"mouse_pos", shim_mouse_pos),
+        (b"mouse_pressed", shim_mouse_pressed),
+        (b"mouse_just_pressed", shim_mouse_just_pressed),
+        (b"mouse_just_released", shim_mouse_just_released),
         (b"show_cursor", shim_show_cursor),
         (b"hide_cursor", shim_hide_cursor),
         (b"set_window_title", shim_set_window_title),
@@ -637,6 +739,21 @@ fn load_script(bytes: &[u8]) -> Result<(Interpreter, Environment, ShimValue), St
 
     let key_val = interpreter.mem.alloc_native(KeyMap);
     env.insert_new(&mut interpreter, b"key".to_vec(), key_val);
+    env.insert_new(&mut interpreter, b"delta".to_vec(), ShimValue::Float(0.0));
+
+    let perf_module = interpreter.mem.alloc_native(PerfModule);
+    env.insert_new(&mut interpreter, b"perf".to_vec(), perf_module);
+
+    let mouse_buttons: &[(&[u8], i32)] = &[
+        (b"MOUSE_LEFT", 1),
+        (b"MOUSE_MIDDLE", 2),
+        (b"MOUSE_RIGHT", 3),
+        (b"MOUSE_X1", 4),
+        (b"MOUSE_X2", 5),
+    ];
+    for (name, value) in mouse_buttons {
+        env.insert_new(&mut interpreter, name.to_vec(), ShimValue::Integer(*value));
+    }
 
     let mut pc = 0;
     interpreter.execute_bytecode_extended(&mut pc, shimlang::ArgBundle::new(), &mut env)?;
@@ -655,11 +772,12 @@ fn call_loop_fn(
     interpreter: &mut Interpreter,
     env: &mut Environment,
     loop_fn: ShimValue,
-) -> Result<(), String> {
+) -> Result<f32, String> {
     match loop_fn.call(interpreter, &mut shimlang::ArgBundle::new()) {
         Ok(CallResult::ReturnValue(_)) => {
+            let gc_start = std::time::Instant::now();
             interpreter.gc(env);
-            Ok(())
+            Ok(gc_start.elapsed().as_secs_f32())
         }
         Ok(CallResult::PC(pc, captured_scope)) => {
             let mut new_env = Environment::with_scope(captured_scope);
@@ -670,8 +788,9 @@ fn call_loop_fn(
             ) {
                 Err(msg) => Err(msg),
                 Ok(_) => {
+                    let gc_start = std::time::Instant::now();
                     interpreter.gc(env);
-                    Ok(())
+                    Ok(gc_start.elapsed().as_secs_f32())
                 }
             }
         }
@@ -704,6 +823,7 @@ impl ScriptBridge {
                 state: BridgeState::Paused(Box::new(interpreter), env, loop_fn),
                 interpreter_errors: Vec::new(),
                 draw_list: Vec::new(),
+                last_gc_time: 0.0,
                 script_path,
                 tx: request_tx,
                 rx: response_rx,
@@ -717,12 +837,13 @@ impl ScriptBridge {
                 state: BridgeState::Paused(Box::new(interpreter), env, loop_fn),
                 interpreter_errors: Vec::new(),
                 draw_list: Vec::new(),
+                last_gc_time: 0.0,
                 script_path,
             }
         }
     }
 
-    pub fn step(&mut self, keys: &[u8], last_keys: &[u8], delta: f32) {
+    pub fn step(&mut self, keys: &[u8], last_keys: &[u8], delta: f32, perf: PerfTimer) {
         let _zone = zone_scoped!("Run interpreter");
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -752,6 +873,7 @@ impl ScriptBridge {
                                 keys.to_vec(),
                                 last_keys.to_vec(),
                                 delta,
+                                perf,
                             ))
                             .unwrap();
                     }
@@ -764,9 +886,10 @@ impl ScriptBridge {
                             self.state = BridgeState::Paused(Box::new(interpreter), env, loop_fn);
                             self.interpreter_errors.push(msg);
                         }
-                        ScriptResponse::LoopComplete(interpreter, env, loop_fn, draw_list) => {
+                        ScriptResponse::LoopComplete(interpreter, env, loop_fn, draw_list, gc_time) => {
                             self.state = BridgeState::Paused(Box::new(interpreter), env, loop_fn);
                             self.draw_list = draw_list;
+                            self.last_gc_time = gc_time;
                         }
                     }
                 }
@@ -815,8 +938,16 @@ impl ScriptBridge {
                     ks.delta = delta;
                     ks.keys = keys.to_vec();
                     ks.last_keys = last_keys.to_vec();
-                    if let Err(msg) = call_loop_fn(interpreter, env, loop_fn) {
-                        self.interpreter_errors.push(msg);
+                    let buttons = unsafe {
+                        SDL_GetMouseState(std::ptr::null_mut(), std::ptr::null_mut())
+                    };
+                    let ms = interpreter.fetch_mut::<MouseState>();
+                    ms.last_buttons = ms.buttons;
+                    ms.buttons = buttons;
+                    *interpreter.fetch_mut::<PerfTimer>() = perf;
+                    match call_loop_fn(interpreter, env, loop_fn) {
+                        Ok(gc_time) => self.last_gc_time = gc_time,
+                        Err(msg) => self.interpreter_errors.push(msg),
                     }
                     self.draw_list = interpreter
                         .fetch_mut::<DrawList>()
@@ -910,7 +1041,7 @@ fn script_thread_logic(rx: Receiver<ScriptRequest>, tx: Sender<ScriptResponse>) 
     loop {
         if let Ok(request) = rx.recv() {
             match request {
-                ScriptRequest::ExecuteLoop(mut interpreter, mut env, loop_fn, keys, last_keys, delta) => {
+                ScriptRequest::ExecuteLoop(mut interpreter, mut env, loop_fn, keys, last_keys, delta, perf) => {
                     let ks = interpreter.fetch_mut::<KeyState>();
                     ks.held_time.resize(keys.len(), 0.0);
                     for (i, &pressed) in keys.iter().enumerate() {
@@ -923,14 +1054,22 @@ fn script_thread_logic(rx: Receiver<ScriptRequest>, tx: Sender<ScriptResponse>) 
                     ks.delta = delta;
                     ks.keys = keys;
                     ks.last_keys = last_keys;
+                    let buttons = unsafe {
+                        SDL_GetMouseState(std::ptr::null_mut(), std::ptr::null_mut())
+                    };
+                    let ms = interpreter.fetch_mut::<MouseState>();
+                    ms.last_buttons = ms.buttons;
+                    ms.buttons = buttons;
+                    *interpreter.fetch_mut::<PerfTimer>() = perf;
+                    env.update(&mut interpreter, b"delta", ShimValue::Float(delta)).expect("delta should be in env");
                     tx.send(match call_loop_fn(&mut interpreter, &mut env, loop_fn) {
-                        Ok(()) => {
+                        Ok(gc_time) => {
                             let draw_list = interpreter
                                 .fetch_mut::<DrawList>()
                                 .items
                                 .drain(..)
                                 .collect();
-                            ScriptResponse::LoopComplete(interpreter, env, loop_fn, draw_list)
+                            ScriptResponse::LoopComplete(interpreter, env, loop_fn, draw_list, gc_time)
                         }
                         Err(msg) => ScriptResponse::Error(interpreter, env, loop_fn, msg),
                     })

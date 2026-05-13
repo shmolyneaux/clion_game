@@ -27,6 +27,7 @@ use std::slice;
 use std::mem::size_of;
 
 use std::cell::RefCell;
+use std::time::Instant;
 
 use glam::Vec3Swizzles;
 
@@ -167,6 +168,9 @@ pub struct State {
     shimlang_texture_handle_to_gl_texture: HashMap<u32, i32>,
     default_texture: GLuint,
     font_texture: GLuint,
+
+    perf: PerfTimer,
+    last_frame_end: Option<Instant>,
 }
 
 impl State {
@@ -774,6 +778,8 @@ fn init_state() -> State {
         shimlang_texture_handle_to_gl_texture: HashMap::new(),
         default_texture,
         font_texture,
+        perf: PerfTimer::default(),
+        last_frame_end: None,
     }
 }
 
@@ -810,6 +816,19 @@ fn frame(state: &mut State, delta: f32) {
         println!("Starting first frame");
     }
 
+    let frame_start = Instant::now();
+    let vsync_secs = state
+        .last_frame_end
+        .map(|t| frame_start.duration_since(t).as_secs_f32())
+        .unwrap_or(0.0);
+
+    let mut new_perf = PerfTimer {
+        script: 0.0,
+        gc: 0.0,
+        render: 0.0,
+        vsync: vsync_secs,
+    };
+
     unsafe {
         let _zone = zone_scoped!("rust frame unsafe block");
 
@@ -818,13 +837,18 @@ fn frame(state: &mut State, delta: f32) {
         }
 
         if !state.edit_mode {
+            let script_start = Instant::now();
             state
                 .script_bridge
-                .step(&state.keys.keys, &state.keys.last_keys, delta);
+                .step(&state.keys.keys, &state.keys.last_keys, delta, state.perf);
+            let script_total = script_start.elapsed().as_secs_f32();
+            new_perf.gc = state.script_bridge.last_gc_time;
+            new_perf.script = (script_total - new_perf.gc).max(0.0);
         }
 
         update_keys(state);
 
+        let render_start = Instant::now();
         gl::ClearColor(
             0.1,
             0.1,
@@ -903,7 +927,11 @@ fn frame(state: &mut State, delta: f32) {
             println!("Finished first frame");
         }
         state.frame_num += 1;
+        new_perf.render = render_start.elapsed().as_secs_f32();
     }
+
+    state.perf = new_perf;
+    state.last_frame_end = Some(Instant::now());
 }
 
 #[unsafe(no_mangle)]
