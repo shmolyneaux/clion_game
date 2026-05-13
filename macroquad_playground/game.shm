@@ -1,342 +1,44 @@
-let screen_width = 640;
-let screen_height = 480;
+// Move the orange circle with the arrow keys.
+// Edit this script and press Run to see your changes.
 
-let paddle_width = 30;
-let paddle_height = 100;
-let paddle_margin = 15;
+let speed = 3;
 
-let ball_size = 10;
+let x = 320;
+let y = 240;
 
-let number_font = dict();
-number_font[0] = "###" +
-                 "# #" +
-                 "# #" +
-                 "# #" +
-                 "###";
-number_font[1] = "  #" +
-                 "  #" +
-                 "  #" +
-                 "  #" +
-                 "  #";
-number_font[2] = "###" +
-                 "  #" +
-                 "###" +
-                 "#  " +
-                 "###";
-number_font[3] = "###" +
-                 "  #" +
-                 "###" +
-                 "  #" +
-                 "###";
-number_font[4] = "# #" +
-                 "# #" +
-                 "###" +
-                 "  #" +
-                 "  #";
-number_font[5] = "###" +
-                 "#  " +
-                 "###" +
-                 "  #" +
-                 "###";
-number_font[6] = "###" +
-                 "#  " +
-                 "###" +
-                 "# #" +
-                 "###";
-number_font[7] = "###" +
-                 "  #" +
-                 "  #" +
-                 "  #" +
-                 "  #";
-number_font[8] = "###" +
-                 "# #" +
-                 "###" +
-                 "# #" +
-                 "###";
-number_font[9] = "###" +
-                 "# #" +
-                 "###" +
-                 "  #" +
-                 "###";
-
-let white = [1.0, 1.0, 1.0, 1.0];
-let light_gray = [0.8, 0.8, 0.8, 1.0];
-
-fn draw_number(x, y, num, font_size=20, pixel_spacing=3, color=white) {
-    num = num % 10;
-    let data = number_font[num];
-    let space = " ";
-    for row in 0..5 {
-        for column in 0..3 {
-            if data[row*3 + column] != space {
-                draw_rectangle(
-                    x+(font_size+pixel_spacing)*column,
-                    y+(font_size+pixel_spacing)*row,
-                    font_size,
-                    font_size,
-                    color[0],
-                    color[1],
-                    color[2],
-                    color[3],
-                );
-            }
-        }
-    }
-}
-
-let frame = 0;
-let score_padding = 130;
-
-fn draw_paddle(y, is_left) {
-    if is_left {
-        draw_rectangle(
-            paddle_margin,
-            y,
-            paddle_width,
-            paddle_height,
-            1.0,
-            1.0,
-            1.0,
-            1.0,
-        );
-    } else {
-        draw_rectangle(
-            screen_width - paddle_width - paddle_margin,
-            y,
-            paddle_width,
-            paddle_height,
-            1.0,
-            1.0,
-            1.0,
-            1.0,
-        );
-    }
-}
-
-struct Paddle {
-    is_player_1,
-    y = (screen_height - paddle_height) / 2,
-
-    fn update(self) {
-        if game_paused_score_flash {
-            return;
-        }
-
-        let dir = if self.is_player_1 {
-            int(key.S.is_down) - int(key.W.is_down)
-        } else {
-            int(key.Down.is_down) - int(key.Up.is_down)
-        };
-        self.y = (self.y + 5*dir).clamp(0, screen_height-paddle_height);
-    }
-
-    fn draw(self) {
-        draw_paddle(
-            y=self.y,
-            is_left=self.is_player_1,
-        );
-    }
-}
-
-let paddle1 = Paddle(is_player_1=true);
-let paddle2 = Paddle(is_player_1=false);
-
-struct Ball {
-    x = screen_width/2,
-    y = screen_height/2,
-    xvel = 5.0,
-    yvel = 5.0,
-
-    fn update(self) {
-        if game_paused_score_flash {
-            return;
-        }
-
-        // TODO: implement +=
-        self.x = self.x + self.xvel;
-        self.y = self.y + self.yvel;
-
-        if self.y < ball_size/2 or self.y > screen_height - ball_size/2 {
-            // Hit top/bottom
-            self.yvel = -self.yvel;
-        }
-
-        if self.x - ball_size/2 < paddle_margin + paddle_width
-            and paddle1.y < self.y and self.y < paddle1.y + paddle_height
-        {
-            if self.xvel < 0 {
-                paddle_hit_sound.play();
-                // Velocity should be to the right
-                self.xvel = -self.xvel;
-            }
-        }
-
-        if self.x + ball_size/2 > screen_width - paddle_margin - paddle_width
-            and paddle2.y < self.y and self.y < paddle2.y + paddle_height
-        {
-            if self.xvel > 0 {
-                paddle_hit_sound.play();
-                // Velocity should be to the left
-                self.xvel = -self.xvel;
-            }
-        }
-
-        if self.x < ball_size/2 {
-            // Score for player 2
-            wall_hit_sound.play();
-            player2_score = player2_score + 1;
-            self.x = screen_width / 2;
-            self.y = screen_height / 2;
-            self.xvel = -self.xvel;
-
-            if player2_score == WINNING_SCORE {
-                let count = 0;
-                fn pause() {
-                    count = count + 1;
-                    if count > 120 {
-                        frame_order.remove(pause);
-                        player1_score = 0;
-                        player2_score = 0;
-                        game_paused_score_flash = false;
-                    }
-                }
-                game_paused_score_flash = true;
-                frame_order.add(pause);
-            }
-        }
-
-        if self.x > screen_width - ball_size/2 {
-            // Score for player 1
-            wall_hit_sound.play();
-            player1_score = player1_score + 1;
-            self.x = screen_width / 2;
-            self.y = screen_height / 2;
-            self.xvel = -self.xvel;
-
-            if player1_score == WINNING_SCORE {
-                let count = 0;
-                fn pause() {
-                    count = count + 1;
-                    if count > 120 {
-                        frame_order.remove(pause);
-                        player1_score = 0;
-                        player2_score = 0;
-                        game_paused_score_flash = false;
-                    }
-                }
-                game_paused_score_flash = true;
-                frame_order.add(pause);
-            }
-        }
-    }
-
-    fn draw(self) {
-        draw_rectangle(
-            self.x-ball_size/2,
-            self.y-ball_size/2,
-            ball_size,
-            ball_size,
-            1.0,
-            1.0,
-            1.0,
-            1.0,
-        );
-    }
-}
-
-let player1_score = 0;
-let player2_score = 0;
-let game_paused_score_flash = false;
-let WINNING_SCORE = 3;
-
-fn max(a, b) {
-    if a >= b { a } else { b }
-}
-
-fn min(a, b) {
-    if a <= b { a } else { b }
-}
-
-fn clamp(val, min, max) {
-    if val < min{
-        min
-    } else if max < val {
-        max
-    } else {
-        val
-    }
-}
-
-struct FrameOrder {
-    callbacks = [],
-
-    fn add(self, func) {
-        self.callbacks.append(func);
-    }
-
-    fn remove(self, func) {
-        for idx in 0..self.callbacks.len() {
-            if self.callbacks[idx] == func {
-                self.callbacks.pop(idx);
-                return;
-            }
-        }
-    }
-
-    fn execute(self) {
-        for idx in 0..self.callbacks.len() {
-            let func = self.callbacks[idx];
-            func();
-        }
-    }
-}
-
-fn draw_playable_area() {
-    draw_rectangle(
-        0,
-        0,
-        screen_width,
-        screen_height,
-        0.2,
-        0.2,
-        0.2,
-        1.0,
-    );
-}
-
-fn draw_score() {
-    draw_number(
-        score_padding,
-        10,
-        player1_score,
-        font_size=10,
-        color=light_gray,
-    );
-
-    draw_number(
-        screen_width-36-score_padding,
-        10,
-        player2_score,
-        font_size=10,
-        color=light_gray,
-    );
-}
-
-let ball = Ball();
-
-let frame_order = FrameOrder();
-frame_order.add(paddle1.update);
-frame_order.add(paddle2.update);
-frame_order.add(ball.update);
-frame_order.add(draw_playable_area);
-frame_order.add(paddle1.draw);
-frame_order.add(paddle2.draw);
-frame_order.add(ball.draw);
-frame_order.add(draw_score);
-
-let paddle_hit_sound = new_bloop(500, 600);
-let wall_hit_sound = new_bloop(800, 200);
+let CIRCLE_RADIUS = 22;
+let MARGIN = 20;
+let XLIM = 600;
+let YLIM = 440;
 
 fn loop() {
-    frame_order.execute();
+    clear_background(1.0, 0.08, 0.12, 1.0);
+
+    // Playfield frame
+    draw_rectangle(MARGIN, MARGIN, 600, 440, 0.16, 0.18, 0.26, 1.0);
+
+    let dx = 0;
+    let dy = 0;
+
+    // Keyboard input
+    dx += int(key.Right.is_down);
+    dx -= int(key.Left.is_down);
+    dy += int(key.Down.is_down);
+    dy -= int(key.Up.is_down);
+
+    if dx or dy {
+        let d = speed / (dx*dx + dy*dy).sqrt();
+        dx *= d;
+        dy *= d;
+
+        x = (x + dx).clamp(MARGIN + CIRCLE_RADIUS, XLIM);
+        y = (y + dy).clamp(MARGIN + CIRCLE_RADIUS, YLIM);
+    }
+
+    // Player
+    draw_circle(x, y, CIRCLE_RADIUS, 1.0, 0.62, 0.31, 1.0);
+
+    // Text
+    draw_text(38, 70, "Shimlang Playground", size=2.0);
+    draw_text(38, 100, "Arrow keys to move", size=1.0);
 }

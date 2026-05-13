@@ -163,6 +163,21 @@ fn shim_draw_line(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Sh
     Ok(ShimValue::None)
 }
 
+fn shim_draw_text(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let x = unpacker.required_number(b"x")?;
+    let y = unpacker.required_number(b"y")?;
+    let size = unpacker.required_number(b"size")?;
+    let text_val = unpacker.required(b"text")?;
+    unpacker.end()?;
+
+    let text = text_val.to_string(interpreter);
+
+    draw_text(&text, x, y, size*16.0, WHITE);
+
+    Ok(ShimValue::None)
+}
+
 fn key_code_from_name(name: &[u8]) -> Option<KeyCode> {
     match name {
         b"Space" => Some(KeyCode::Space),
@@ -356,6 +371,7 @@ fn load_script(text: &[u8]) -> Result<(Interpreter, Environment, ShimValue), Str
         (b"draw_circle", Box::new(shim_draw_circle)),
         (b"draw_rectangle", Box::new(shim_draw_rectangle)),
         (b"draw_line", Box::new(shim_draw_line)),
+        (b"draw_text", Box::new(shim_draw_text)),
         (b"clear_background", Box::new(shim_clear_background)),
         (b"new_bloop", Box::new(shim_new_bloop)),
     ];
