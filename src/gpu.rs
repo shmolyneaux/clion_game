@@ -1004,11 +1004,11 @@ impl StaticMesh {
 
             let mut texture_unit = 0;
             {
-                let _zone = zone_scoped!("iterate self.shader.uniforms");
+                //let _zone = zone_scoped!("iterate self.shader.uniforms");
                 for uniform_info in self.shader.uniforms() {
                     {
                         let loc = {
-                            let zone = zone_scoped!("self.shader.uniform_location");
+                            //let zone = zone_scoped!("self.shader.uniform_location");
                             self.shader
                                 .uniform_location(&CString::new(uniform_info.name.clone()).unwrap())
                         };
