@@ -777,6 +777,18 @@ impl<'a> GC<'a> {
                             vals.push(ShimValue::Environment(shim_fn.captured_scope.into()));
                         }
                     }
+                    ShimValue::Tuple(len, pos) => {
+                        let pos: usize = pos.into();
+                        let len: usize = len.into();
+
+                        #[cfg(feature = "gc_debug")]
+                        let desc = MemDescriptor::other(pos, pos + len, "Tuple contents");
+
+                        for idx in pos..(pos + len) {
+                            vals.push(*self.mem.get(idx.into()));
+                            mark_bit!(self.mask, idx, desc);
+                        }
+                    }
                     ShimValue::List(pos) => {
                         let pos: usize = pos.into();
                         if self.mask.is_set(pos) {

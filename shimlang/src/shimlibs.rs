@@ -2298,6 +2298,7 @@ pub(crate) fn get_type_name(value: &ShimValue) -> &'static str {
         ShimValue::BoundNativeMethod(_) => "bound native method",
         ShimValue::NativeFn(_) => "native function",
         ShimValue::String(..) => "string",
+        ShimValue::Tuple(..) => "tuple",
         ShimValue::List(_) => "list",
         ShimValue::Dict(_) => "dict",
         ShimValue::StructDef(_) => "struct definition",

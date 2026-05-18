@@ -495,6 +495,12 @@ pub enum ShimValue {
         // position (word index into memory)
         u24,
     ),
+    Tuple(
+        // len
+        u24,
+        // position
+        u24,
+    ),
     List(u24),
     Dict(u24),
     StructDef(u24),
