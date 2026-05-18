@@ -47,6 +47,7 @@ pub(crate) enum ByteCode {
     CreateFn,
     CreateList,
     CreateStruct,
+    CreateTuple,
     VariableDeclaration,
     Assignment,
     VariableLoad,
@@ -747,6 +748,14 @@ pub fn expression_captures_env(input_expr: &Expression) -> bool {
             }
             false
         }
+        Expression::Primary(Primary::Tuple(tpl)) => {
+            for expr in tpl.iter() {
+                if expression_captures_env(&expr.data) {
+                    return true;
+                }
+            }
+            false
+        }
         Expression::Primary(Primary::Expression(expr)) => expression_captures_env(&expr.data),
         Expression::BooleanOp(op) => {
             let exprs = op.exprs();
@@ -960,6 +969,17 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
             for b in s.iter() {
                 res.push((*b, expr.span));
             }
+            Ok(res)
+        }
+        Expression::Primary(Primary::Tuple(items)) => {
+            let mut res = Vec::new();
+            for expr in items {
+                res.extend(compile_expression(expr)?);
+            }
+            res.push((ByteCode::CreateTuple as u8, expr.span));
+            let len: u16 = items.len().try_into().expect("Tuple should fit into u16");
+            res.push(((len >> 8) as u8, expr.span));
+            res.push(((len & 0xff) as u8, expr.span));
             Ok(res)
         }
         Expression::Primary(Primary::List(items)) => {
@@ -1383,6 +1403,10 @@ pub fn format_asm(bytes: &[u8]) -> String {
         } else if *b == ByteCode::CreateList as u8 {
             let list_size = ((bytes[idx + 1] as usize) << 8) + bytes[idx + 2] as usize;
             out.push_str(&format!("CreateList size={}", list_size));
+            idx += 2;
+        } else if *b == ByteCode::CreateTuple as u8 {
+            let list_size = ((bytes[idx + 1] as usize) << 8) + bytes[idx + 2] as usize;
+            out.push_str(&format!("CreateTuple size={}", list_size));
             idx += 2;
         } else if *b == ByteCode::Copy as u8 {
             out.push_str("Copy");

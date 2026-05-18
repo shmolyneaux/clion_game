@@ -456,6 +456,15 @@ impl MMU {
         ShimValue::Dict(self.alloc_dict_raw())
     }
 
+    pub fn alloc_tuple(&mut self, items: &[ShimValue]) -> ShimValue {
+        let word_count: u24 = items.len().into();
+        let position = alloc!(self, word_count, "tuple");
+        for (idx, val) in items.iter().enumerate() {
+            self.mem[usize::from(position)+idx] = val.to_u64();
+        }
+        ShimValue::Tuple(word_count, position)
+    }
+
     pub fn alloc_list_raw(&mut self) -> u24 {
         let word_count: u24 = (std::mem::size_of::<ShimList>() as u32).div_ceil(8).into();
         let position = alloc!(self, word_count, "List");

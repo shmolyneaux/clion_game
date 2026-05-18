@@ -1358,6 +1358,13 @@ impl ShimValue {
                     std::mem::transmute(&interpreter.mem.mem[usize::from(*position)]);
                 lst.get(&interpreter.mem, *idx as isize)
             },
+            (ShimValue::Tuple(len, position), ShimValue::Integer(idx)) => unsafe {
+                let len_usize = usize::from(*len);
+                if *idx < 0 || (*idx as usize) >= len_usize {
+                    return Err(format!("Index {idx} out of range of {}-tuple", len_usize));
+                }
+                Ok(ShimValue::from_u64(interpreter.mem.mem[usize::from(*position) + (*idx as usize)]))
+            },
             (ShimValue::Dict(_), some_key) => {
                 let dict = self.dict_mut(interpreter)?;
 
@@ -2700,6 +2707,20 @@ impl Interpreter {
                         pc = new_pc;
                         continue;
                     }
+                    pc += 2;
+                }
+                val if val == ByteCode::CreateTuple as u8 => {
+                    let len = ((bytes[pc + 1] as usize) << 8) + bytes[pc + 2] as usize;
+
+                    let mut items = Vec::new();
+                    for item in stack.drain(stack.len() - len..) {
+                        items.push(item);
+                    }
+
+                    let tpl = self.mem.alloc_tuple(&items);
+
+                    stack.push(tpl);
+
                     pc += 2;
                 }
                 val if val == ByteCode::CreateList as u8 => {

@@ -40,6 +40,7 @@ pub enum Primary {
     Bool(bool),
     String(Vec<u8>),
     List(Vec<ExprNode>),
+    Tuple(Vec<ExprNode>),
     Expression(Box<ExprNode>),
 }
 
@@ -255,8 +256,21 @@ pub fn parse_primary(tokens: &mut TokenStream) -> Result<ExprNode, String> {
         }
         Token::LBracket => {
             let expr = parse_expression(tokens)?;
+            let mut elements = vec![expr];
+            while *tokens.peek()? == Token::Comma {
+                tokens.consume(Token::Comma)?;
+                if *tokens.peek()? == Token::RBracket {
+                    break;
+                }
+                let expr = parse_expression(tokens)?;
+                elements.push(expr);
+            }
             tokens.consume(Token::RBracket)?;
-            return Ok(expr);
+            if elements.len() > 1 {
+                Expression::Primary(Primary::Tuple(elements))
+            } else {
+                return Ok(elements.into_iter().next().unwrap());
+            }
         }
         Token::LSquare => {
             let items = parse_arguments(tokens, Token::RSquare)?;
