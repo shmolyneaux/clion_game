@@ -255,21 +255,60 @@ pub fn parse_primary(tokens: &mut TokenStream) -> Result<ExprNode, String> {
             Expression::Block(block)
         }
         Token::LBracket => {
-            let expr = parse_expression(tokens)?;
-            let mut elements = vec![expr];
-            while *tokens.peek()? == Token::Comma {
-                tokens.consume(Token::Comma)?;
-                if *tokens.peek()? == Token::RBracket {
-                    break;
-                }
-                let expr = parse_expression(tokens)?;
-                elements.push(expr);
-            }
-            tokens.consume(Token::RBracket)?;
-            if elements.len() > 1 {
-                Expression::Primary(Primary::Tuple(elements))
+            // Empty tuple: ()
+            if !tokens.is_empty() && *tokens.peek()? == Token::RBracket {
+                tokens.advance()?;
+                Expression::Primary(Primary::Tuple(Vec::new()))
             } else {
-                return Ok(elements.into_iter().next().unwrap());
+                let first = parse_expression(tokens)?;
+                match tokens.peek()? {
+                    Token::RBracket => {
+                        tokens.advance()?;
+                        return Ok(first);
+                    }
+                    Token::Comma => {
+                        tokens.advance()?;
+                        let mut items = vec![first];
+                        // Allow trailing comma for 1-tuple `(x,)`
+                        if !tokens.is_empty() && *tokens.peek()? == Token::RBracket {
+                            tokens.advance()?;
+                        } else {
+                            while !tokens.is_empty() {
+                                let expr = parse_expression(tokens)?;
+                                items.push(expr);
+                                match tokens.peek()? {
+                                    Token::RBracket => {
+                                        tokens.advance()?;
+                                        break;
+                                    }
+                                    Token::Comma => {
+                                        tokens.advance()?;
+                                        if !tokens.is_empty()
+                                            && *tokens.peek()? == Token::RBracket
+                                        {
+                                            tokens.advance()?;
+                                            break;
+                                        }
+                                        continue;
+                                    }
+                                    token => {
+                                        return Err(tokens.format_peek_err(&format!(
+                                            "Expected comma or `)` in tuple, found {:?}",
+                                            token
+                                        )));
+                                    }
+                                }
+                            }
+                        }
+                        Expression::Primary(Primary::Tuple(items))
+                    }
+                    token => {
+                        return Err(tokens.format_peek_err(&format!(
+                            "Expected `)` or `,` after expression in `(`, found {:?}",
+                            token
+                        )));
+                    }
+                }
             }
         }
         Token::LSquare => {

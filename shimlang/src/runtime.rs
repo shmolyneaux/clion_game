@@ -1439,6 +1439,25 @@ impl ShimValue {
 
                 out
             }
+            ShimValue::Tuple(len, pos) => {
+                let len = usize::from(*len);
+                let pos = usize::from(*pos);
+                let mut out = "(".to_string();
+                for idx in 0..len {
+                    if idx != 0 {
+                        out.push(',');
+                        out.push(' ');
+                    }
+                    let item = unsafe { ShimValue::from_u64(mem.mem[pos+idx]) };
+                    out.push_str(&item.to_string_mem(mem));
+                }
+                if len == 1 {
+                    out.push(',');
+                }
+                out.push(')');
+
+                out
+            }
             ShimValue::Native(_, _) => self.native_from_mem(mem).unwrap().to_string_mem(mem),
             ShimValue::Struct(def_pos, pos) => {
                 unsafe {
