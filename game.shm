@@ -57,11 +57,11 @@ let BUTTON_TEXTURE = {
     )
 };
 
-let BLOCK_SIZE = 64;
+let BLOCK_SIZE = 32;
 fn block_texture(r, g, b) {
     let data = [];
     let size = BLOCK_SIZE;
-    let bevel = 6;
+    let bevel = 4;
 
     for y in 0..size {
         for x in 0..size {
@@ -124,6 +124,103 @@ let CYAN_BLOCK_TEXTURE = block_texture(
     b=0.863,
 );
 
+let ORANGE_BLOCK_TEXTURE = block_texture(
+    r=0.7,
+    g=0.5,
+    b=0.1,
+);
+
+let RED_BLOCK_TEXTURE = block_texture(
+    r=0.7,
+    g=0.1,
+    b=0.1,
+);
+
+let BLUE_BLOCK_TEXTURE = block_texture(
+    r=0.1,
+    g=0.1,
+    b=0.7,
+);
+
+let GREEN_BLOCK_TEXTURE = block_texture(
+    r=0.1,
+    g=0.7,
+    b=0.1,
+);
+
+let YELLOW_BLOCK_TEXTURE = block_texture(
+    r=0.7,
+    g=0.7,
+    b=0.1,
+);
+
+let PURPLE_BLOCK_TEXTURE = block_texture(
+    r=0.7,
+    g=0.1,
+    b=0.7,
+);
+
+let BORDER_BLOCK_TEXTURE = block_texture(
+    r=0.2,
+    g=0.2,
+    b=0.2,
+);
+
+let EMPTY = 0;
+let RED = 1;
+let GREEN = 2;
+let BLUE = 3;
+let YELLOW = 4;
+let PURPLE = 5;
+let CYAN = 6;
+let ORANGE = 7;
+
+let shapes = [
+    // RED
+    [
+        [0, 1],
+        [1, 1],
+        [1, 0],
+    ],
+    // GREEN
+    [
+        [1, 0],
+        [1, 1],
+        [0, 1],
+    ],
+    // BLUE
+    [
+        [0, 1],
+        [0, 1],
+        [1, 1],
+    ],
+    // YELLOW
+    [
+        [1, 1],
+        [1, 1],
+    ],
+    // PURPLE
+    [
+        [0, 1],
+        [1, 1],
+        [0, 1],
+    ],
+    // CYAN
+    [
+        [1],
+        [1],
+        [1],
+        [1],
+    ],
+    // ORANGE
+    [
+        [1, 0],
+        [1, 0],
+        [1, 1],
+    ],
+];
+
+
 let MENU_BUTTONS = [
     "START",
     "OPTIONS",
@@ -145,6 +242,7 @@ struct Menu {
 
         let total_height = MENU_BUTTONS.len()*BUTTON_HEIGHT + (MENU_BUTTONS.len() - 1)*BUTTON_PADDING;
 
+        /*
         if ig_begin("game") {
             ig_text("Frame Time (ms): \(delta * 1000)");
             ig_text("Selected button: \(self.selected_button)");
@@ -158,6 +256,7 @@ struct Menu {
             ig_text("\(perf.script) \(perf.gc) \(perf.render) \(perf.vsync)");
             ig_end();
         }
+        */
         let font_size = 4.0;
         let font_size_pixels = font_size*8.0;
         let label_height = font_size*7.0;
@@ -195,6 +294,7 @@ struct Menu {
             button_num += 1;
         }
 
+        /*
         draw_rect(
             0,
             0,
@@ -202,6 +302,7 @@ struct Menu {
             256,
             texture=COLOR_PICKER_TEXTURE,
         );
+        */
 
         if key.Enter.just_pressed and self.selected_button == MENU_BUTTONS.index("START") {
             state = Game();
@@ -209,42 +310,205 @@ struct Menu {
     }
 }
 
-let y = 50;
+fn color_to_tex(color_idx) {
+    if color_idx == EMPTY {
+        None
+    } else if color_idx == CYAN {
+        CYAN_BLOCK_TEXTURE
+    } else if color_idx == RED {
+        RED_BLOCK_TEXTURE
+    } else if color_idx == GREEN {
+        GREEN_BLOCK_TEXTURE
+    } else if color_idx == BLUE {
+        BLUE_BLOCK_TEXTURE
+    } else if color_idx == YELLOW {
+        YELLOW_BLOCK_TEXTURE
+    } else if color_idx == PURPLE {
+        PURPLE_BLOCK_TEXTURE
+    } else if color_idx == ORANGE {
+        ORANGE_BLOCK_TEXTURE
+    } else {
+        assert(false);
+    }
+}
+
+let log_lines = [];
+
+let GRID_Y = 20;
+let GRID_X = 10;
 struct Game {
-    fn tick(self) {
-        let speed = if key.LeftShift.pressed { 5 } else { 1 };
-        y += if key.W.pressed { -speed } else { 0 };
-        y += if key.S.pressed { speed } else { 0 };
-
-        if ig_begin("from shimlang") {
-            ig_text("test");
-            ig_end();
+    blocks = {
+        let rows = [];
+        for _row in 0..GRID_Y {
+            let row = [];
+            for _column in 0..GRID_X {
+                row.append(EMPTY);
+            }
+            rows.append(row);
         }
+        rows
+    },
+    active_shape_x = int(GRID_X/2)-1,
+    active_shape_y = 0,
+    current_shape = 4,
 
-        draw_rect(
-            10,
-            y,
-            200,
-            300,
-        );
+    count = 0,
 
-        draw_text(
-            300,
-            400,
-            "Hello, World!",
-            size=3.0,
-        );
-
-        draw_rect(
-            (viewport[0] - BLOCK_SIZE)/2,
-            (viewport[1] - BLOCK_SIZE)/2,
-            BLOCK_SIZE,
-            BLOCK_SIZE,
-            texture=CYAN_BLOCK_TEXTURE,
-        );
-
+    fn tick(self) {
         if key.Escape.just_pressed {
             state = Menu();
+            return;
+        }
+
+        if key.Left.just_pressed {
+            if self.active_shape_x > 0 {
+                // TODO: check for hit
+                self.active_shape_x -= 1;
+            }
+        }
+
+        if key.Right.just_pressed {
+            // TODO: check width against GRID_X
+            if true {
+                // TODO: check for hit
+                self.active_shape_x += 1;
+            }
+        }
+
+        if /*self.count % 5 == 0*/ key.Space.just_pressed_with_repeat {
+            let x = 0;
+            let y = 0;
+
+            let hit = false;
+            if self.current_shape != None {
+                let shape = self.current_shape;
+                for shape_row in shapes[shape] {
+                    for shape_column in shape_row {
+                        if shape_column {
+                            let next_y = self.active_shape_y + y + 1;
+                            hit = next_y >= GRID_Y or self.blocks[next_y][self.active_shape_x+x] != EMPTY;
+                            if hit {
+                                break;
+                            }
+                        }
+                        x += 1;
+                    }
+                    if hit {
+                        break;
+                    }
+                    x = 0;
+                    y += 1;
+                }
+
+                if hit {
+                    let x = 0;
+                    let y = 0;
+                    for shape_row in shapes[shape] {
+                        for shape_column in shape_row {
+                            if shape_column {
+                                let x = self.active_shape_x + x;
+                                let y = self.active_shape_y + y;
+                                self.blocks[y][x] = self.current_shape+1;
+                            }
+                            x += 1;
+                        }
+                        x = 0;
+                        y += 1;
+                    }
+                    self.current_shape += 1;
+                    self.current_shape %= 6;
+                    self.active_shape_y = 0;
+                    self.active_shape_x = int(GRID_X/2)-1;
+                } else {
+                    self.active_shape_y += 1;
+                }
+            }
+        }
+
+        self.draw();
+        self.count += 1;
+    }
+
+    fn draw(self) {
+        let play_area_width = BLOCK_SIZE*self.blocks[0].len();
+        let play_area_height = BLOCK_SIZE*self.blocks.len();
+
+        let offset_x = (viewport[0] - play_area_width)/2;
+        let offset_y = (viewport[1] - play_area_height)/2;
+
+        let x = 0;
+        let y = 0;
+        if self.current_shape != None {
+            let shape = self.current_shape;
+            for shape_row in shapes[shape] {
+                for shape_column in shape_row {
+                    if shape_column {
+                        draw_rect(
+                            offset_x + (self.active_shape_x+x)*BLOCK_SIZE,
+                            offset_y + (self.active_shape_y+y)*BLOCK_SIZE,
+                            BLOCK_SIZE,
+                            BLOCK_SIZE,
+                            texture=color_to_tex(shape+1),
+                        );
+                    }
+                    x += 1;
+                }
+                x = 0;
+                y += 1;
+            }
+        }
+
+        x = 0;
+        y = 0;
+        for row in self.blocks {
+            for column in row {
+                let texture = color_to_tex(column);
+                if texture {
+                    draw_rect(
+                        offset_x + x*BLOCK_SIZE,
+                        offset_y + y*BLOCK_SIZE,
+                        BLOCK_SIZE,
+                        BLOCK_SIZE,
+                        texture=texture,
+                    );
+                }
+                x += 1;
+            }
+            x = 0;
+            y += 1;
+        }
+
+        // Draw side borders
+        y = 0;
+        for row in self.blocks {
+            draw_rect(
+                offset_x - BLOCK_SIZE,
+                offset_y + y*BLOCK_SIZE,
+                BLOCK_SIZE,
+                BLOCK_SIZE,
+                texture=BORDER_BLOCK_TEXTURE,
+            );
+            draw_rect(
+                offset_x + play_area_width,
+                offset_y + y*BLOCK_SIZE,
+                BLOCK_SIZE,
+                BLOCK_SIZE,
+                texture=BORDER_BLOCK_TEXTURE,
+            );
+            y += 1;
+        }
+
+        // Draw bottom border
+        x = -1;
+        for column in 0..(self.blocks[0].len()+2) {
+            draw_rect(
+                offset_x + x*BLOCK_SIZE,
+                offset_y + play_area_height,
+                BLOCK_SIZE,
+                BLOCK_SIZE,
+                texture=BORDER_BLOCK_TEXTURE,
+            );
+            x += 1;
         }
     }
 }
@@ -338,6 +602,7 @@ fn cursor() {
         10,
     );
 
+    /*
     if mouse_pressed(MOUSE_LEFT) {
         for idx in 0..11 {
             let b = Ball(
@@ -349,11 +614,12 @@ fn cursor() {
             add_tick_fn(b.tick);
         }
     }
+    */
 }
 
 add_tick_fn(cursor);
 
-set_window_title("Ball Game");
+set_window_title("Block Game");
 
 let frame_times = [];
 let script_times = [];
@@ -424,10 +690,10 @@ fn debug_frame_times() {
     );
 }
 
-add_tick_fn(debug_frame_times);
+//add_tick_fn(debug_frame_times);
 
 let viewport = None;
-let state = Menu();
+let state = Game();
 let frame_num = 0;
 fn loop() {
     viewport = window_size();
@@ -435,6 +701,15 @@ fn loop() {
 
     for func in tick_fns {
         func();
+    }
+
+    if log_lines {
+        if ig_begin("log") {
+            for line in log_lines {
+                ig_text(line);
+            }
+            ig_end();
+        }
     }
 
     frame_num += 1;
