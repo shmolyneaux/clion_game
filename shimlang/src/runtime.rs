@@ -749,8 +749,10 @@ const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
 const FNV_PRIME: u64 = 0x100000001b3;
 
 pub fn fnv1a_hash(key: &[u8]) -> u64 {
-    let mut hash = FNV_OFFSET_BASIS;
+    fnv1a_hash_extend(FNV_OFFSET_BASIS, key)
+}
 
+pub fn fnv1a_hash_extend(mut hash: u64, key: &[u8]) -> u64 {
     for &byte in key {
         hash ^= byte as u64;
         hash = hash.wrapping_mul(FNV_PRIME);
@@ -847,6 +849,18 @@ impl ShimValue {
             ShimValue::Integer(i) => fnv1a_hash(&i.to_be_bytes()),
             ShimValue::Float(f) => fnv1a_hash(&f.to_be_bytes()),
             ShimValue::String(..) => fnv1a_hash(self.string(interpreter).unwrap()),
+            ShimValue::Tuple(len, pos) => {
+                let mut hash = fnv1a_hash(&[]);
+
+                let len = usize::from(*len);
+                let pos = usize::from(*pos);
+                for idx in 0..len {
+                    let item = unsafe { ShimValue::from_u64(interpreter.mem.mem[pos+idx]) };
+                    hash = fnv1a_hash_extend(hash, &item.hash(interpreter)?.to_be_bytes());
+                }
+
+                hash
+            },
             // We might want to salt these to reduce collisions with other type,
             // but I expect there is a fairly trivial difference in performance
             // and would imply heterogenous dicts.
@@ -1621,6 +1635,29 @@ impl ShimValue {
                     }
                     Err(_) => Ok(false),
                 }
+            }
+            (ShimValue::Tuple(len_a, pos_a), ShimValue::Tuple(len_b, pos_b)) => {
+                let len_a = usize::from(*len_a);
+                let len_b = usize::from(*len_b);
+                let pos_a = usize::from(*pos_a);
+                let pos_b = usize::from(*pos_b);
+                if len_a == len_b && pos_a == pos_b {
+                    // Trivial case
+                    return Ok(true);
+                }
+                if len_a != len_b {
+                    return Ok(false);
+                }
+
+                let len = len_a;
+                for idx in 0..len {
+                    let item_a = unsafe { ShimValue::from_u64(interpreter.mem.mem[pos_a+idx]) };
+                    let item_b = unsafe { ShimValue::from_u64(interpreter.mem.mem[pos_b+idx]) };
+                    if !item_a.equal_inner(interpreter, &item_b)? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
             }
             (ShimValue::Fn(pos_a), ShimValue::Fn(pos_b)) => Ok(pos_a == pos_b),
             (ShimValue::BoundMethod(pos_a), ShimValue::BoundMethod(pos_b)) => {
