@@ -1501,6 +1501,23 @@ pub(crate) fn compare_values(
             }
             Ok(lst_a.len().cmp(&lst_b.len()))
         }
+        (ShimValue::Tuple(len_a, pos_a), ShimValue::Tuple(len_b, pos_b)) => {
+            let len_a = usize::from(*len_a);
+            let len_b = usize::from(*len_b);
+            let pos_a = usize::from(*pos_a);
+            let pos_b = usize::from(*pos_b);
+
+            let min_len = len_a.min(len_b);
+            for idx in 0..min_len {
+                let item_a = unsafe { ShimValue::from_u64(interpreter.mem.mem[pos_a+idx]) };
+                let item_b = unsafe { ShimValue::from_u64(interpreter.mem.mem[pos_b+idx]) };
+                match compare_values(interpreter, &item_a, &item_b)? {
+                    Ordering::Equal => continue,
+                    other => return Ok(other),
+                }
+            }
+            Ok(len_a.cmp(&len_b))
+        }
         (ShimValue::Struct(..), _) => {
             // Try struct method overrides for comparison operators
             if let Some(gt_result) = a.try_struct_override(interpreter, b"gt", b) {
