@@ -1042,6 +1042,7 @@ impl ShimValue {
                     b"filter" => shim_list_filter,
                     b"len" => shim_list_len,
                     b"iter" => shim_list_iter,
+                    b"enumerate" => shim_list_enumerate,
                     b"sort" => shim_list_sort,
                     b"append" => shim_list_append,
                     b"clear" => shim_list_clear,

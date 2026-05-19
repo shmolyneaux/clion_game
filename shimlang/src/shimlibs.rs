@@ -54,6 +54,72 @@ impl ShimNative for ListIterator {
     }
 }
 
+pub(crate) struct ListEnumerator {
+    pub(crate) lst: ShimValue,
+    pub(crate) idx: usize,
+}
+impl ShimNative for ListEnumerator {
+    fn get_attr(
+        &self,
+        self_as_val: &ShimValue,
+        interpreter: &mut Interpreter,
+        ident: &[u8],
+    ) -> Result<ShimValue, String> {
+        if ident == b"iter" {
+            fn return_self(
+                interpreter: &mut Interpreter,
+                args: &ArgBundle,
+            ) -> Result<ShimValue, String> {
+                Ok(args.args[0])
+            }
+            return Ok(
+                interpreter
+                    .mem
+                    .alloc_bound_native_fn(self_as_val, return_self)
+            );
+        }
+
+        if ident == b"next" {
+            fn shim_list_enumerate_next(
+                interpreter: &mut Interpreter,
+                args: &ArgBundle,
+            ) -> Result<ShimValue, String> {
+                if args.args.len() != 1 {
+                    return Err("Can't provide positional args to ListEnumerator.next()".to_string());
+                }
+
+                let itr: &mut ListEnumerator = args.args[0].as_native(interpreter)?;
+                let lst = itr.lst.list(interpreter)?;
+                if itr.idx >= lst.len() {
+                    Ok(ShimValue::None)
+                } else {
+                    let idx = ShimValue::Integer(itr.idx as i32);
+                    let item = lst.get(&interpreter.mem, itr.idx as isize)?;
+                    itr.idx += 1;
+
+                    let tpl = interpreter.mem.alloc_tuple(&[idx, item]);
+
+                    Ok(tpl)
+                }
+            }
+
+            Ok(interpreter
+                .mem
+                .alloc_bound_native_fn(self_as_val, shim_list_enumerate_next))
+        } else {
+            Err(format!(
+                "Can't get_attr {} on {}",
+                debug_u8s(ident),
+                type_name::<Self>()
+            ))
+        }
+    }
+
+    fn gc_vals(&self) -> Vec<ShimValue> {
+        vec![self.lst]
+    }
+}
+
 pub(crate) struct StringIterator {
     pub(crate) str_val: ShimValue,
     pub(crate) idx: usize,
@@ -1626,6 +1692,21 @@ pub(crate) fn shim_list_map(
     }
 
     Ok(new_lst_val)
+}
+
+
+
+pub(crate) fn shim_list_enumerate(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let obj = unpacker.required(b"obj")?;
+    unpacker.end()?;
+
+    Ok(interpreter
+        .mem
+        .alloc_native(ListEnumerator { lst: obj, idx: 0 }))
 }
 
 pub(crate) fn shim_list_len(

@@ -458,10 +458,8 @@ struct Game {
             }
         }
 
-        x = 0;
-        y = 0;
-        for row in self.blocks {
-            for column in row {
+        for y, row in self.blocks.enumerate() {
+            for x, column in row.enumerate() {
                 let texture = color_to_tex(column);
                 if texture {
                     draw_rect(
@@ -472,10 +470,7 @@ struct Game {
                         texture=texture,
                     );
                 }
-                x += 1;
             }
-            x = 0;
-            y += 1;
         }
 
         // Draw side borders
