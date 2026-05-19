@@ -18,7 +18,9 @@ with methods, and a growing standard library of built-in types and functions.
   - [Strings](#strings)
   - [None](#none)
   - [Lists](#lists)
+  - [Tuples](#tuples)
   - [Dictionaries](#dictionaries)
+  - [Numeric Methods](#numeric-methods)
 - [Operators](#operators)
   - [Arithmetic](#arithmetic)
   - [Comparison](#comparison)
@@ -145,18 +147,21 @@ Output:
 -2.5
 ```
 
-Integer division truncates toward zero. Use floats for decimal results:
+The `/` operator always produces a float, even for integer operands. Use
+`.trunc()` or `int(...)` if you need a truncated integer result:
 
 ```rust
 print(10 / 3);
 print(10.0 / 3.0);
+print(int(10 / 3));
 ```
 
 Output:
 
 ```
-3
 3.3333333
+3.3333333
+3
 ```
 
 ### Booleans
@@ -211,6 +216,23 @@ Output:
 line one
 line two
 a "quoted" word
+```
+
+Strings are iterable. Iteration yields each character as a one-character
+string:
+
+```rust
+for ch in "abc" {
+    print(ch);
+}
+```
+
+Output:
+
+```
+a
+b
+c
 ```
 
 Strings can be compared for equality:
@@ -303,6 +325,7 @@ Lists have a rich set of methods:
 | `.reversed()` | Returns a new reversed list |
 | `.map(fn)` | Returns a new list with `fn` applied to each element |
 | `.filter(fn)` | Returns a new list of elements where `fn` returns truthy |
+| `.enumerate()` | Returns an iterator yielding `(index, element)` tuples |
 
 Examples:
 
@@ -360,6 +383,112 @@ Output:
 [9, 8, 5, 3, 2, 1]
 ```
 
+The `enumerate()` method pairs each element with its index. It is typically
+consumed by a `for` loop using tuple unpacking (see [Tuples](#tuples)):
+
+```rust
+let names = ["a", "b", "c"];
+for i, name in names.enumerate() {
+    print(i, name);
+}
+```
+
+Output:
+
+```
+0 a
+1 b
+2 c
+```
+
+### Tuples
+
+Tuples are fixed-size, ordered, immutable sequences written with parentheses.
+Unlike lists, tuples are hashable, so they can be used as dictionary keys:
+
+```rust
+let pair = (1, 2);
+let triple = (1, "two", 3.0);
+print(pair);
+print(triple);
+print(pair[0], pair[1]);
+```
+
+Output:
+
+```
+(1, 2)
+(1, two, 3)
+1 2
+```
+
+A single-element tuple requires a trailing comma to distinguish it from a
+parenthesized expression. The empty tuple is written `()`:
+
+```rust
+let one = (1,);
+let empty = ();
+print(one);
+print(empty);
+```
+
+Output:
+
+```
+(1,)
+()
+```
+
+Tuples can be unpacked in `for` loops by listing multiple variables before `in`.
+This is the primary way to destructure tuples — there is no `let (x, y) = ...`
+form:
+
+```rust
+let points = [(1, 2), (3, 4), (5, 6)];
+for x, y in points {
+    print(x, "+", y, "=", x + y);
+}
+```
+
+Output:
+
+```
+1 + 2 = 3
+3 + 4 = 7
+5 + 6 = 11
+```
+
+Tuples are hashable and may be used as dictionary keys:
+
+```rust
+let d = dict();
+d[(0, 0)] = "origin";
+d[(1, 2)] = "point";
+print(d[(0, 0)]);
+print((1, 2) in d);
+```
+
+Output:
+
+```
+origin
+true
+```
+
+Tuples compare lexicographically. If one tuple is a prefix of another, the
+shorter one sorts first:
+
+```rust
+let lst = [(2, 1), (1, 2), (1, 1)];
+print(lst.sorted());
+```
+
+Output:
+
+```
+[(1, 1), (1, 2), (2, 1)]
+```
+
 ### Dictionaries
 
 Dictionaries are hash maps created with the `dict()` built-in. Keys can be
@@ -401,7 +530,8 @@ Dictionary methods:
 | Method | Description |
 |--------|-------------|
 | `.len()` | Returns the number of entries |
-| `.get(key)` | Returns the value for `key` |
+| `.get(key)` | Returns the value for `key`, or `None` if missing |
+| `.get(key, default)` | Returns the value for `key`, or `default` if missing |
 | `.set(key, val)` | Sets `key` to `val` |
 | `.has(key)` | Returns `true` if `key` exists |
 | `.pop(key)` | Removes `key` and returns its value |
@@ -438,6 +568,57 @@ b => 2
 c => 3
 ```
 
+### Numeric Methods
+
+Both integers and floats expose the same set of math methods. Methods that
+produce fractional results return floats even when called on an integer:
+
+```rust
+print((9).sqrt());
+print((-3).abs());
+print((2.5).round());
+```
+
+Output:
+
+```
+3.0
+3
+3
+```
+
+> **Note:** A method call on a negative integer literal needs parentheses
+> (`(-3).abs()`), otherwise the `.` binds to the literal `3` first.
+
+Available methods on both `int` and `float`:
+
+| Category | Methods |
+|----------|---------|
+| Conversion | `bool`, `int`, `float` |
+| Sign / range | `abs`, `signum`, `min`, `max`, `clamp` |
+| Rounding | `round`, `ceil`, `floor`, `trunc`, `frac` |
+| Power / root | `sqrt`, `pow(exp=...)`, `recip` |
+| Logs / exp | `ln`, `log(base=...)`, `log2`, `log10` |
+| Trig | `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2(other=...)` |
+| Hyperbolic | `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh` |
+| Angle | `to_degrees`, `to_radians` |
+
+`pow`, `log`, and `atan2` take their second operand as a keyword argument:
+
+```rust
+print((2).pow(exp=10));
+print((1000.0).log(base=10));
+print((1.0).atan2(other=1.0));
+```
+
+Output:
+
+```
+1024
+3.0
+0.7853982
+```
+
 ## Operators
 
 ### Arithmetic
@@ -447,8 +628,8 @@ c => 3
 | `+` | Addition (also string concatenation) |
 | `-` | Subtraction |
 | `*` | Multiplication |
-| `/` | Division (integer division truncates) |
-| `%` | Modulus |
+| `/` | Division (always produces a float) |
+| `%` | Modulus (Euclidean: result has the sign of the divisor) |
 
 ```rust
 print(10 + 3);
@@ -464,8 +645,23 @@ Output:
 13
 7
 30
-3
+3.3333333
 1
+```
+
+Modulus uses Euclidean remainder, so the result always has the same sign as the
+divisor. With a positive divisor the result is non-negative:
+
+```rust
+print(-1 % 5);
+print(-7 % 3);
+```
+
+Output:
+
+```
+4
+2
 ```
 
 ### Comparison
@@ -1408,15 +1604,14 @@ The following changes would improve the Shimlang experience for users:
   set of `try_` variants for operations that can fail with user-supplied data.
 - **Module / import system:** All code lives in a single file. An import
   system would allow organizing projects into reusable modules.
-- **Tuple type and destructuring:** Tuples and pattern-matching destructuring
-  (e.g., `let (x, y) = point;`) would make working with multiple return values
-  more ergonomic.
+- **Let-binding destructuring:** Tuples currently destructure only in `for`
+  loops. A `let (x, y) = point;` form would make working with multiple return
+  values more ergonomic.
 - **Variadic arguments (`*args`, `**kwargs`):** Functions cannot currently
   accept a variable number of positional or keyword arguments.
-- **Standard library expansion:** Built-in support for file I/O, math
-  functions (e.g., `sqrt`, `sin`, `cos`), and string manipulation methods
-  (e.g., `split`, `join`, `trim`, `upper`, `lower`) would greatly increase the
-  language's utility.
+- **Standard library expansion:** Built-in support for file I/O and additional
+  string manipulation methods (e.g., `join`, `trim`, `upper`, `lower`) would
+  greatly increase the language's utility.
 - **REPL improvements:** The interactive REPL could benefit from line editing,
   history, and multi-line input support.
 - **Better error messages:** While error messages include source location,
