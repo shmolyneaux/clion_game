@@ -158,7 +158,7 @@ pub enum Statement {
     CompoundAttributeAssignment(ExprNode, Vec<u8>, CompoundOp, ExprNode),
     CompoundIndexAssignment(ExprNode, ExprNode, CompoundOp, ExprNode),
     If(ExprNode, Block, Block),
-    For(Vec<u8>, ExprNode, Block),
+    For(Vec<Vec<u8>>, ExprNode, Block),
     While(ExprNode, Block),
     Break,
     Continue,
@@ -930,21 +930,32 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
             }
         } else if *tokens.peek()? == Token::For {
             tokens.advance()?;
-            let ident = match tokens.pop()? {
+            let mut idents: Vec<Vec<u8>> = vec![match tokens.pop()? {
                 Token::Identifier(ident) => ident,
                 token => {
                     tokens.unadvance()?;
                     return Err(tokens
                         .format_peek_err(&format!("Expected ident after for, found {:?}", token)));
                 }
-            };
+            }];
+            while *tokens.peek()? == Token::Comma {
+                tokens.consume(Token::Comma)?;
+                idents.push(match tokens.pop()? {
+                    Token::Identifier(ident) => ident,
+                    token => {
+                        tokens.unadvance()?;
+                        return Err(tokens
+                            .format_peek_err(&format!("Expected ident after comma, found {:?}", token)));
+                    }
+                });
+            }
             tokens.consume(Token::In)?;
             let expr = parse_expression(tokens)?;
             let body = parse_block(tokens)?;
 
             let end_span = tokens.previous_span()?;
             StatementNode {
-                data: Statement::For(ident, expr, body),
+                data: Statement::For(idents, expr, body),
                 span: start_span + end_span,
             }
         } else if *tokens.peek()? == Token::While {

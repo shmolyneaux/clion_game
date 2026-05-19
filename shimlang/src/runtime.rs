@@ -2765,6 +2765,26 @@ impl Interpreter {
                     }
                     pc += 2;
                 }
+                val if val == ByteCode::UnpackTuple as u8 => {
+                    let inst_len = ((bytes[pc + 1] as usize) << 8) + bytes[pc + 2] as usize;
+
+                    match stack.pop().expect("UnpackTuple stack value") {
+                        ShimValue::Tuple(tuple_len, pos) => {
+                            let tuple_len = usize::from(tuple_len);
+                            if tuple_len != inst_len {
+                                return Err(format!("Cannot unpack tuple of length {tuple_len} into {inst_len} variables"));
+                            }
+                            let pos = usize::from(pos);
+                            for idx in (0..inst_len).rev() {
+                                let item = unsafe { ShimValue::from_u64(self.mem.mem[pos+idx]) };
+                                stack.push(item);
+                            }
+                        }
+                        val => return Err(format!("Can't UnpackTuple {val:?}"))
+                    }
+
+                    pc += 2;
+                }
                 val if val == ByteCode::CreateTuple as u8 => {
                     let len = ((bytes[pc + 1] as usize) << 8) + bytes[pc + 2] as usize;
 

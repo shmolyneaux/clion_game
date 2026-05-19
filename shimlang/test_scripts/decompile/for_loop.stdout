@@ -7,14 +7,14 @@
   44:  get .iter
   50:  call args=0  kwargs=0
   53:  get .next
-  59:  Loop Start -> 100
+  59:  Loop Start -> 101
   62:  Copy
   63:  call args=0  kwargs=0
   66:  Copy
-  67:  let "item"
-  73:  None
-  74:  equal
-  75:  JMPNZ -> 100
+  67:  None
+  68:  equal
+  69:  JMPNZ -> 100
+  72:  let "item"
   78:  load "print"
   85:  load "item"
   91:  call args=1  kwargs=0
@@ -22,6 +22,8 @@
   95:  None
   96:  pop
   97:  JMPUP -> 62
- 100:  Loop End
- 101:  pop
- 102:  None
+ 100:  pop
+ 101:  Loop End
+ 102:  pop
+ 103:  None
+
