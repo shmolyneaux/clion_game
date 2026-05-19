@@ -376,14 +376,11 @@ struct Game {
         }
 
         if /*self.count % 5 == 0*/ key.Space.just_pressed_with_repeat {
-            let x = 0;
-            let y = 0;
-
             let hit = false;
             if self.current_shape != None {
                 let shape = self.current_shape;
-                for shape_row in shapes[shape] {
-                    for shape_column in shape_row {
+                for y, shape_row in shapes[shape].enumerate() {
+                    for x, shape_column in shape_row.enumerate() {
                         if shape_column {
                             let next_y = self.active_shape_y + y + 1;
                             hit = next_y >= GRID_Y or self.blocks[next_y][self.active_shape_x+x] != EMPTY;
@@ -391,29 +388,21 @@ struct Game {
                                 break;
                             }
                         }
-                        x += 1;
                     }
                     if hit {
                         break;
                     }
-                    x = 0;
-                    y += 1;
                 }
 
                 if hit {
-                    let x = 0;
-                    let y = 0;
-                    for shape_row in shapes[shape] {
-                        for shape_column in shape_row {
+                    for y, shape_row in shapes[shape].enumerate() {
+                        for x, shape_column in shape_row.enumerate() {
                             if shape_column {
                                 let x = self.active_shape_x + x;
                                 let y = self.active_shape_y + y;
                                 self.blocks[y][x] = self.current_shape+1;
                             }
-                            x += 1;
                         }
-                        x = 0;
-                        y += 1;
                     }
                     self.current_shape += 1;
                     self.current_shape %= 6;
@@ -436,12 +425,10 @@ struct Game {
         let offset_x = (viewport[0] - play_area_width)/2;
         let offset_y = (viewport[1] - play_area_height)/2;
 
-        let x = 0;
-        let y = 0;
         if self.current_shape != None {
             let shape = self.current_shape;
-            for shape_row in shapes[shape] {
-                for shape_column in shape_row {
+            for y, shape_row in shapes[shape].enumerate() {
+                for x, shape_column in shape_row.enumerate() {
                     if shape_column {
                         draw_rect(
                             offset_x + (self.active_shape_x+x)*BLOCK_SIZE,
@@ -451,10 +438,7 @@ struct Game {
                             texture=color_to_tex(shape+1),
                         );
                     }
-                    x += 1;
                 }
-                x = 0;
-                y += 1;
             }
         }
 
@@ -474,8 +458,7 @@ struct Game {
         }
 
         // Draw side borders
-        y = 0;
-        for row in self.blocks {
+        for y, row in self.blocks.enumerate() {
             draw_rect(
                 offset_x - BLOCK_SIZE,
                 offset_y + y*BLOCK_SIZE,
@@ -490,12 +473,10 @@ struct Game {
                 BLOCK_SIZE,
                 texture=BORDER_BLOCK_TEXTURE,
             );
-            y += 1;
         }
 
         // Draw bottom border
-        x = -1;
-        for column in 0..(self.blocks[0].len()+2) {
+        for x in (-1)..(self.blocks[0].len()+1) {
             draw_rect(
                 offset_x + x*BLOCK_SIZE,
                 offset_y + play_area_height,
@@ -503,7 +484,6 @@ struct Game {
                 BLOCK_SIZE,
                 texture=BORDER_BLOCK_TEXTURE,
             );
-            x += 1;
         }
     }
 }
