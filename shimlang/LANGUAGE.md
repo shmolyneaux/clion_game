@@ -446,7 +446,7 @@ form:
 ```rust
 let points = [(1, 2), (3, 4), (5, 6)];
 for x, y in points {
-    print(x, "+", y, "=", x + y);
+    print("\(x) + \(y) = \(x + y)");
 }
 ```
 
@@ -597,18 +597,19 @@ Available methods on both `int` and `float`:
 | Conversion | `bool`, `int`, `float` |
 | Sign / range | `abs`, `signum`, `min`, `max`, `clamp` |
 | Rounding | `round`, `ceil`, `floor`, `trunc`, `frac` |
-| Power / root | `sqrt`, `pow(exp=...)`, `recip` |
-| Logs / exp | `ln`, `log(base=...)`, `log2`, `log10` |
-| Trig | `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2(other=...)` |
+| Power / root | `sqrt`, `pow(exp)`, `recip` |
+| Logs / exp | `ln`, `log(base)`, `log2`, `log10` |
+| Trig | `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2(other)` |
 | Hyperbolic | `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh` |
 | Angle | `to_degrees`, `to_radians` |
 
-`pow`, `log`, and `atan2` take their second operand as a keyword argument:
+`pow`, `log`, and `atan2` take a second operand, which can be passed
+positionally or as a keyword argument (`exp`, `base`, `other`):
 
 ```rust
-print((2).pow(exp=10));
+print((2).pow(10));
 print((1000.0).log(base=10));
-print((1.0).atan2(other=1.0));
+print((1.0).atan2(1.0));
 ```
 
 Output:
