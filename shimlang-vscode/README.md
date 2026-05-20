@@ -9,8 +9,11 @@ Syntax highlighting for the [Shimlang](../shimlang/) programming language (`.shm
 - Nested string interpolation — code inside `\(expr)` blocks is highlighted as code, not as a string
 - Keywords, constants (`true`, `false`, `None`), and operators
 - Numeric literals (integers and floats)
+- Tuples and tuple unpacking in `for` loops (`for x, y in pairs`)
+- `in` membership operator (`key in dict`, `value in list`, `substr in string`)
 - Function and struct definitions
-- `self` keyword
+- Built-in functions (`print`, `assert`, `panic`, `dict`, `Range`, `str`, `int`, `float`, `try_int`, `try_float`)
+- `self` keyword and dunder attributes (`__name__`, `__type__`)
 
 ## Build .vsix File
 
@@ -56,5 +59,7 @@ shimlang-vscode/
         ├── numbers_constants.shm
         ├── functions_structs.shm
         ├── operators.shm
+        ├── tuples.shm
+        ├── builtins.shm
         └── nested_features.shm
 ```

@@ -1,0 +1,49 @@
+// SYNTAX TEST "source.shim"
+
+print("hello");
+// <- support.function.builtin.shim
+
+assert(1 == 1);
+// <- support.function.builtin.shim
+
+panic("nope");
+// <- support.function.builtin.shim
+
+let d = dict();
+//      ^^^^ support.function.builtin.shim
+
+for i in Range(0, 10) {
+//       ^^^^^ support.function.builtin.shim
+}
+
+let s = str(42);
+//      ^^^ support.function.builtin.shim
+
+let n = int("42");
+//      ^^^ support.function.builtin.shim
+
+let f = float("3.14");
+//      ^^^^^ support.function.builtin.shim
+
+let maybe_n = try_int("hello");
+//            ^^^^^^^ support.function.builtin.shim
+
+let maybe_f = try_float("hello");
+//            ^^^^^^^^^ support.function.builtin.shim
+
+// Non-builtin function calls remain plain function calls
+foo(1, 2);
+// <- entity.name.function.call.shim
+
+// Built-in identifier without parens is not specially highlighted
+let p = print;
+//      ^^^^^ variable.other.shim
+
+// Dunder attributes
+struct Animal { name }
+let dog = Animal("Buddy");
+print(Animal.__name__);
+//           ^^^^^^^^ variable.language.dunder.shim
+
+print(dog.__type__);
+//        ^^^^^^^^ variable.language.dunder.shim

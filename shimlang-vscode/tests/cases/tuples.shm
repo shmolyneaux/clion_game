@@ -1,0 +1,37 @@
+// SYNTAX TEST "source.shim"
+
+let pair = (1, 2);
+//         ^ punctuation.section.parens.begin.shim
+//          ^ constant.numeric.integer.shim
+//           ^ punctuation.separator.comma.shim
+//             ^ constant.numeric.integer.shim
+//              ^ punctuation.section.parens.end.shim
+
+let one = (1,);
+//        ^ punctuation.section.parens.begin.shim
+//         ^ constant.numeric.integer.shim
+//          ^ punctuation.separator.comma.shim
+//           ^ punctuation.section.parens.end.shim
+
+let empty = ();
+//          ^ punctuation.section.parens.begin.shim
+//           ^ punctuation.section.parens.end.shim
+
+let triple = (1, "two", 3.0);
+//           ^ punctuation.section.parens.begin.shim
+//            ^ constant.numeric.integer.shim
+//                ^ string.quoted.double.shim
+//                      ^^^ constant.numeric.float.shim
+
+// Tuple unpacking in for loop
+for x, y in pairs {
+// <- keyword.control.shim
+//  ^ variable.other.shim
+//   ^ punctuation.separator.comma.shim
+//     ^ variable.other.shim
+//       ^^ keyword.operator.logical.shim
+}
+
+// Membership test with in operator
+let has = key in d;
+//            ^^ keyword.operator.logical.shim

@@ -6,7 +6,7 @@ fn hello(name) {
 //      ^ punctuation.section.parens.begin.shim
 
     print("Hello " + name);
-//  ^^^^^ entity.name.function.call.shim
+//  ^^^^^ support.function.builtin.shim
 }
 
 fn add(a, b) {
