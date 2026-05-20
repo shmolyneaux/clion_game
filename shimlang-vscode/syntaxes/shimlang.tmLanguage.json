@@ -11,8 +11,10 @@
         { "include": "#keywords" },
         { "include": "#constants" },
         { "include": "#numbers" },
+        { "include": "#builtin-functions" },
         { "include": "#function-call" },
         { "include": "#self-keyword" },
+        { "include": "#dunder-attribute" },
         { "include": "#operators" },
         { "include": "#round-braces" },
         { "include": "#square-braces" },
@@ -97,7 +99,7 @@
             "patterns": [
                 {
                     "name": "keyword.control.shim",
-                    "match": "\\b(if|else|while|for|in|break|continue|return)\\b"
+                    "match": "\\b(if|else|while|for|break|continue|return)\\b"
                 },
                 {
                     "name": "keyword.other.let.shim",
@@ -105,7 +107,7 @@
                 },
                 {
                     "name": "keyword.operator.logical.shim",
-                    "match": "\\b(and|or)\\b"
+                    "match": "\\b(and|or|in)\\b"
                 },
                 {
                     "name": "storage.type.function.shim",
@@ -145,6 +147,12 @@
                 }
             ]
         },
+        "builtin-functions": {
+            "match": "\\b(print|assert|panic|dict|Range|str|int|float|try_int|try_float)(?=\\s*\\()",
+            "captures": {
+                "1": { "name": "support.function.builtin.shim" }
+            }
+        },
         "function-call": {
             "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)(?=\\s*\\()",
             "captures": {
@@ -154,6 +162,10 @@
         "self-keyword": {
             "name": "variable.language.self.shim",
             "match": "\\bself\\b"
+        },
+        "dunder-attribute": {
+            "name": "variable.language.dunder.shim",
+            "match": "\\b__[a-zA-Z_][a-zA-Z0-9_]*__\\b"
         },
         "operators": {
             "patterns": [

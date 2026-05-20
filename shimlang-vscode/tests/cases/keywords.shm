@@ -14,7 +14,7 @@ while true { }
 
 for i in lst { }
 // <- keyword.control.shim
-//    ^^ keyword.control.shim
+//    ^^ keyword.operator.logical.shim
 
 break;
 // <- keyword.control.shim
