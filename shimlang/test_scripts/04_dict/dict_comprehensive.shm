@@ -23,8 +23,8 @@ for v in mixed.values() {
 }
 
 print("Items:");
-for item in mixed.items() {
-    print(item.key, "=>", item.value);
+for key, value in mixed.items() {
+    print(key, "=>", value);
 }
 
 // Test that we can reuse iterators

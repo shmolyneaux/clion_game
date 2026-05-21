@@ -1065,7 +1065,7 @@ impl ShimValue {
                     b"has" => shim_dict_index_has,
                     b"len" => shim_dict_len,
                     b"pop" => shim_dict_pop,
-                    b"iter" => shim_dict_iter,
+                    b"iter" => shim_dict_keys,
                     b"keys" => shim_dict_keys,
                     b"values" => shim_dict_values,
                     b"items" => shim_dict_items,

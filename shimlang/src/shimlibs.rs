@@ -352,35 +352,6 @@ impl ShimNative for DictValuesIterator {
     }
 }
 
-pub(crate) struct DictEntryNative {
-    pub(crate) key: ShimValue,
-    pub(crate) value: ShimValue,
-}
-impl ShimNative for DictEntryNative {
-    fn get_attr(
-        &self,
-        _self_as_val: &ShimValue,
-        _interpreter: &mut Interpreter,
-        ident: &[u8],
-    ) -> Result<ShimValue, String> {
-        if ident == b"key" {
-            Ok(self.key)
-        } else if ident == b"value" {
-            Ok(self.value)
-        } else {
-            Err(format!(
-                "Can't get_attr {} on {}",
-                debug_u8s(ident),
-                type_name::<Self>()
-            ))
-        }
-    }
-
-    fn gc_vals(&self) -> Vec<ShimValue> {
-        vec![self.key, self.value]
-    }
-}
-
 pub(crate) struct DictItemsIterator {
     pub(crate) dict: ShimValue,
     pub(crate) idx: usize,
@@ -409,10 +380,7 @@ impl ShimNative for DictItemsIterator {
                 while itr.idx < entries.len() {
                     if entries[itr.idx].is_valid() {
                         let entry = &entries[itr.idx];
-                        let result = interpreter.mem.alloc_native(DictEntryNative {
-                            key: entry.key,
-                            value: entry.value,
-                        });
+                        let result = interpreter.mem.alloc_tuple(&[entry.key, entry.value]);
                         itr.idx += 1;
                         return Ok(result);
                     }
@@ -2052,19 +2020,6 @@ pub(crate) fn shim_list_reversed(
     }
 
     Ok(new_lst_val)
-}
-
-pub(crate) fn shim_dict_iter(
-    interpreter: &mut Interpreter,
-    args: &ArgBundle,
-) -> Result<ShimValue, String> {
-    let mut unpacker = ArgUnpacker::new(args);
-    let obj = unpacker.required(b"obj")?;
-    unpacker.end()?;
-
-    Ok(interpreter
-        .mem
-        .alloc_native(DictKeysIterator { dict: obj, idx: 0 }))
 }
 
 pub(crate) fn shim_dict_keys(

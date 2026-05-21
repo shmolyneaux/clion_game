@@ -538,7 +538,7 @@ Dictionary methods:
 | `.pop(key, default)` | Removes `key` or returns `default` |
 | `.keys()` | Returns an iterator over keys |
 | `.values()` | Returns an iterator over values |
-| `.items()` | Returns an iterator over entries with `.key` and `.value` |
+| `.items()` | Returns a tuple iterator of (key, value) pairs |
 
 Iterating over a dictionary yields its keys. Use `.items()` for key-value pairs:
 
@@ -552,8 +552,8 @@ for key in d {
     print(key);
 }
 
-for item in d.items() {
-    print(item.key, "=>", item.value);
+for key, value in d.items() {
+    print(key, "=>", value);
 }
 ```
 

@@ -4,5 +4,5 @@ d.set("second", 2);
 d.set("third", 3);
 
 for entry in d.items() {
-    print(entry.key, ":", entry.value);
+    print(entry[0], ":", entry[1]);
 }
