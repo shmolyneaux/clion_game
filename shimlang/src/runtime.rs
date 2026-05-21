@@ -1099,6 +1099,7 @@ impl ShimValue {
                     b"min" => shim_min,
                     b"max" => shim_max,
                     b"clamp" => shim_clamp,
+                    b"in_range" => shim_in_range,
                     b"sqrt" => shim_sqrt,
                     b"pow" => shim_pow,
                     b"round" => shim_round,

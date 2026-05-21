@@ -3031,6 +3031,32 @@ pub(crate) fn shim_clamp(
     Ok(value)
 }
 
+/// Clamp function that's generic over any comparable type.
+/// Prefers returning the original value when value == min or value == max
+pub(crate) fn shim_in_range(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = unpacker.required(b"value")?;
+    let min = unpacker.required(b"min")?;
+    let max = unpacker.required(b"max")?;
+    unpacker.end()?;
+
+    // If value is less than min, return false
+    if let Ok(std::cmp::Ordering::Less) = compare_values(interpreter, &value, &min) {
+        return Ok(ShimValue::Bool(false))
+    }
+
+    // If value is less than max, return false
+    if let Ok(std::cmp::Ordering::Greater) = compare_values(interpreter, &value, &max) {
+        return Ok(ShimValue::Bool(false))
+    }
+
+    // Otherwise it's between the range, so we can return the value itself
+    Ok(ShimValue::Bool(true))
+}
+
 
 pub(crate) fn shim_min(
     _interpreter: &mut Interpreter,
