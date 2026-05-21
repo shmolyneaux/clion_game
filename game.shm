@@ -1,39 +1,3 @@
-let COLOR_PICKER_TEXTURE = {
-    let data = [];
-    let width = 256;
-    let height = 256;
-
-    for y in 0..height {
-        for x in 0..width {
-            let u = ((x / width) - 0.5) * 2;
-            let v = ((y / height) - 0.5) * 2;
-
-            let h = (x / width) * 360;
-            let s = 1.0;
-            let l = 0.5;
-
-            let c = (1 - (2*l - 1).abs()) * s;
-            let h_prime = c * (1 - ((h / 60) % 2 - 1).abs());
-            let m = l - c / 2;
-
-            let r_prime = if h <  60 { c       } else if h < 120 { h_prime } else if h < 180 { 0       } else if h < 240 { 0       } else if h < 300 { h_prime } else { c       };
-            let g_prime = if h <  60 { h_prime } else if h < 120 { c       } else if h < 180 { c       } else if h < 240 { h_prime } else if h < 300 { 0       } else { 0       };
-            let b_prime = if h <  60 { 0       } else if h < 120 { 0       } else if h < 180 { h_prime } else if h < 240 { c       } else if h < 300 { c       } else { h_prime };
-
-            data.append(r_prime + m);
-            data.append(g_prime + m);
-            data.append(b_prime + m);
-            data.append(1.0);
-        }
-    }
-
-    create_texture(
-        width,
-        height,
-        data,
-    )
-};
-
 let BUTTON_WIDTH = 500;
 let BUTTON_HEIGHT = 50;
 let BUTTON_TEXTURE = {
@@ -242,21 +206,6 @@ struct Menu {
 
         let total_height = MENU_BUTTONS.len()*BUTTON_HEIGHT + (MENU_BUTTONS.len() - 1)*BUTTON_PADDING;
 
-        /*
-        if ig_begin("game") {
-            ig_text("Frame Time (ms): \(delta * 1000)");
-            ig_text("Selected button: \(self.selected_button)");
-            ig_text("(-1) %% 2 == \((-1) % 2)");
-            ig_text("self: \(self)");
-            ig_text("Mouse pos: \(mouse_pos())");
-            ig_text("Button texture: \(BUTTON_TEXTURE)");
-            ig_text("");
-            ig_text("Ticker count: \(tick_fns.len())");
-            ig_text("");
-            ig_text("\(perf.script) \(perf.gc) \(perf.render) \(perf.vsync)");
-            ig_end();
-        }
-        */
         let font_size = 4.0;
         let font_size_pixels = font_size*8.0;
         let label_height = font_size*7.0;
@@ -293,16 +242,6 @@ struct Menu {
             y += BUTTON_HEIGHT + BUTTON_PADDING;
             button_num += 1;
         }
-
-        /*
-        draw_rect(
-            0,
-            0,
-            256,
-            256,
-            texture=COLOR_PICKER_TEXTURE,
-        );
-        */
 
         if key.Enter.just_pressed and self.selected_button == MENU_BUTTONS.index("START") {
             state = Game();
@@ -351,8 +290,54 @@ struct Game {
     active_shape_x = int(GRID_X/2)-1,
     active_shape_y = 0,
     current_shape = 4,
+    shape_rotation = 0,
 
     count = 0,
+
+    fn shape_block_offsets(self) {
+        let out = [];
+        let shape = shapes[self.current_shape];
+        let height = shape.len();
+        let width = shape[0].len();
+        for y, shape_row in shapes[self.current_shape].enumerate() {
+            for x, shape_column in shape_row.enumerate() {
+                if shape_column {
+                    if self.shape_rotation == 0 {
+                        out.append((x, y));
+                    } else if self.shape_rotation == 1 {
+                        out.append((height-y-1, x));
+                    } else if self.shape_rotation == 2 {
+                        out.append((width-x-1, height-y-1));
+                    } else {
+                        out.append((y, width-x-1));
+                    }
+
+                }
+            }
+        }
+        out
+    }
+
+    fn shape_intersects(self, x, y) {
+        for block_x, block_y in self.shape_block_offsets() {
+            let check_x = block_x + x;
+            let check_y = block_y + y;
+
+            if !check_x.in_range(0, GRID_X-1) {
+                return true;
+            }
+
+            if !check_y.in_range(0, GRID_Y-1) {
+                return true;
+            }
+
+            if self.blocks[check_y][check_x] != EMPTY {
+                return true;
+            }
+        }
+
+        false
+    }
 
     fn tick(self) {
         if key.Escape.just_pressed {
@@ -360,49 +345,47 @@ struct Game {
             return;
         }
 
+        if key.Up.just_pressed {
+            self.shape_rotation += 1;
+            self.shape_rotation %= 4;
+
+            // Undo the rotation if we would intersect
+            if self.shape_intersects(self.active_shape_x, self.active_shape_y) {
+                self.shape_rotation -= 1;
+                self.shape_rotation %= 4;
+            }
+        }
+
         if key.Left.just_pressed {
-            if self.active_shape_x > 0 {
-                // TODO: check for hit
+            if !self.shape_intersects(self.active_shape_x - 1, self.active_shape_y) {
                 self.active_shape_x -= 1;
             }
         }
 
         if key.Right.just_pressed {
-            // TODO: check width against GRID_X
-            if true {
-                // TODO: check for hit
+            if !self.shape_intersects(self.active_shape_x + 1, self.active_shape_y) {
                 self.active_shape_x += 1;
             }
         }
 
-        if /*self.count % 5 == 0*/ key.Space.just_pressed_with_repeat {
+        if key.Down.just_pressed and self.current_shape != None {
+            while true {
+                if self.shape_intersects(self.active_shape_x, self.active_shape_y + 1) {
+                    break;
+                }
+                self.active_shape_y += 1;
+            }
+        } else if self.count % 40 == 0 {
             let hit = false;
             if self.current_shape != None {
                 let shape = self.current_shape;
-                for y, shape_row in shapes[shape].enumerate() {
-                    for x, shape_column in shape_row.enumerate() {
-                        if shape_column {
-                            let next_y = self.active_shape_y + y + 1;
-                            hit = next_y >= GRID_Y or self.blocks[next_y][self.active_shape_x+x] != EMPTY;
-                            if hit {
-                                break;
-                            }
-                        }
-                    }
-                    if hit {
-                        break;
-                    }
-                }
+                let hit = self.shape_intersects(self.active_shape_x, self.active_shape_y + 1);
 
                 if hit {
-                    for y, shape_row in shapes[shape].enumerate() {
-                        for x, shape_column in shape_row.enumerate() {
-                            if shape_column {
-                                let x = self.active_shape_x + x;
-                                let y = self.active_shape_y + y;
-                                self.blocks[y][x] = self.current_shape+1;
-                            }
-                        }
+                    for x, y in self.shape_block_offsets() {
+                        let x = self.active_shape_x + x;
+                        let y = self.active_shape_y + y;
+                        self.blocks[y][x] = self.current_shape+1;
                     }
                     self.current_shape += 1;
                     self.current_shape %= 6;
@@ -427,18 +410,14 @@ struct Game {
 
         if self.current_shape != None {
             let shape = self.current_shape;
-            for y, shape_row in shapes[shape].enumerate() {
-                for x, shape_column in shape_row.enumerate() {
-                    if shape_column {
-                        draw_rect(
-                            offset_x + (self.active_shape_x+x)*BLOCK_SIZE,
-                            offset_y + (self.active_shape_y+y)*BLOCK_SIZE,
-                            BLOCK_SIZE,
-                            BLOCK_SIZE,
-                            texture=color_to_tex(shape+1),
-                        );
-                    }
-                }
+            for x, y in self.shape_block_offsets() {
+                draw_rect(
+                    offset_x + (self.active_shape_x+x)*BLOCK_SIZE,
+                    offset_y + (self.active_shape_y+y)*BLOCK_SIZE,
+                    BLOCK_SIZE,
+                    BLOCK_SIZE,
+                    texture=color_to_tex(shape+1),
+                );
             }
         }
 
@@ -501,69 +480,6 @@ fn remove_tick_fn(func) {
     }
 }
 
-let BALL_SIZE = 10;
-struct Ball {
-    x,
-    y,
-    vx,
-    vy,
-
-    fn tick(self) {
-        // Kinematic step under constant gravity: y(t) = y0 + v0*t + 0.5*g*t²
-        let v0 = self.vy;
-        let y0 = self.y;
-        let y_end = y0 + v0 + 0.5 * g;
-        let v_end = v0 + g;
-
-        let floor = viewport[1] - BALL_SIZE;
-        if y_end > floor {
-            // Solve 0.5*g*t² + v0*t + (y0 - floor) = 0 for t in (0, 1]
-            let a = 0.5 * g;
-            let b = v0;
-            let c = y0 - floor;
-            let t_hit = (-b + (b*b - 4*a*c).sqrt()) / (2*a);
-            let v_hit = v0 + g * t_hit;
-            let dt_rem = 1.0 - t_hit;
-            // Reflect at the floor, then finish the frame
-            let v_after = -v_hit;
-            self.vy = v_after + g * dt_rem;
-            self.y = floor + v_after * dt_rem + 0.5 * g * dt_rem * dt_rem;
-        } else {
-            self.y = y_end;
-            self.vy = v_end;
-        }
-
-        self.x += self.vx;
-        if self.x < 0 {
-            self.x = -self.x;
-            self.vx = -self.vx;
-        }
-        if self.x + BALL_SIZE > viewport[0] {
-            self.x -= 2 * ((self.x + BALL_SIZE) - viewport[0]);
-            self.vx = -self.vx;
-        }
-        if self.y < 0 {
-            self.y = -self.y;
-            self.vy = -self.vy;
-        }
-
-        draw_rect(
-            self.x,
-            self.y,
-            BALL_SIZE,
-            BALL_SIZE,
-            r=1.0,
-            g=0.5,
-            b=0.5,
-        );
-    }
-}
-
-let vx = -5.0;
-let vy = 0.0;
-
-let g = 1.0;
-
 fn cursor() {
     if !mouse_focus() {
         return;
@@ -576,20 +492,6 @@ fn cursor() {
         10,
         10,
     );
-
-    /*
-    if mouse_pressed(MOUSE_LEFT) {
-        for idx in 0..11 {
-            let b = Ball(
-                pos[0] + idx*2,
-                pos[1] + idx*2,
-                vx,
-                vy,
-            );
-            add_tick_fn(b.tick);
-        }
-    }
-    */
 }
 
 add_tick_fn(cursor);
