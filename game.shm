@@ -291,7 +291,7 @@ struct Game {
     active_shape_y = 0,
     current_shape = 4,
     shape_rotation = 0,
-
+    game_over = false,
     count = 0,
 
     fn shape_block_offsets(self) {
@@ -345,6 +345,13 @@ struct Game {
             return;
         }
 
+        if !self.game_over {
+            self.update_game();
+        }
+        self.draw();
+    }
+
+    fn update_game(self) {
         if key.Up.just_pressed {
             self.shape_rotation += 1;
             self.shape_rotation %= 4;
@@ -374,8 +381,12 @@ struct Game {
                     break;
                 }
                 self.active_shape_y += 1;
+
+                // Reset count so that it can be shifted left/right after being pushed down
+                // We do it in the loop so the count only resets if the block moves
+                self.count = 0;
             }
-        } else if self.count % 40 == 0 {
+        } else if self.count >= 40 {
             let hit = false;
             if self.current_shape != None {
                 let shape = self.current_shape;
@@ -387,17 +398,40 @@ struct Game {
                         let y = self.active_shape_y + y;
                         self.blocks[y][x] = self.current_shape+1;
                     }
+
+                    // TODO: show "next block" at the side that picks randomly
+                    // from a bag
                     self.current_shape += 1;
-                    self.current_shape %= 6;
+                    self.current_shape %= shapes.len();
+                    self.shape_rotation = 0;
+
                     self.active_shape_y = 0;
                     self.active_shape_x = int(GRID_X/2)-1;
+
+                    self.game_over = self.shape_intersects(
+                        self.active_shape_x, self.active_shape_y + 1
+                    );
+
+                    if self.game_over {
+                        let reset_count = 0;
+                        fn reset_after_delay() {
+                            reset_count += 1;
+                            ig_begin("reset_count");
+                            ig_text("Reset Count: \(reset_count)");
+                            ig_end();
+                            if reset_count > 100 {
+                                remove_tick_fn(reset_after_delay);
+                                state = Game();
+                            }
+                        }
+                        add_tick_fn(reset_after_delay);
+                    }
                 } else {
                     self.active_shape_y += 1;
                 }
             }
+            self.count = 0;
         }
-
-        self.draw();
         self.count += 1;
     }
 
@@ -408,6 +442,23 @@ struct Game {
         let offset_x = (viewport[0] - play_area_width)/2;
         let offset_y = (viewport[1] - play_area_height)/2;
 
+        // Draw the highlight for where the block will be pushed down to
+        if self.current_shape != None {
+            let width = 1;
+            let shape = self.current_shape;
+            for x, _ in self.shape_block_offsets() {
+                width = width.max(x+1);
+            }
+            draw_rect(
+                offset_x + (self.active_shape_x)*BLOCK_SIZE,
+                offset_y,
+                width*BLOCK_SIZE,
+                play_area_height,
+                a=0.1,
+            );
+        }
+
+        // Draw active block
         if self.current_shape != None {
             let shape = self.current_shape;
             for x, y in self.shape_block_offsets() {
@@ -421,6 +472,7 @@ struct Game {
             }
         }
 
+        // Draw the placed blocks
         for y, row in self.blocks.enumerate() {
             for x, column in row.enumerate() {
                 let texture = color_to_tex(column);
@@ -462,6 +514,19 @@ struct Game {
                 BLOCK_SIZE,
                 BLOCK_SIZE,
                 texture=BORDER_BLOCK_TEXTURE,
+            );
+        }
+
+        if self.game_over {
+            let label = "GAME OVER";
+            let font_size = 4.0;
+            let font_size_pixels = font_size*8.0;
+            let label_width = label.len()*font_size_pixels;
+            draw_text(
+                (viewport[0] - label_width)/2,
+                (viewport[1])/2,
+                label,
+                size=font_size,
             );
         }
     }
