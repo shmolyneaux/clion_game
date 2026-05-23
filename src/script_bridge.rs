@@ -435,14 +435,15 @@ fn shim_ig_text(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimV
 
 fn shim_draw_rect(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
-    let x = unpacker.required_number(b"x")?;
-    let y = unpacker.required_number(b"y")?;
+    let mut x = unpacker.required_number(b"x")?;
+    let mut y = unpacker.required_number(b"y")?;
     let w = unpacker.required_number(b"w")?;
     let h = unpacker.required_number(b"h")?;
     let texture: Option<TextureHandle> = match unpacker.optional(b"texture") {
         Some(val) => Some(val.as_native::<TextureHandle>(interpreter)?.clone()),
         None => None,
     };
+    let center = matches!(unpacker.optional(b"center"), Some(ShimValue::Bool(true)));
     fn optional_channel(val: Option<ShimValue>) -> Result<u8, String> {
         match val {
             None => Ok(255),
@@ -470,6 +471,11 @@ fn shim_draw_rect(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shi
     };
     unpacker.end()?;
 
+    if center {
+        x -= w/2.0;
+        y -= h/2.0;
+    }
+
     interpreter.fetch_mut::<DrawList>().push_rect(x, y, w, h, texture, [r, g, b, a], region);
     Ok(ShimValue::None)
 }
@@ -486,15 +492,44 @@ fn shim_rect(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValu
     Ok(interpreter.mem.alloc_native(Rect { x1: clamp01(x1), y1: clamp01(y1), x2: clamp01(x2), y2: clamp01(y2) }))
 }
 
+fn text_size(text: &[u8], font_size: f32) -> (f32, f32) {
+    let mut line_count = 1;
+    let mut longest_line = 0;
+    let mut current_line_length = 0;
+    for byte in text {
+        current_line_length += 1;
+        if *byte == b'\n' {
+            line_count += 1;
+            longest_line = longest_line.max(current_line_length - 1);
+            current_line_length = 0;
+        }
+    }
+    longest_line = longest_line.max(current_line_length);
+
+    (
+        longest_line as f32 * font_size,
+        // Each char is 7px, but with line spacing of 8px
+        (7.0/8.0 + (line_count as f32 - 1.0)) * font_size,
+    )
+}
+
 fn shim_draw_text(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
-    let x = unpacker.required_number(b"x")?;
-    let y = unpacker.required_number(b"y")?;
+    let mut x = unpacker.required_number(b"x")?;
+    let mut y = unpacker.required_number(b"y")?;
     let text_val = unpacker.required(b"text")?;
     let size = unpacker.optional_number(b"size", 1.0)?;
+    let center = matches!(unpacker.optional(b"center"), Some(ShimValue::Bool(true)));
     unpacker.end()?;
 
     let text = text_val.to_string(interpreter);
+
+    if center {
+        let dim = text_size(text.as_bytes(), size*8.0);
+        x -= dim.0/2.0;
+        // Offset by size since the top row of pixels in the font is transparent
+        y -= dim.1/2.0 + size;
+    }
 
     interpreter
         .fetch_mut::<DrawList>()

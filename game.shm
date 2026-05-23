@@ -186,9 +186,6 @@ let shapes = [
 let MENU_BUTTONS = [
     "START",
     "OPTIONS",
-    "THIRD",
-    "Fourth",
-    "5th",
 ];
 let BUTTON_PADDING = 10;
 struct Menu {
@@ -216,11 +213,12 @@ struct Menu {
         let y = 0;
         for label in MENU_BUTTONS {
             draw_rect(
-                (viewport[0] - BUTTON_WIDTH)/2,
+                viewport[0]/2,
                 (viewport[1] - total_height)/2 + y,
                 BUTTON_WIDTH,
                 BUTTON_HEIGHT,
                 texture=BUTTON_TEXTURE,
+                center=true,
                 r=if (self.selected_button == button_num) {
                     (((frame_num - self.button_highlight_start_frame)/15).cos()+1.0)/2
                 } else {
@@ -232,9 +230,10 @@ struct Menu {
             );
             let label_width = label.len()*font_size_pixels;
             draw_text(
-                (viewport[0] - BUTTON_WIDTH)/2 + (BUTTON_WIDTH - label_width)/2,
-                (viewport[1] - total_height)/2 + (BUTTON_HEIGHT - label_height)/2 - label_offset + y,
+                viewport[0]/2,
+                (viewport[1] - total_height)/2 + y,
                 label,
+                center=true,
                 size=font_size,
             );
             y += BUTTON_HEIGHT + BUTTON_PADDING;
@@ -532,6 +531,9 @@ struct Game {
                         BLOCK_SIZE,
                         BLOCK_SIZE,
                         texture=texture,
+                        r=0.95,
+                        g=0.95,
+                        b=0.95,
                     );
                 }
             }
@@ -579,10 +581,11 @@ struct Game {
             let font_size_pixels = font_size*8.0;
             let label_width = label.len()*font_size_pixels;
             draw_text(
-                (viewport[0] - label_width)/2,
+                (viewport[0])/2,
                 (viewport[1])/2,
                 label,
                 size=font_size,
+                center=true,
             );
 
             let label = "Press Space to Retry";
@@ -590,10 +593,11 @@ struct Game {
             let font_size_pixels = font_size*8.0;
             let label_width = label.len()*font_size_pixels;
             draw_text(
-                (viewport[0] - label_width)/2,
+                (viewport[0])/2,
                 (viewport[1])/2 + 48.0,
                 label,
                 size=2.0,
+                center=true,
             );
         }
     }
@@ -699,10 +703,10 @@ fn debug_frame_times() {
     );
 }
 
-//add_tick_fn(debug_frame_times);
+add_tick_fn(debug_frame_times);
 
 let viewport = None;
-let state = Game();
+let state = Menu();
 let frame_num = 0;
 fn loop() {
     viewport = window_size();
