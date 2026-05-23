@@ -7,9 +7,7 @@ let BUTTON_TEXTURE = {
 
     for y in 0..height {
         for x in 0..width {
-            data.append(255 - (x - BUTTON_WIDTH/2).abs().int());
-            data.append(0);
-            data.append(0);
+            data.append(255 - (x - BUTTON_WIDTH/2).abs().int()); data.append(0); data.append(0);
             data.append(255);
         }
     }
@@ -271,8 +269,52 @@ fn color_to_tex(color_idx) {
     }
 }
 
-let log_lines = [];
+fn new_bag() {
+    let lst = [];
+    for idx in 0..shapes.len() {
+        lst.append(idx);
+        lst.append(idx);
+    }
+    lst
+}
 
+fn shape_block_offsets(shape_num, rotation) {
+    let out = [];
+    let shape = shapes[shape_num];
+    let height = shape.len();
+    let width = shape[0].len();
+    for y, shape_row in shapes[shape_num].enumerate() {
+        for x, shape_column in shape_row.enumerate() {
+            if shape_column {
+                if rotation == 0 {
+                    out.append((x, y));
+                } else if rotation == 1 {
+                    out.append((height-y-1, x));
+                } else if rotation == 2 {
+                    out.append((width-x-1, height-y-1));
+                } else {
+                    out.append((y, width-x-1));
+                }
+
+            }
+        }
+    }
+    out
+}
+
+fn draw_shape(offset_x, offset_y, shape_num, rotation) {
+    for x, y in shape_block_offsets(shape_num, rotation) {
+        draw_rect(
+            offset_x + x*BLOCK_SIZE,
+            offset_y + y*BLOCK_SIZE,
+            BLOCK_SIZE,
+            BLOCK_SIZE,
+            texture=color_to_tex(shape_num+1),
+        );
+    }
+}
+
+let log_lines = [];
 let GRID_Y = 20;
 let GRID_X = 10;
 struct Game {
@@ -289,33 +331,16 @@ struct Game {
     },
     active_shape_x = int(GRID_X/2)-1,
     active_shape_y = 0,
-    current_shape = 4,
+    current_shape = randi() % shapes.len(),
+    next_shape = randi() % shapes.len(),
     shape_rotation = 0,
     game_over = false,
     count = 0,
+    bag = new_bag(),
+    line_count = 0,
 
     fn shape_block_offsets(self) {
-        let out = [];
-        let shape = shapes[self.current_shape];
-        let height = shape.len();
-        let width = shape[0].len();
-        for y, shape_row in shapes[self.current_shape].enumerate() {
-            for x, shape_column in shape_row.enumerate() {
-                if shape_column {
-                    if self.shape_rotation == 0 {
-                        out.append((x, y));
-                    } else if self.shape_rotation == 1 {
-                        out.append((height-y-1, x));
-                    } else if self.shape_rotation == 2 {
-                        out.append((width-x-1, height-y-1));
-                    } else {
-                        out.append((y, width-x-1));
-                    }
-
-                }
-            }
-        }
-        out
+        shape_block_offsets(self.current_shape, self.shape_rotation)
     }
 
     fn shape_intersects(self, x, y) {
@@ -386,27 +411,51 @@ struct Game {
                 // We do it in the loop so the count only resets if the block moves
                 self.count = 0;
             }
-        } else if self.count >= 40 {
+        } else if self.count >= 40 - int(self.line_count/2) {
             let hit = false;
             if self.current_shape != None {
                 let shape = self.current_shape;
                 let hit = self.shape_intersects(self.active_shape_x, self.active_shape_y + 1);
 
                 if hit {
+                    let check_rows = [];
                     for x, y in self.shape_block_offsets() {
                         let x = self.active_shape_x + x;
                         let y = self.active_shape_y + y;
                         self.blocks[y][x] = self.current_shape+1;
+                        check_rows.append(y);
                     }
 
-                    // TODO: show "next block" at the side that picks randomly
-                    // from a bag
-                    self.current_shape += 1;
-                    self.current_shape %= shapes.len();
-                    self.shape_rotation = 0;
+                    check_rows.sort();
+                    for row in check_rows {
+                        let row_complete = true;
+                        for b in self.blocks[row] {
+                            if b == EMPTY {
+                                row_complete = false;
+                                break;
+                            }
+                        }
+                        if row_complete {
+                            self.line_count += 1;
+                            let new_row = [];
+                            for _ in 0..GRID_X {
+                                new_row.append(EMPTY);
+                            }
+                            self.blocks.pop(row);
+                            self.blocks.insert(0, new_row);
+                        }
+                    }
 
+                    self.current_shape = self.next_shape;
+                    self.shape_rotation = 0;
                     self.active_shape_y = 0;
                     self.active_shape_x = int(GRID_X/2)-1;
+
+                    if !self.bag {
+                        self.bag = new_bag();
+                    }
+                    let next_shape_idx = randi() % self.bag.len();
+                    self.next_shape = self.bag.pop(next_shape_idx);
 
                     self.game_over = self.shape_intersects(
                         self.active_shape_x, self.active_shape_y + 1
@@ -416,12 +465,10 @@ struct Game {
                         let reset_count = 0;
                         fn reset_after_delay() {
                             reset_count += 1;
-                            ig_begin("reset_count");
-                            ig_text("Reset Count: \(reset_count)");
-                            ig_end();
                             if reset_count > 100 {
-                                remove_tick_fn(reset_after_delay);
-                                state = Game();
+                                if key.Space.just_pressed {
+                                    state = Game();
+                                }
                             }
                         }
                         add_tick_fn(reset_after_delay);
@@ -459,18 +506,20 @@ struct Game {
         }
 
         // Draw active block
-        if self.current_shape != None {
-            let shape = self.current_shape;
-            for x, y in self.shape_block_offsets() {
-                draw_rect(
-                    offset_x + (self.active_shape_x+x)*BLOCK_SIZE,
-                    offset_y + (self.active_shape_y+y)*BLOCK_SIZE,
-                    BLOCK_SIZE,
-                    BLOCK_SIZE,
-                    texture=color_to_tex(shape+1),
-                );
-            }
-        }
+        draw_shape(
+            offset_x + self.active_shape_x*BLOCK_SIZE,
+            offset_y + self.active_shape_y*BLOCK_SIZE,
+            self.current_shape,
+            self.shape_rotation,
+        );
+
+        // Draw next block
+        draw_shape(
+            20,
+            50,
+            self.next_shape,
+            0,
+        );
 
         // Draw the placed blocks
         for y, row in self.blocks.enumerate() {
@@ -517,6 +566,13 @@ struct Game {
             );
         }
 
+        draw_text(
+            10,
+            10,
+            "Lines: \(self.line_count)",
+            size=2.0,
+        );
+
         if self.game_over {
             let label = "GAME OVER";
             let font_size = 4.0;
@@ -527,6 +583,17 @@ struct Game {
                 (viewport[1])/2,
                 label,
                 size=font_size,
+            );
+
+            let label = "Press Space to Retry";
+            let font_size = 2.0;
+            let font_size_pixels = font_size*8.0;
+            let label_width = label.len()*font_size_pixels;
+            draw_text(
+                (viewport[0] - label_width)/2,
+                (viewport[1])/2 + 48.0,
+                label,
+                size=2.0,
             );
         }
     }
