@@ -490,8 +490,8 @@ fn shim_draw_text(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shi
     let mut unpacker = ArgUnpacker::new(args);
     let x = unpacker.required_number(b"x")?;
     let y = unpacker.required_number(b"y")?;
-    let size = unpacker.required_number(b"size")?;
     let text_val = unpacker.required(b"text")?;
+    let size = unpacker.optional_number(b"size", 1.0)?;
     unpacker.end()?;
 
     let text = text_val.to_string(interpreter);
@@ -679,6 +679,97 @@ fn shim_input_focus(
     Ok(ShimValue::Bool(flags & 0x00000200 != 0))
 }
 
+/// xorshift64 PRNG state, seeded from system time on first fetch.
+pub struct RandomState {
+    state: u64,
+}
+
+impl Default for RandomState {
+    fn default() -> Self {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0x9e3779b97f4a7c15);
+        let seed = nanos ^ 0x9e3779b97f4a7c15;
+        Self { state: if seed == 0 { 0xdeadbeefcafebabe } else { seed } }
+    }
+}
+
+impl RandomState {
+    pub fn next_u64(&mut self) -> u64 {
+        let mut x = self.state;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.state = x;
+        x
+    }
+
+    /// Uniform float in [0.0, 1.0).
+    pub fn next_f32_unit(&mut self) -> f32 {
+        // Top 24 bits — matches f32 mantissa width.
+        (self.next_u64() >> 40) as f32 / ((1u32 << 24) as f32)
+    }
+}
+
+fn shim_rand(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let n = args.args.len();
+    let result = match n {
+        0 => {
+            unpacker.end()?;
+            interpreter.fetch_mut::<RandomState>().next_f32_unit()
+        }
+        1 => {
+            let hi = unpacker.required_number(b"hi")?;
+            unpacker.end()?;
+            interpreter.fetch_mut::<RandomState>().next_f32_unit() * hi
+        }
+        2 => {
+            let lo = unpacker.required_number(b"lo")?;
+            let hi = unpacker.required_number(b"hi")?;
+            unpacker.end()?;
+            let r = interpreter.fetch_mut::<RandomState>().next_f32_unit();
+            lo + (hi - lo) * r
+        }
+        _ => return Err(format!("rand expects 0, 1, or 2 arguments; got {}", n)),
+    };
+    Ok(ShimValue::Float(result))
+}
+
+fn shim_randi(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let n = args.args.len();
+    let result = match n {
+        0 => {
+            unpacker.end()?;
+            (interpreter.fetch_mut::<RandomState>().next_u64() & 0x7fff_ffff) as i32
+        }
+        1 => {
+            let hi = unpacker.required_int(b"hi")?;
+            unpacker.end()?;
+            if hi < 0 {
+                return Err(format!("randi: hi {} must be non-negative", hi));
+            }
+            let span = hi as u64;
+            (interpreter.fetch_mut::<RandomState>().next_u64() % span) as i32
+        }
+        2 => {
+            let lo = unpacker.required_int(b"lo")?;
+            let hi = unpacker.required_int(b"hi")?;
+            unpacker.end()?;
+            if lo > hi {
+                return Err(format!("randi: lo {} must be <= hi {}", lo, hi));
+            }
+            let span = (hi as i64 - lo as i64) as u64;
+            let r = interpreter.fetch_mut::<RandomState>().next_u64() % span;
+            (lo as i64 + r as i64) as i32
+        }
+        _ => return Err(format!("randi expects 0, 1, or 2 arguments; got {}", n)),
+    };
+    Ok(ShimValue::Integer(result))
+}
+
 fn shim_window_size(
     interpreter: &mut Interpreter,
     args: &ArgBundle,
@@ -724,6 +815,8 @@ fn load_script(bytes: &[u8]) -> Result<(Interpreter, Environment, ShimValue), St
         (b"set_window_title", shim_set_window_title),
         (b"mouse_focus", shim_mouse_focus),
         (b"input_focus", shim_input_focus),
+        (b"rand", shim_rand),
+        (b"randi", shim_randi),
     ];
     for (name, func) in builtins {
         let position = interpreter.mem.alloc_and_set(
