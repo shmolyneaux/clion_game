@@ -701,6 +701,19 @@ impl<'a> ArgUnpacker<'a> {
         }
     }
 
+    pub fn optional_number(&mut self, name: &[u8], default: f32) -> Result<f32, String> {
+        match self.optional(name) {
+            Some(ShimValue::Float(f)) => Ok(f),
+            Some(ShimValue::Integer(i)) => Ok(i as f32),
+            Some(value) => Err(format!(
+                "Optional argument '{}' non-numeric: {:?}",
+                debug_u8s(name),
+                value,
+            )),
+            None => Ok(default),
+        }
+    }
+
     pub fn required_int(&mut self, name: &[u8]) -> Result<i32, String> {
         match self
             .optional(name)

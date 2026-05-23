@@ -578,6 +578,12 @@ pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, S
             asm.push((0, stmt_span));
             asm.push((0, stmt_span));
 
+            if block_captures_env(body) {
+                asm.push((ByteCode::StartCapturedScope as u8, stmt_span));
+            } else {
+                asm.push((ByteCode::StartScope as u8, stmt_span));
+            }
+
             if idents.len() != 1 {
                 let tuple_size_u8s = u16_to_u8s(idents.len() as u16);
                 asm.push((ByteCode::UnpackTuple as u8, stmt_span));
@@ -600,6 +606,8 @@ pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, S
             }
 
             asm.extend(compile_block(body, false, stmt_span)?);
+
+            asm.push((ByteCode::EndScope as u8, stmt_span));
 
             // Jump to start of loop to check the condition again
             let loop_start_offset = u16_to_u8s(asm.len() as u16 - loop_start_idx as u16 - 3);
