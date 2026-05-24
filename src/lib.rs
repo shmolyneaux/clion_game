@@ -37,6 +37,7 @@ use facet_reflect::*;
 use std::borrow::Cow;
 use std::fmt::Formatter;
 
+mod audio;
 mod debug_draw;
 mod gpu;
 mod imgui;
@@ -844,6 +845,8 @@ fn frame(state: &mut State, delta: f32) {
             let script_total = script_start.elapsed().as_secs_f32();
             new_perf.gc = state.script_bridge.last_gc_time;
             new_perf.script = (script_total - new_perf.gc).max(0.0);
+
+            audio::submit(state.script_bridge.sound_list.drain(..));
         }
 
         update_keys(state);
@@ -940,6 +943,17 @@ pub extern "C" fn rust_frame(delta: f32) -> i32 {
     STATE_REFCELL.with_borrow_mut(|value| frame(value.as_mut().unwrap(), delta));
 
     42
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_audio_callback(
+    _userdata: *mut std::ffi::c_void,
+    stream: *mut u8,
+    len: c_int,
+) {
+    let sample_count = (len as usize) / std::mem::size_of::<i16>();
+    let out = unsafe { slice::from_raw_parts_mut(stream as *mut i16, sample_count) };
+    audio::mix(out);
 }
 
 const _: () = compile_time_checks();

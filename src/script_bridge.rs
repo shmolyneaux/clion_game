@@ -66,6 +66,138 @@ pub enum DrawListItem {
     CreateTexture(u32, u32, u32, Vec<u8>, bool),
 }
 
+/// A reference to a sample registered with the audio system
+#[derive(Debug, Clone)]
+pub struct SoundSampleHandle {
+    pub sample_id: u32,
+}
+
+impl ShimNative for SoundSampleHandle {
+    fn get_attr(
+        &self,
+        self_as_val: &ShimValue,
+        interpreter: &mut Interpreter,
+        ident: &[u8],
+    ) -> Result<ShimValue, String> {
+        if ident == b"play" {
+            fn shim_sample_play(
+                interpreter: &mut Interpreter,
+                args: &ArgBundle,
+            ) -> Result<ShimValue, String> {
+                if args.args.len() != 1 {
+                    return Err("SoundSampleHandle.play takes no positional args".to_string());
+                }
+                let sample_id = args.args[0]
+                    .as_native::<SoundSampleHandle>(interpreter)?
+                    .sample_id;
+                let mut amp = 1.0f32;
+                let mut speed = 1.0f32;
+                let mut fade_in = 0.005f32;
+                let mut fade_out = 0.005f32;
+                let mut delay = 0.0f32;
+                let mut pan = 0.0f32;
+                for (k, v) in args.kwargs.iter() {
+                    let f = match v {
+                        ShimValue::Float(f) => *f,
+                        ShimValue::Integer(i) => *i as f32,
+                        _ => {
+                            return Err(format!(
+                                "play kwarg '{}' must be numeric",
+                                debug_u8s(k)
+                            ));
+                        }
+                    };
+                    match k.as_slice() {
+                        b"amp" => amp = f,
+                        b"speed" => speed = f,
+                        b"fade_in" => fade_in = f,
+                        b"fade_out" => fade_out = f,
+                        b"delay" => delay = f,
+                        b"pan" => pan = f,
+                        _ => {
+                            return Err(format!(
+                                "Unknown play kwarg '{}'",
+                                debug_u8s(k)
+                            ));
+                        }
+                    }
+                }
+                interpreter.fetch_mut::<SoundList>().items.push(SoundCmd::PlaySample {
+                    sample_id,
+                    amp,
+                    speed,
+                    fade_in,
+                    fade_out,
+                    delay,
+                    pan: pan.clamp(-1.0, 1.0),
+                });
+                Ok(ShimValue::None)
+            }
+            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_sample_play))
+        } else {
+            Err(format!(
+                "SoundSampleHandle has no attribute '{}'",
+                debug_u8s(ident)
+            ))
+        }
+    }
+
+    fn gc_vals(&self) -> Vec<ShimValue> {
+        Vec::new()
+    }
+}
+
+pub enum SoundCmd {
+    Square {
+        freq: f32,
+        duty: f32,
+        amp: f32,
+        duration: f32,
+        delay: f32,
+        pan: f32,
+    },
+    Sine {
+        freq: f32,
+        amp: f32,
+        duration: f32,
+        delay: f32,
+        pan: f32,
+    },
+    CreateSample {
+        sample_id: u32,
+        sample_rate: u32,
+        samples: Vec<f32>,
+    },
+    PlaySample {
+        sample_id: u32,
+        amp: f32,
+        speed: f32,
+        fade_in: f32,
+        fade_out: f32,
+        delay: f32,
+        pan: f32,
+    },
+}
+
+#[derive(Default)]
+pub struct SoundList {
+    next_sample_id: u32,
+    pub items: Vec<SoundCmd>,
+}
+
+impl SoundList {
+    fn push_create_sample(&mut self, sample_rate: u32, samples: Vec<f32>) -> SoundSampleHandle {
+        let sample_id = self.next_sample_id;
+        self.next_sample_id += 1;
+        self.items.push(SoundCmd::CreateSample {
+            sample_id,
+            sample_rate,
+            samples,
+        });
+        SoundSampleHandle { sample_id }
+    }
+}
+
 const KEY_REPEAT_INITIAL_DELAY: f32 = 0.4;
 const KEY_REPEAT_RATE: f32 = 0.08;
 
@@ -367,7 +499,14 @@ pub enum ScriptRequest {
 /// Messages sent from the Script Thread to the Engine
 #[cfg(not(target_arch = "wasm32"))]
 pub enum ScriptResponse {
-    LoopComplete(Interpreter, Environment, ShimValue, Vec<DrawListItem>, f32),
+    LoopComplete(
+        Interpreter,
+        Environment,
+        ShimValue,
+        Vec<DrawListItem>,
+        Vec<SoundCmd>,
+        f32,
+    ),
     Error(Interpreter, Environment, ShimValue, String),
 }
 
@@ -388,6 +527,7 @@ pub struct ScriptBridge {
     state: BridgeState,
     pub interpreter_errors: Vec<String>,
     pub draw_list: Vec<DrawListItem>,
+    pub sound_list: Vec<SoundCmd>,
     pub last_gc_time: f32,
     script_path: String,
     #[cfg(not(target_arch = "wasm32"))]
@@ -511,6 +651,20 @@ fn text_size(text: &[u8], font_size: f32) -> (f32, f32) {
         // Each char is 7px, but with line spacing of 8px
         (7.0/8.0 + (line_count as f32 - 1.0)) * font_size,
     )
+}
+
+fn shim_text_size(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let text_val = unpacker.required(b"text")?;
+    let size = unpacker.optional_number(b"size", 1.0)?;
+    let center = matches!(unpacker.optional(b"center"), Some(ShimValue::Bool(true)));
+    unpacker.end()?;
+
+    let text = text_val.to_string(interpreter);
+
+    let size = text_size(text.as_bytes(), size*8.0);
+
+    Ok(interpreter.mem.alloc_tuple(&[ShimValue::Float(size.0), ShimValue::Float(size.1)]))
 }
 
 fn shim_draw_text(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
@@ -805,6 +959,81 @@ fn shim_randi(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimVal
     Ok(ShimValue::Integer(result))
 }
 
+fn shim_play_square(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let freq = unpacker.required_number(b"freq")?;
+    let duration = unpacker.required_number(b"duration")?;
+    let duty = unpacker.optional_number(b"duty", 0.5)?;
+    let amp = unpacker.optional_number(b"amp", 0.5)?;
+    let delay = unpacker.optional_number(b"delay", 0.0)?;
+    let pan = unpacker.optional_number(b"pan", 0.0)?;
+    unpacker.end()?;
+    interpreter.fetch_mut::<SoundList>().items.push(SoundCmd::Square {
+        freq,
+        duty: duty.clamp(0.0, 1.0),
+        amp,
+        duration,
+        delay,
+        pan: pan.clamp(-1.0, 1.0),
+    });
+    Ok(ShimValue::None)
+}
+
+fn shim_play_sine(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let freq = unpacker.required_number(b"freq")?;
+    let duration = unpacker.required_number(b"duration")?;
+    let amp = unpacker.optional_number(b"amp", 0.5)?;
+    let delay = unpacker.optional_number(b"delay", 0.0)?;
+    let pan = unpacker.optional_number(b"pan", 0.0)?;
+    unpacker.end()?;
+    interpreter.fetch_mut::<SoundList>().items.push(SoundCmd::Sine {
+        freq,
+        amp,
+        duration,
+        delay,
+        pan: pan.clamp(-1.0, 1.0),
+    });
+    Ok(ShimValue::None)
+}
+
+fn shim_create_sample(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let samples_list = unpacker.required_list(interpreter, b"samples")?;
+    let sample_rate = unpacker.required_int(b"sample_rate")?;
+    unpacker.end()?;
+
+    if sample_rate <= 0 {
+        return Err(format!(
+            "create_sample: sample_rate {} must be positive",
+            sample_rate
+        ));
+    }
+
+    let raw = samples_list.raw_data(&interpreter.mem);
+    let mut samples: Vec<f32> = Vec::with_capacity(raw.len());
+    for val in raw.iter() {
+        samples.push(match unsafe { ShimValue::from_u64(*val) } {
+            ShimValue::Float(f) => f,
+            ShimValue::Integer(i) => i as f32,
+            other => {
+                return Err(format!(
+                    "create_sample: non-numeric sample {:?}",
+                    other
+                ));
+            }
+        });
+    }
+
+    let handle = interpreter
+        .fetch_mut::<SoundList>()
+        .push_create_sample(sample_rate as u32, samples);
+    Ok(interpreter.mem.alloc_native(handle))
+}
+
 fn shim_window_size(
     interpreter: &mut Interpreter,
     args: &ArgBundle,
@@ -838,6 +1067,7 @@ fn load_script(bytes: &[u8]) -> Result<(Interpreter, Environment, ShimValue), St
         (b"ig_text", shim_ig_text),
         (b"draw_rect", shim_draw_rect),
         (b"draw_text", shim_draw_text),
+        (b"text_size", shim_text_size),
         (b"create_texture", shim_create_texture),
         (b"Rect", shim_rect),
         (b"window_size", shim_window_size),
@@ -852,6 +1082,9 @@ fn load_script(bytes: &[u8]) -> Result<(Interpreter, Environment, ShimValue), St
         (b"input_focus", shim_input_focus),
         (b"rand", shim_rand),
         (b"randi", shim_randi),
+        (b"play_square", shim_play_square),
+        (b"play_sine", shim_play_sine),
+        (b"create_sample", shim_create_sample),
     ];
     for (name, func) in builtins {
         let position = interpreter.mem.alloc_and_set(
@@ -951,6 +1184,7 @@ impl ScriptBridge {
                 state: BridgeState::Paused(Box::new(interpreter), env, loop_fn),
                 interpreter_errors: Vec::new(),
                 draw_list: Vec::new(),
+                sound_list: Vec::new(),
                 last_gc_time: 0.0,
                 script_path,
                 tx: request_tx,
@@ -965,6 +1199,7 @@ impl ScriptBridge {
                 state: BridgeState::Paused(Box::new(interpreter), env, loop_fn),
                 interpreter_errors: Vec::new(),
                 draw_list: Vec::new(),
+                sound_list: Vec::new(),
                 last_gc_time: 0.0,
                 script_path,
             }
@@ -1014,9 +1249,10 @@ impl ScriptBridge {
                             self.state = BridgeState::Paused(Box::new(interpreter), env, loop_fn);
                             self.interpreter_errors.push(msg);
                         }
-                        ScriptResponse::LoopComplete(interpreter, env, loop_fn, draw_list, gc_time) => {
+                        ScriptResponse::LoopComplete(interpreter, env, loop_fn, draw_list, sound_list, gc_time) => {
                             self.state = BridgeState::Paused(Box::new(interpreter), env, loop_fn);
                             self.draw_list = draw_list;
+                            self.sound_list = sound_list;
                             self.last_gc_time = gc_time;
                         }
                     }
@@ -1079,6 +1315,11 @@ impl ScriptBridge {
                     }
                     self.draw_list = interpreter
                         .fetch_mut::<DrawList>()
+                        .items
+                        .drain(..)
+                        .collect();
+                    self.sound_list = interpreter
+                        .fetch_mut::<SoundList>()
                         .items
                         .drain(..)
                         .collect();
@@ -1197,7 +1438,12 @@ fn script_thread_logic(rx: Receiver<ScriptRequest>, tx: Sender<ScriptResponse>) 
                                 .items
                                 .drain(..)
                                 .collect();
-                            ScriptResponse::LoopComplete(interpreter, env, loop_fn, draw_list, gc_time)
+                            let sound_list = interpreter
+                                .fetch_mut::<SoundList>()
+                                .items
+                                .drain(..)
+                                .collect();
+                            ScriptResponse::LoopComplete(interpreter, env, loop_fn, draw_list, sound_list, gc_time)
                         }
                         Err(msg) => ScriptResponse::Error(interpreter, env, loop_fn, msg),
                     })

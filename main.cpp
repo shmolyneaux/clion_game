@@ -37,6 +37,9 @@ SDL_Window* window;
 
 extern "C" int rust_init();
 extern "C" int rust_frame(float delta);
+extern "C" void rust_audio_callback(void* userdata, Uint8* stream, int len);
+
+static constexpr int kAudioSampleRate = 44100;
 
 
 // Function to log error messages
@@ -253,6 +256,21 @@ int main(int, char**)
     Uint64 frequency = SDL_GetPerformanceFrequency();
     Uint64 ticks = 0;
 
+    SDL_AudioSpec want{};
+    want.freq = kAudioSampleRate;
+    want.format = AUDIO_S16SYS;
+    want.channels = 2;
+    want.samples = 1024;
+    want.callback = rust_audio_callback;
+    SDL_AudioSpec have{};
+    SDL_AudioDeviceID audio_device = SDL_OpenAudioDevice(nullptr, 0, &want, &have, 0);
+    if (audio_device == 0) {
+        log_error("SDL_OpenAudioDevice Error:");
+        log_error(SDL_GetError());
+    } else {
+        SDL_PauseAudioDevice(audio_device, 0);
+    }
+
     if (rust_init()) {
         printf("Rust failed to initialize!\n");
         return 1;
@@ -395,6 +413,10 @@ int main(int, char**)
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplSDL2_Shutdown();
     ImGui::DestroyContext();
+
+    if (audio_device != 0) {
+        SDL_CloseAudioDevice(audio_device);
+    }
 
     SDL_GL_DeleteContext(gl_context);
     SDL_DestroyWindow(window);
