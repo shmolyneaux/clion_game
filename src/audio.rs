@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock};
 
 use crate::script_bridge::SoundCmd;
 
@@ -7,13 +7,14 @@ pub const SAMPLE_RATE: u32 = 44100;
 const TAU: f32 = std::f32::consts::TAU;
 
 /// Mono PCM buffer of normalized `[-1.0, 1.0]` samples, owned by the mixer's
-/// sample bank. `Arc`'d so a long-running voice can keep the data alive even
-/// if the script later replaces the registration.
+/// sample bank. Entries are never replaced or removed, so voices reference
+/// their buffer by `sample_id` and look it up at mix time.
 struct SampleBuffer {
     sample_rate: u32,
     samples: Vec<f32>,
 }
 
+#[derive(Clone, Copy)]
 enum VoiceSource {
     Sine {
         /// Cycles per output sample.
@@ -26,7 +27,7 @@ enum VoiceSource {
         amp: f32,
     },
     Sample {
-        buffer: Arc<SampleBuffer>,
+        sample_id: u32,
         amp: f32,
         /// Source samples per output sample. Combines user `speed` with the
         /// source's native sample rate vs. the output sample rate.
@@ -61,7 +62,7 @@ fn pan_gains(pan: f32) -> (f32, f32) {
 #[derive(Default)]
 struct Mixer {
     voices: Vec<Voice>,
-    bank: HashMap<u32, Arc<SampleBuffer>>,
+    bank: HashMap<u32, SampleBuffer>,
 }
 
 fn mixer() -> &'static Mutex<Mixer> {
@@ -76,10 +77,7 @@ pub fn submit<I: IntoIterator<Item = SoundCmd>>(cmds: I) {
     for cmd in cmds {
         match cmd {
             SoundCmd::CreateSample { sample_id, sample_rate, samples } => {
-                m.bank.insert(
-                    sample_id,
-                    Arc::new(SampleBuffer { sample_rate, samples }),
-                );
+                m.bank.insert(sample_id, SampleBuffer { sample_rate, samples });
             }
             SoundCmd::Sine { freq, amp, duration, delay, pan } => {
                 let total = (duration.max(0.0) * SAMPLE_RATE as f32) as u64;
@@ -119,13 +117,13 @@ pub fn submit<I: IntoIterator<Item = SoundCmd>>(cmds: I) {
                 });
             }
             SoundCmd::PlaySample { sample_id, amp, speed, fade_in, fade_out, delay, pan } => {
-                let Some(buffer) = m.bank.get(&sample_id).cloned() else {
-                    continue;
+                let (sample_rate, sample_len) = match m.bank.get(&sample_id) {
+                    Some(b) => (b.sample_rate, b.samples.len()),
+                    None => continue,
                 };
                 let speed = speed.max(0.0001);
-                let source_step = speed * buffer.sample_rate as f32 / SAMPLE_RATE as f32;
-                let total =
-                    (buffer.samples.len() as f32 / source_step).floor().max(0.0) as u64;
+                let source_step = speed * sample_rate as f32 / SAMPLE_RATE as f32;
+                let total = (sample_len as f32 / source_step).floor().max(0.0) as u64;
                 if total == 0 {
                     continue;
                 }
@@ -134,7 +132,7 @@ pub fn submit<I: IntoIterator<Item = SoundCmd>>(cmds: I) {
                 let (gain_l, gain_r) = pan_gains(pan);
                 m.voices.push(Voice {
                     source: VoiceSource::Sample {
-                        buffer,
+                        sample_id,
                         amp,
                         source_step,
                         fade_in_samples: fade_in_samples.min(total),
@@ -163,18 +161,9 @@ pub fn mix(stream: &mut [i16]) {
     let mut accum = vec![0.0f32; frames * 2];
 
     for mut voice in voices {
-        let mut f = 0;
-        while f < frames && voice.delay_remaining > 0 {
-            voice.delay_remaining -= 1;
-            f += 1;
-        }
-        while f < frames && voice.position < voice.total_samples {
-            let s = sample_voice(&voice);
-            accum[f * 2] += s * voice.gain_l;
-            accum[f * 2 + 1] += s * voice.gain_r;
-            voice.position += 1;
-            f += 1;
-        }
+        let skip = voice.delay_remaining.min(frames as u64) as usize;
+        voice.delay_remaining -= skip as u64;
+        render_voice(&mut voice, &mut accum, skip, frames, &m.bank);
         if voice.position < voice.total_samples {
             next_voices.push(voice);
         }
@@ -189,52 +178,81 @@ pub fn mix(stream: &mut [i16]) {
     }
 }
 
-fn sample_voice(voice: &Voice) -> f32 {
-    let raw = match &voice.source {
+/// 5ms attack/release applied to procedural voices to mask clicks.
+const PROC_FADE: u64 = SAMPLE_RATE as u64 / 200;
+
+/// Linear fade-in/out envelope. A zero fade length disables that edge.
+fn envelope(pos: u64, total: u64, fade_in: u64, fade_out: u64) -> f32 {
+    let mut e = 1.0f32;
+    if pos < fade_in {
+        e = e.min(pos as f32 / fade_in as f32);
+    }
+    let tail = total - pos;
+    if tail < fade_out {
+        e = e.min(tail as f32 / fade_out as f32);
+    }
+    e
+}
+
+/// Render one voice's contribution into the interleaved `accum` buffer for the
+/// frame range `[start_frame, frames)`, advancing `voice.position`. The enum
+/// dispatch and bank lookup happen once per call rather than per sample.
+fn render_voice(
+    voice: &mut Voice,
+    accum: &mut [f32],
+    start_frame: usize,
+    frames: usize,
+    bank: &HashMap<u32, SampleBuffer>,
+) {
+    let (gain_l, gain_r) = (voice.gain_l, voice.gain_r);
+    let total = voice.total_samples;
+    let mut emit = |accum: &mut [f32], f: usize, s: f32| {
+        accum[f * 2] += s * gain_l;
+        accum[f * 2 + 1] += s * gain_r;
+    };
+
+    // Number of frames to render: limited by both the output buffer space and
+    // the voice's remaining samples.
+    let available = (frames - start_frame) as u64;
+    let remaining = total - voice.position;
+    let end_frame = start_frame + available.min(remaining) as usize;
+
+    match voice.source {
         VoiceSource::Sine { phase_inc, amp } => {
-            (TAU * phase_inc * voice.position as f32).sin() * *amp
+            for f in start_frame..end_frame {
+                let env = envelope(voice.position, total, PROC_FADE, PROC_FADE);
+                let s = (TAU * phase_inc * voice.position as f32).sin() * amp * env;
+                emit(accum, f, s);
+                voice.position += 1;
+            }
         }
         VoiceSource::Square { phase_inc, duty, amp } => {
-            let phase = (phase_inc * voice.position as f32).fract();
-            if phase < *duty { *amp } else { -*amp }
-        }
-        VoiceSource::Sample { buffer, amp, source_step, .. } => {
-            let pos = voice.position as f32 * source_step;
-            let i0 = pos.floor() as usize;
-            let frac = pos - pos.floor();
-            let s0 = buffer.samples.get(i0).copied().unwrap_or(0.0);
-            let s1 = buffer.samples.get(i0 + 1).copied().unwrap_or(s0);
-            (s0 + (s1 - s0) * frac) * *amp
-        }
-    };
-
-    let env = match &voice.source {
-        VoiceSource::Sample { fade_in_samples, fade_out_samples, .. } => {
-            let pos = voice.position;
-            let mut e = 1.0f32;
-            if pos < *fade_in_samples {
-                e = e.min(pos as f32 / *fade_in_samples as f32);
+            for f in start_frame..end_frame {
+                let env = envelope(voice.position, total, PROC_FADE, PROC_FADE);
+                let phase = (phase_inc * voice.position as f32).fract();
+                let s = (if phase < duty { amp } else { -amp }) * env;
+                emit(accum, f, s);
+                voice.position += 1;
             }
-            let tail = voice.total_samples - pos;
-            if tail < *fade_out_samples {
-                e = e.min(tail as f32 / *fade_out_samples as f32);
-            }
-            e
         }
-        _ => {
-            const PROC_FADE: u64 = SAMPLE_RATE as u64 / 200;
-            let pos = voice.position;
-            let mut e = 1.0f32;
-            if pos < PROC_FADE {
-                e = e.min(pos as f32 / PROC_FADE as f32);
+        VoiceSource::Sample { sample_id, amp, source_step, fade_in_samples, fade_out_samples } => {
+            let Some(buffer) = bank.get(&sample_id) else {
+                voice.position = total;
+                return;
+            };
+            for f in start_frame..end_frame {
+                let env = envelope(voice.position, total, fade_in_samples, fade_out_samples);
+                let pos = voice.position as f32 * source_step;
+                let i0 = pos.floor() as usize;
+                let frac = pos - pos.floor();
+                let s0 = buffer.samples[i0];
+                // i0+1 can be one past the end on the final frame; hold the
+                // last sample rather than wrapping or reading OOB.
+                let s1 = buffer.samples.get(i0 + 1).copied().unwrap_or(s0);
+                let s = (s0 + (s1 - s0) * frac) * amp * env;
+                emit(accum, f, s);
+                voice.position += 1;
             }
-            let tail = voice.total_samples - pos;
-            if tail < PROC_FADE {
-                e = e.min(tail as f32 / PROC_FADE as f32);
-            }
-            e
         }
-    };
-
-    raw * env
+    }
 }
