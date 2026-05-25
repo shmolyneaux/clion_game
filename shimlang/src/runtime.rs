@@ -1706,6 +1706,7 @@ impl ShimValue {
                 // The pos's might not match up but still have an equivalent obj/func
                 Err("Can't yet check equality between bound native methods".to_string())
             }
+            (ShimValue::StructDef(pos_a), ShimValue::StructDef(pos_b)) => Ok(pos_a == pos_b),
             _ => Ok(false),
         }
     }

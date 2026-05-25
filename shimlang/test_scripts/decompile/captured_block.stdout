@@ -7,32 +7,34 @@
   40:  get .iter
   46:  call args=0  kwargs=0
   49:  get .next
-  55:  Loop Start -> 117
+  55:  Loop Start -> 119
   58:  Copy
   59:  call args=0  kwargs=0
   62:  Copy
   63:  None
   64:  equal
-  65:  JMPNZ -> 116
-  68:  let "i"
-  71:  start_captured_scope
-  72:  JMP -> 83
-  75:  start_scope
-  76:  unpack_args required=0 optional=0 []
-  79:  load "i"
-  82:  return
-  83:  CreateFn -> PC 75
-  86:  let "f"
-  89:  load "funcs"
-  96:  load "f"
-  99:  attr_call .append args=1  kwargs=0
- 109:  pop
- 110:  None
- 111:  pop
- 112:  end_scope
- 113:  JMPUP -> 58
- 116:  pop
- 117:  Loop End
+  65:  JMPNZ -> 118
+  68:  start_captured_scope
+  69:  let "i"
+  72:  start_captured_scope
+  73:  JMP -> 84
+  76:  start_scope
+  77:  unpack_args required=0 optional=0 []
+  80:  load "i"
+  83:  return
+  84:  CreateFn -> PC 76
+  87:  let "f"
+  90:  load "funcs"
+  97:  load "f"
+ 100:  attr_call .append args=1  kwargs=0
+ 110:  pop
+ 111:  None
+ 112:  pop
+ 113:  end_scope
+ 114:  end_scope
+ 115:  JMPUP -> 58
  118:  pop
- 119:  None
+ 119:  Loop End
+ 120:  pop
+ 121:  None
 
