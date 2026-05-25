@@ -256,6 +256,10 @@ pub enum SoundCmd {
         duty: f32,
         amp: f32,
         duration: f32,
+        attack: f32,
+        decay: f32,
+        sustain: f32,
+        release: f32,
         delay: f32,
         pan: f32,
         bus: u32,
@@ -265,6 +269,10 @@ pub enum SoundCmd {
         freq: f32,
         amp: f32,
         duration: f32,
+        attack: f32,
+        decay: f32,
+        sustain: f32,
+        release: f32,
         delay: f32,
         pan: f32,
         bus: u32,
@@ -1128,6 +1136,10 @@ fn shim_play_square(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<S
     let duration = unpacker.required_number(b"duration")?;
     let duty = unpacker.optional_number(b"duty", 0.5)?;
     let amp = unpacker.optional_number(b"amp", 0.5)?;
+    let attack = unpacker.optional_number(b"attack", 0.005)?;
+    let decay = unpacker.optional_number(b"decay", 0.0)?;
+    let sustain = unpacker.optional_number(b"sustain", 1.0)?;
+    let release = unpacker.optional_number(b"release", 0.005)?;
     let delay = unpacker.optional_number(b"delay", 0.0)?;
     let pan = unpacker.optional_number(b"pan", 0.0)?;
     let bus = parse_bus(unpacker.optional(b"bus"))?;
@@ -1140,6 +1152,10 @@ fn shim_play_square(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<S
         duty: duty.clamp(0.0, 1.0),
         amp,
         duration,
+        attack,
+        decay,
+        sustain: sustain.clamp(0.0, 1.0),
+        release,
         delay,
         pan: pan.clamp(-1.0, 1.0),
         bus,
@@ -1152,6 +1168,10 @@ fn shim_play_sine(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shi
     let freq = unpacker.required_number(b"freq")?;
     let duration = unpacker.required_number(b"duration")?;
     let amp = unpacker.optional_number(b"amp", 0.5)?;
+    let attack = unpacker.optional_number(b"attack", 0.005)?;
+    let decay = unpacker.optional_number(b"decay", 0.0)?;
+    let sustain = unpacker.optional_number(b"sustain", 1.0)?;
+    let release = unpacker.optional_number(b"release", 0.005)?;
     let delay = unpacker.optional_number(b"delay", 0.0)?;
     let pan = unpacker.optional_number(b"pan", 0.0)?;
     let bus = parse_bus(unpacker.optional(b"bus"))?;
@@ -1163,6 +1183,10 @@ fn shim_play_sine(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shi
         freq,
         amp,
         duration,
+        attack,
+        decay,
+        sustain: sustain.clamp(0.0, 1.0),
+        release,
         delay,
         pan: pan.clamp(-1.0, 1.0),
         bus,

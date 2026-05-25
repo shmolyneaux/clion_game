@@ -94,6 +94,11 @@ impl Ramp {
     }
 }
 
+enum Envelope {
+    FadeInOut { fade_in: u64, fade_out: u64 },
+    Adsr { attack: u64, decay: u64, sustain: f32, release: u64 },
+}
+
 struct Voice {
     id: u32,
     bus: u32,
@@ -104,8 +109,7 @@ struct Voice {
     position: u64,
     /// Total output frames this voice will produce.
     total_samples: u64,
-    fade_in: u64,
-    fade_out: u64,
+    envelope: Envelope,
     /// Overall amplitude (ramps on `set_gain`).
     amp: Ramp,
     /// Equal-power L/R gains (ramp together on `set_pan`).
@@ -341,7 +345,7 @@ fn apply_command(m: &mut Mixer, cmd: SoundCmd) {
         SoundCmd::CreateSample { sample_id, sample_rate, samples } => {
             m.bank.insert(sample_id, SampleBuffer { sample_rate, samples });
         }
-        SoundCmd::Sine { voice_id, freq, amp, duration, delay, pan, bus } => {
+        SoundCmd::Sine { voice_id, freq, amp, duration, attack, decay, sustain, release, delay, pan, bus } => {
             let total = secs_to_samples(duration);
             if total == 0 {
                 return;
@@ -354,14 +358,13 @@ fn apply_command(m: &mut Mixer, cmd: SoundCmd) {
                 delay_remaining: secs_to_samples(delay),
                 position: 0,
                 total_samples: total,
-                fade_in: PROC_FADE.min(total),
-                fade_out: PROC_FADE.min(total),
+                envelope: make_adsr(attack, decay, sustain, release, total),
                 amp: Ramp::new(amp),
                 pan_l,
                 pan_r,
             });
         }
-        SoundCmd::Square { voice_id, freq, duty, amp, duration, delay, pan, bus } => {
+        SoundCmd::Square { voice_id, freq, duty, amp, duration, attack, decay, sustain, release, delay, pan, bus } => {
             let total = secs_to_samples(duration);
             if total == 0 {
                 return;
@@ -377,8 +380,7 @@ fn apply_command(m: &mut Mixer, cmd: SoundCmd) {
                 delay_remaining: secs_to_samples(delay),
                 position: 0,
                 total_samples: total,
-                fade_in: PROC_FADE.min(total),
-                fade_out: PROC_FADE.min(total),
+                envelope: make_adsr(attack, decay, sustain, release, total),
                 amp: Ramp::new(amp),
                 pan_l,
                 pan_r,
@@ -403,8 +405,10 @@ fn apply_command(m: &mut Mixer, cmd: SoundCmd) {
                 delay_remaining: secs_to_samples(delay),
                 position: 0,
                 total_samples: total,
-                fade_in: secs_to_samples(fade_in).min(total),
-                fade_out: secs_to_samples(fade_out).min(total),
+                envelope: Envelope::FadeInOut {
+                    fade_in: secs_to_samples(fade_in).min(total),
+                    fade_out: secs_to_samples(fade_out).min(total),
+                },
                 amp: Ramp::new(amp),
                 pan_l,
                 pan_r,
@@ -418,8 +422,14 @@ fn apply_command(m: &mut Mixer, cmd: SoundCmd) {
                     v.position = 0;
                 } else {
                     // Ramp out over the remaining (or a minimum) fade window.
-                    let fade = v.fade_out.max(PROC_FADE);
-                    v.fade_out = fade;
+                    let fade = match &v.envelope {
+                        Envelope::FadeInOut { fade_out, .. } => *fade_out,
+                        Envelope::Adsr { release, .. } => *release,
+                    }.max(PROC_FADE);
+                    match &mut v.envelope {
+                        Envelope::FadeInOut { fade_out, .. } => *fade_out = fade,
+                        Envelope::Adsr { release, .. } => *release = fade,
+                    }
                     v.total_samples = v.position + fade;
                 }
             }
@@ -545,17 +555,53 @@ pub fn mix(stream: &mut [i16]) {
 /// 5ms attack/release applied to procedural voices to mask clicks.
 const PROC_FADE: u64 = SAMPLE_RATE as u64 / 200;
 
+/// Build an ADSR `Envelope`, clamping A/D/R to fit within `total` and
+/// enforcing `PROC_FADE` as a minimum for attack and release.
+fn make_adsr(attack: f32, decay: f32, sustain: f32, release: f32, total: u64) -> Envelope {
+    let a = secs_to_samples(attack).max(PROC_FADE);
+    let d = secs_to_samples(decay);
+    let r = secs_to_samples(release).max(PROC_FADE);
+    // Scale proportionally if A+D+R would exceed the total duration.
+    let sum = a + d + r;
+    let (a, d, r) = if sum > total && sum > 0 {
+        let s = total as f64 / sum as f64;
+        ((a as f64 * s) as u64, (d as f64 * s) as u64, (r as f64 * s) as u64)
+    } else {
+        (a, d, r)
+    };
+    Envelope::Adsr { attack: a, decay: d, sustain, release: r }
+}
+
 /// Linear fade-in/out envelope. A zero fade length disables that edge.
-fn envelope(pos: u64, total: u64, fade_in: u64, fade_out: u64) -> f32 {
-    let mut e = 1.0f32;
-    if pos < fade_in {
-        e = e.min(pos as f32 / fade_in as f32);
+fn eval_envelope(env: &Envelope, pos: u64, total: u64) -> f32 {
+    match env {
+        Envelope::FadeInOut { fade_in, fade_out } => {
+            let mut e = 1.0f32;
+            if pos < *fade_in {
+                e = e.min(pos as f32 / *fade_in as f32);
+            }
+            let tail = total.saturating_sub(pos);
+            if tail < *fade_out {
+                e = e.min(tail as f32 / *fade_out as f32);
+            }
+            e
+        }
+        Envelope::Adsr { attack, decay, sustain, release } => {
+            if *attack > 0 && pos < *attack {
+                return pos as f32 / *attack as f32;
+            }
+            let pos2 = pos.saturating_sub(*attack);
+            if *decay > 0 && pos2 < *decay {
+                let t = pos2 as f32 / *decay as f32;
+                return 1.0 - t * (1.0 - sustain);
+            }
+            let tail = total.saturating_sub(pos);
+            if *release > 0 && tail < *release {
+                return sustain * tail as f32 / *release as f32;
+            }
+            *sustain
+        }
     }
-    let tail = total - pos;
-    if tail < fade_out {
-        e = e.min(tail as f32 / fade_out as f32);
-    }
-    e
 }
 
 /// Render one voice's contribution into the interleaved `accum` buffer for the
@@ -569,7 +615,6 @@ fn render_voice(
     bank: &HashMap<u32, SampleBuffer>,
 ) {
     let total = voice.total_samples;
-    let (fade_in, fade_out) = (voice.fade_in, voice.fade_out);
 
     // Number of frames to render: limited by both the output buffer space and
     // the voice's remaining samples.
@@ -612,7 +657,7 @@ fn render_voice(
             }
         };
 
-        let env = envelope(voice.position, total, fade_in, fade_out);
+        let env = eval_envelope(&voice.envelope, voice.position, total);
         let amp = voice.amp.next();
         let l = voice.pan_l.next();
         let r = voice.pan_r.next();
