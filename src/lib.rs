@@ -838,10 +838,13 @@ fn frame(state: &mut State, delta: f32) {
         }
 
         if !state.edit_mode {
+            let mut finished = Vec::new();
+            audio::drain_finished(&mut finished);
+
             let script_start = Instant::now();
             state
                 .script_bridge
-                .step(&state.keys.keys, &state.keys.last_keys, delta, state.perf);
+                .step(&state.keys.keys, &state.keys.last_keys, delta, state.perf, finished);
             let script_total = script_start.elapsed().as_secs_f32();
             new_perf.gc = state.script_bridge.last_gc_time;
             new_perf.script = (script_total - new_perf.gc).max(0.0);

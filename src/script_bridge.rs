@@ -1,6 +1,7 @@
 use shimlang::ArgBundle;
 use shimlang::runtime::{ArgUnpacker, CallResult, NativeFn};
 use shimlang::{Environment, Interpreter, ShimNative, ShimValue, debug_u8s};
+use std::collections::HashSet;
 use std::ffi::CString;
 use std::mem;
 
@@ -96,6 +97,7 @@ impl ShimNative for SoundSampleHandle {
                 let mut fade_out = 0.005f32;
                 let mut delay = 0.0f32;
                 let mut pan = 0.0f32;
+                let mut bus = 0u32;
                 for (k, v) in args.kwargs.iter() {
                     let f = match v {
                         ShimValue::Float(f) => *f,
@@ -114,6 +116,7 @@ impl ShimNative for SoundSampleHandle {
                         b"fade_out" => fade_out = f,
                         b"delay" => delay = f,
                         b"pan" => pan = f,
+                        b"bus" => bus = parse_bus(Some(*v))?,
                         _ => {
                             return Err(format!(
                                 "Unknown play kwarg '{}'",
@@ -122,7 +125,10 @@ impl ShimNative for SoundSampleHandle {
                         }
                     }
                 }
-                interpreter.fetch_mut::<SoundList>().items.push(SoundCmd::PlaySample {
+                let sl = interpreter.fetch_mut::<SoundList>();
+                let voice_id = sl.alloc_voice_id();
+                sl.items.push(SoundCmd::PlaySample {
+                    voice_id,
                     sample_id,
                     amp,
                     speed,
@@ -130,8 +136,9 @@ impl ShimNative for SoundSampleHandle {
                     fade_out,
                     delay,
                     pan: pan.clamp(-1.0, 1.0),
+                    bus,
                 });
-                Ok(ShimValue::None)
+                Ok(interpreter.mem.alloc_native(VoiceHandle { voice_id }))
             }
             Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_sample_play))
         } else {
@@ -147,21 +154,120 @@ impl ShimNative for SoundSampleHandle {
     }
 }
 
+/// Default gain/pan ramp (seconds) when a script doesn't pass `ramp`.
+const DEFAULT_RAMP_SECS: f32 = 0.01;
+
+/// A reference to a playing voice. Holds only the id; `.stop()`, `.set_gain()`
+/// and `.set_pan()` push control commands. Targeting a finished or unknown
+/// voice is a harmless no-op on the audio side.
+#[derive(Debug, Clone)]
+pub struct VoiceHandle {
+    pub voice_id: u32,
+}
+
+impl ShimNative for VoiceHandle {
+    fn get_attr(
+        &self,
+        self_as_val: &ShimValue,
+        interpreter: &mut Interpreter,
+        ident: &[u8],
+    ) -> Result<ShimValue, String> {
+        match ident {
+            b"finished" => {
+                let done = interpreter
+                    .fetch_mut::<SoundList>()
+                    .finished
+                    .contains(&self.voice_id);
+                Ok(ShimValue::Bool(done))
+            }
+            b"stop" => {
+                fn shim_stop(
+                    interpreter: &mut Interpreter,
+                    args: &ArgBundle,
+                ) -> Result<ShimValue, String> {
+                    let voice_id = args.args[0]
+                        .as_native::<VoiceHandle>(interpreter)?
+                        .voice_id;
+                    interpreter
+                        .fetch_mut::<SoundList>()
+                        .items
+                        .push(SoundCmd::StopVoice { voice_id });
+                    Ok(ShimValue::None)
+                }
+                Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_stop))
+            }
+            b"set_gain" => {
+                fn shim_set_gain(
+                    interpreter: &mut Interpreter,
+                    args: &ArgBundle,
+                ) -> Result<ShimValue, String> {
+                    let voice_id = args.args[0]
+                        .as_native::<VoiceHandle>(interpreter)?
+                        .voice_id;
+                    let mut unpacker = ArgUnpacker::new(args);
+                    let _ = unpacker.required(b"self")?;
+                    let amp = unpacker.required_number(b"amp")?;
+                    let ramp = unpacker.optional_number(b"ramp", DEFAULT_RAMP_SECS)?;
+                    unpacker.end()?;
+                    interpreter.fetch_mut::<SoundList>().items.push(SoundCmd::SetVoiceGain {
+                        voice_id,
+                        amp,
+                        ramp: ramp.max(0.0),
+                    });
+                    Ok(ShimValue::None)
+                }
+                Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_set_gain))
+            }
+            b"set_pan" => {
+                fn shim_set_pan(
+                    interpreter: &mut Interpreter,
+                    args: &ArgBundle,
+                ) -> Result<ShimValue, String> {
+                    let voice_id = args.args[0]
+                        .as_native::<VoiceHandle>(interpreter)?
+                        .voice_id;
+                    let mut unpacker = ArgUnpacker::new(args);
+                    let _ = unpacker.required(b"self")?;
+                    let pan = unpacker.required_number(b"pan")?;
+                    let ramp = unpacker.optional_number(b"ramp", DEFAULT_RAMP_SECS)?;
+                    unpacker.end()?;
+                    interpreter.fetch_mut::<SoundList>().items.push(SoundCmd::SetVoicePan {
+                        voice_id,
+                        pan: pan.clamp(-1.0, 1.0),
+                        ramp: ramp.max(0.0),
+                    });
+                    Ok(ShimValue::None)
+                }
+                Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_set_pan))
+            }
+            _ => Err(format!("VoiceHandle has no attribute '{}'", debug_u8s(ident))),
+        }
+    }
+
+    fn gc_vals(&self) -> Vec<ShimValue> {
+        Vec::new()
+    }
+}
+
 pub enum SoundCmd {
     Square {
+        voice_id: u32,
         freq: f32,
         duty: f32,
         amp: f32,
         duration: f32,
         delay: f32,
         pan: f32,
+        bus: u32,
     },
     Sine {
+        voice_id: u32,
         freq: f32,
         amp: f32,
         duration: f32,
         delay: f32,
         pan: f32,
+        bus: u32,
     },
     CreateSample {
         sample_id: u32,
@@ -169,6 +275,7 @@ pub enum SoundCmd {
         samples: Vec<f32>,
     },
     PlaySample {
+        voice_id: u32,
         sample_id: u32,
         amp: f32,
         speed: f32,
@@ -176,13 +283,62 @@ pub enum SoundCmd {
         fade_out: f32,
         delay: f32,
         pan: f32,
+        bus: u32,
     },
+    StopVoice {
+        voice_id: u32,
+    },
+    SetVoiceGain {
+        voice_id: u32,
+        amp: f32,
+        ramp: f32,
+    },
+    SetVoicePan {
+        voice_id: u32,
+        pan: f32,
+        ramp: f32,
+    },
+    SetBusGain {
+        bus: u32,
+        gain: f32,
+        ramp: f32,
+    },
+    SetBusLowPass {
+        bus: u32,
+        cutoff: f32,
+        q: f32,
+    },
+    ClearBusEffects {
+        bus: u32,
+    },
+}
+
+/// Number of mixer buses. Buses are addressed 0..NUM_BUSES.
+pub const NUM_BUSES: u32 = 32;
+
+fn parse_bus(value: Option<ShimValue>) -> Result<u32, String> {
+    let bus = match value {
+        None => return Ok(0),
+        Some(ShimValue::Integer(i)) => i,
+        Some(ShimValue::Float(f)) => f as i32,
+        Some(_) => return Err("bus must be an integer".to_string()),
+    };
+    if (0..NUM_BUSES as i32).contains(&bus) {
+        Ok(bus as u32)
+    } else {
+        Err(format!("bus must be 0..={}, got {}", NUM_BUSES - 1, bus))
+    }
 }
 
 #[derive(Default)]
 pub struct SoundList {
     next_sample_id: u32,
+    next_voice_id: u32,
     pub items: Vec<SoundCmd>,
+    /// Voice ids that have finished playing, drained from the audio thread.
+    /// Grows unbounded for now; entries will be released once `ShimNative`
+    /// gains drop-like behavior.
+    pub finished: HashSet<u32>,
 }
 
 impl SoundList {
@@ -195,6 +351,12 @@ impl SoundList {
             samples,
         });
         SoundSampleHandle { sample_id }
+    }
+
+    fn alloc_voice_id(&mut self) -> u32 {
+        let id = self.next_voice_id;
+        self.next_voice_id += 1;
+        id
     }
 }
 
@@ -493,7 +655,7 @@ impl DrawList {
 /// Messages sent from the Engine (Main Thread) to the Script Thread
 #[cfg(not(target_arch = "wasm32"))]
 pub enum ScriptRequest {
-    ExecuteLoop(Interpreter, Environment, ShimValue, Vec<u8>, Vec<u8>, f32, PerfTimer),
+    ExecuteLoop(Interpreter, Environment, ShimValue, Vec<u8>, Vec<u8>, f32, PerfTimer, Vec<u32>),
 }
 
 /// Messages sent from the Script Thread to the Engine
@@ -967,16 +1129,21 @@ fn shim_play_square(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<S
     let amp = unpacker.optional_number(b"amp", 0.5)?;
     let delay = unpacker.optional_number(b"delay", 0.0)?;
     let pan = unpacker.optional_number(b"pan", 0.0)?;
+    let bus = parse_bus(unpacker.optional(b"bus"))?;
     unpacker.end()?;
-    interpreter.fetch_mut::<SoundList>().items.push(SoundCmd::Square {
+    let sl = interpreter.fetch_mut::<SoundList>();
+    let voice_id = sl.alloc_voice_id();
+    sl.items.push(SoundCmd::Square {
+        voice_id,
         freq,
         duty: duty.clamp(0.0, 1.0),
         amp,
         duration,
         delay,
         pan: pan.clamp(-1.0, 1.0),
+        bus,
     });
-    Ok(ShimValue::None)
+    Ok(interpreter.mem.alloc_native(VoiceHandle { voice_id }))
 }
 
 fn shim_play_sine(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
@@ -986,15 +1153,20 @@ fn shim_play_sine(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shi
     let amp = unpacker.optional_number(b"amp", 0.5)?;
     let delay = unpacker.optional_number(b"delay", 0.0)?;
     let pan = unpacker.optional_number(b"pan", 0.0)?;
+    let bus = parse_bus(unpacker.optional(b"bus"))?;
     unpacker.end()?;
-    interpreter.fetch_mut::<SoundList>().items.push(SoundCmd::Sine {
+    let sl = interpreter.fetch_mut::<SoundList>();
+    let voice_id = sl.alloc_voice_id();
+    sl.items.push(SoundCmd::Sine {
+        voice_id,
         freq,
         amp,
         duration,
         delay,
         pan: pan.clamp(-1.0, 1.0),
+        bus,
     });
-    Ok(ShimValue::None)
+    Ok(interpreter.mem.alloc_native(VoiceHandle { voice_id }))
 }
 
 fn shim_create_sample(
@@ -1032,6 +1204,45 @@ fn shim_create_sample(
         .fetch_mut::<SoundList>()
         .push_create_sample(sample_rate as u32, samples);
     Ok(interpreter.mem.alloc_native(handle))
+}
+
+fn shim_set_bus_gain(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let bus = parse_bus(Some(unpacker.required(b"bus")?))?;
+    let gain = unpacker.required_number(b"gain")?;
+    let ramp = unpacker.optional_number(b"ramp", DEFAULT_RAMP_SECS)?;
+    unpacker.end()?;
+    interpreter.fetch_mut::<SoundList>().items.push(SoundCmd::SetBusGain {
+        bus,
+        gain,
+        ramp: ramp.max(0.0),
+    });
+    Ok(ShimValue::None)
+}
+
+fn shim_set_bus_lowpass(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let bus = parse_bus(Some(unpacker.required(b"bus")?))?;
+    let cutoff = unpacker.required_number(b"cutoff")?;
+    let q = unpacker.optional_number(b"q", std::f32::consts::FRAC_1_SQRT_2)?;
+    unpacker.end()?;
+    interpreter.fetch_mut::<SoundList>().items.push(SoundCmd::SetBusLowPass {
+        bus,
+        cutoff,
+        q,
+    });
+    Ok(ShimValue::None)
+}
+
+fn shim_clear_bus_effects(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let bus = parse_bus(Some(unpacker.required(b"bus")?))?;
+    unpacker.end()?;
+    interpreter
+        .fetch_mut::<SoundList>()
+        .items
+        .push(SoundCmd::ClearBusEffects { bus });
+    Ok(ShimValue::None)
 }
 
 fn shim_window_size(
@@ -1085,6 +1296,9 @@ fn load_script(bytes: &[u8]) -> Result<(Interpreter, Environment, ShimValue), St
         (b"play_square", shim_play_square),
         (b"play_sine", shim_play_sine),
         (b"create_sample", shim_create_sample),
+        (b"set_bus_gain", shim_set_bus_gain),
+        (b"set_bus_lowpass", shim_set_bus_lowpass),
+        (b"clear_bus_effects", shim_clear_bus_effects),
     ];
     for (name, func) in builtins {
         let position = interpreter.mem.alloc_and_set(
@@ -1206,7 +1420,7 @@ impl ScriptBridge {
         }
     }
 
-    pub fn step(&mut self, keys: &[u8], last_keys: &[u8], delta: f32, perf: PerfTimer) {
+    pub fn step(&mut self, keys: &[u8], last_keys: &[u8], delta: f32, perf: PerfTimer, finished: Vec<u32>) {
         let _zone = zone_scoped!("Run interpreter");
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -1237,6 +1451,7 @@ impl ScriptBridge {
                                 last_keys.to_vec(),
                                 delta,
                                 perf,
+                                finished,
                             ))
                             .unwrap();
                     }
@@ -1309,6 +1524,7 @@ impl ScriptBridge {
                     ms.last_buttons = ms.buttons;
                     ms.buttons = buttons;
                     *interpreter.fetch_mut::<PerfTimer>() = perf;
+                    interpreter.fetch_mut::<SoundList>().finished.extend(finished.iter().copied());
                     match call_loop_fn(interpreter, env, loop_fn) {
                         Ok(gc_time) => self.last_gc_time = gc_time,
                         Err(msg) => self.interpreter_errors.push(msg),
@@ -1410,7 +1626,7 @@ fn script_thread_logic(rx: Receiver<ScriptRequest>, tx: Sender<ScriptResponse>) 
     loop {
         if let Ok(request) = rx.recv() {
             match request {
-                ScriptRequest::ExecuteLoop(mut interpreter, mut env, loop_fn, keys, last_keys, delta, perf) => {
+                ScriptRequest::ExecuteLoop(mut interpreter, mut env, loop_fn, keys, last_keys, delta, perf, finished) => {
                     let ks = interpreter.fetch_mut::<KeyState>();
                     ks.held_time.resize(keys.len(), 0.0);
                     for (i, &pressed) in keys.iter().enumerate() {
@@ -1430,6 +1646,7 @@ fn script_thread_logic(rx: Receiver<ScriptRequest>, tx: Sender<ScriptResponse>) 
                     ms.last_buttons = ms.buttons;
                     ms.buttons = buttons;
                     *interpreter.fetch_mut::<PerfTimer>() = perf;
+                    interpreter.fetch_mut::<SoundList>().finished.extend(finished.iter().copied());
                     env.update(&mut interpreter, b"delta", ShimValue::Float(delta)).expect("delta should be in env");
                     tx.send(match call_loop_fn(&mut interpreter, &mut env, loop_fn) {
                         Ok(gc_time) => {
