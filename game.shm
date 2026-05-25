@@ -19,6 +19,250 @@ let BUTTON_TEXTURE = {
     )
 };
 
+
+// Note frequencies (Hz), equal temperament, A4 = 440. Full 88-key piano range A0..C8.
+// Sharps use the `s` suffix (e.g. Cs4 = C#4 = Db4).
+let A0 = 27.50;
+let As0 = 29.14;
+let B0 = 30.87;
+let C1 = 32.70;
+let Cs1 = 34.65;
+let D1 = 36.71;
+let Ds1 = 38.89;
+let E1 = 41.20;
+let F1 = 43.65;
+let Fs1 = 46.25;
+let G1 = 49.00;
+let Gs1 = 51.91;
+let A1 = 55.00;
+let As1 = 58.27;
+let B1 = 61.74;
+let C2 = 65.41;
+let Cs2 = 69.30;
+let D2 = 73.42;
+let Ds2 = 77.78;
+let E2 = 82.41;
+let F2 = 87.31;
+let Fs2 = 92.50;
+let G2 = 98.00;
+let Gs2 = 103.83;
+let A2 = 110.00;
+let As2 = 116.54;
+let B2 = 123.47;
+let C3 = 130.81;
+let Cs3 = 138.59;
+let D3 = 146.83;
+let Ds3 = 155.56;
+let E3 = 164.81;
+let F3 = 174.61;
+let Fs3 = 185.00;
+let G3 = 196.00;
+let Gs3 = 207.65;
+let A3 = 220.00;
+let As3 = 233.08;
+let B3 = 246.94;
+let C4 = 261.63;
+let Cs4 = 277.18;
+let D4 = 293.66;
+let Ds4 = 311.13;
+let E4 = 329.63;
+let F4 = 349.23;
+let Fs4 = 369.99;
+let G4 = 392.00;
+let Gs4 = 415.30;
+let A4 = 440.00;
+let As4 = 466.16;
+let B4 = 493.88;
+let C5 = 523.25;
+let Cs5 = 554.37;
+let D5 = 587.33;
+let Ds5 = 622.25;
+let E5 = 659.26;
+let F5 = 698.46;
+let Fs5 = 739.99;
+let G5 = 783.99;
+let Gs5 = 830.61;
+let A5 = 880.00;
+let As5 = 932.33;
+let B5 = 987.77;
+let C6 = 1046.50;
+let Cs6 = 1108.73;
+let D6 = 1174.66;
+let Ds6 = 1244.51;
+let E6 = 1318.51;
+let F6 = 1396.91;
+let Fs6 = 1479.98;
+let G6 = 1567.98;
+let Gs6 = 1661.22;
+let A6 = 1760.00;
+let As6 = 1864.66;
+let B6 = 1975.53;
+let C7 = 2093.00;
+let Cs7 = 2217.46;
+let D7 = 2349.32;
+let Ds7 = 2489.02;
+let E7 = 2637.02;
+let F7 = 2793.83;
+let Fs7 = 2959.96;
+let G7 = 3135.96;
+let Gs7 = 3322.44;
+let A7 = 3520.00;
+let As7 = 3729.31;
+let B7 = 3951.07;
+let C8 = 4186.01;
+
+let EIGHTH = 0.5;
+let QUARTER = 1.0;
+let DOT_QUARTER = 1.5;
+let HALF = 2.0;
+
+struct Note {
+    frequency,
+    period,
+}
+
+struct Wait {
+    period,
+}
+
+// Korobeiniki ("Tetris Theme A"). The melody and a root bass line are merged
+// into a single event stream: a `Note` triggers a sound without advancing time,
+// so notes that sound together are emitted back-to-back, then a `Wait` advances
+// to the next onset. Bass notes carry their full (HALF) duration so they sustain
+// under the melody.
+let song = [
+    // --- Section A, phrase 1 ---
+    // m1: Em
+    Note(E5, QUARTER), Note(E2, HALF),
+    Wait(QUARTER),
+    Note(B4, EIGHTH),
+    Wait(EIGHTH),
+    Note(C5, EIGHTH),
+    Wait(EIGHTH),
+    Note(D5, QUARTER), Note(E2, HALF),
+    Wait(QUARTER),
+    Note(C5, EIGHTH),
+    Wait(EIGHTH),
+    Note(B4, EIGHTH),
+    Wait(EIGHTH),
+    // m2: Am
+    Note(A4, QUARTER), Note(A2, HALF),
+    Wait(QUARTER),
+    Note(A4, EIGHTH),
+    Wait(EIGHTH),
+    Note(C5, EIGHTH),
+    Wait(EIGHTH),
+    Note(E5, QUARTER), Note(A2, HALF),
+    Wait(QUARTER),
+    Note(D5, EIGHTH),
+    Wait(EIGHTH),
+    Note(C5, EIGHTH),
+    Wait(EIGHTH),
+    // m3: B
+    Note(B4, DOT_QUARTER), Note(B2, HALF),
+    Wait(DOT_QUARTER),
+    Note(C5, EIGHTH),
+    Wait(EIGHTH),
+    Note(D5, QUARTER), Note(B2, HALF),
+    Wait(QUARTER),
+    Note(E5, QUARTER),
+    Wait(QUARTER),
+    // m4: Em
+    Note(C5, QUARTER), Note(E2, HALF),
+    Wait(QUARTER),
+    Note(A4, QUARTER),
+    Wait(QUARTER),
+    Note(A4, QUARTER), Note(E2, HALF),
+    Wait(QUARTER),
+    Wait(QUARTER),
+
+    // --- Section A, phrase 2 ---
+    // m5: Dm
+    Note(D5, DOT_QUARTER), Note(D2, HALF),
+    Wait(DOT_QUARTER),
+    Note(F5, EIGHTH),
+    Wait(EIGHTH),
+    Note(A5, QUARTER), Note(D2, HALF),
+    Wait(QUARTER),
+    Note(G5, EIGHTH),
+    Wait(EIGHTH),
+    Note(F5, EIGHTH),
+    Wait(EIGHTH),
+    // m6: C
+    Note(E5, DOT_QUARTER), Note(C2, HALF),
+    Wait(DOT_QUARTER),
+    Note(C5, EIGHTH),
+    Wait(EIGHTH),
+    Note(E5, QUARTER), Note(C2, HALF),
+    Wait(QUARTER),
+    Note(D5, EIGHTH),
+    Wait(EIGHTH),
+    Note(C5, EIGHTH),
+    Wait(EIGHTH),
+    // m7: B
+    Note(B4, DOT_QUARTER), Note(B2, HALF),
+    Wait(DOT_QUARTER),
+    Note(C5, EIGHTH),
+    Wait(EIGHTH),
+    Note(D5, QUARTER), Note(B2, HALF),
+    Wait(QUARTER),
+    Note(E5, QUARTER),
+    Wait(QUARTER),
+    // m8: Am -> Em
+    Note(C5, QUARTER), Note(A2, HALF),
+    Wait(QUARTER),
+    Note(A4, QUARTER),
+    Wait(QUARTER),
+    Note(A4, QUARTER), Note(E2, HALF),
+    Wait(QUARTER),
+    Wait(QUARTER),
+
+    // --- Section B ---
+    // b1
+    Note(E5, HALF), Note(E2, HALF),
+    Wait(HALF),
+    Note(C5, HALF), Note(C2, HALF),
+    Wait(HALF),
+    // b2
+    Note(D5, HALF), Note(D2, HALF),
+    Wait(HALF),
+    Note(B4, HALF), Note(B2, HALF),
+    Wait(HALF),
+    // b3
+    Note(C5, HALF), Note(C2, HALF),
+    Wait(HALF),
+    Note(A4, HALF), Note(A2, HALF),
+    Wait(HALF),
+    // b4
+    Note(Gs4, HALF), Note(E2, HALF),
+    Wait(HALF),
+    Note(B4, HALF), Note(E2, HALF),
+    Wait(HALF),
+    // b5
+    Note(E5, HALF), Note(E2, HALF),
+    Wait(HALF),
+    Note(C5, HALF), Note(C2, HALF),
+    Wait(HALF),
+    // b6
+    Note(D5, HALF), Note(D2, HALF),
+    Wait(HALF),
+    Note(B4, HALF), Note(B2, HALF),
+    Wait(HALF),
+    // b7
+    Note(C5, QUARTER), Note(A2, HALF),
+    Wait(QUARTER),
+    Note(E5, QUARTER),
+    Wait(QUARTER),
+    Note(A5, HALF), Note(A2, HALF),
+    Wait(HALF),
+    // b8
+    Note(Gs5, HALF), Note(E2, HALF),
+    Wait(HALF),
+    Note(E2, HALF),
+    Wait(HALF),
+];
+let current_note = 0;
+
 let BLOCK_SIZE = 32;
 fn block_texture(r, g, b) {
     let data = [];
@@ -337,6 +581,9 @@ struct Game {
     count = 0,
     bag = new_bag(),
     line_count = 0,
+
+    // Starting tempo
+    tempo = 150,
 
     fn shape_block_offsets(self) {
         shape_block_offsets(self.current_shape, self.shape_rotation)
@@ -705,6 +952,11 @@ fn debug_frame_times() {
     gc_times[slot] = perf.gc;
     render_times[slot] = perf.render;
     vsync_times[slot] = perf.vsync;
+
+    if !show_debug_frame_times {
+        return;
+    }
+
     let BAR_WIDTH = 10;
     let SCALE = 10000;
     let sum = 0;
@@ -754,7 +1006,21 @@ fn debug_frame_times() {
     );
 }
 
+let song_frame_next_note = 0;
+let song_idx = 0;
+
+let show_debug_frame_times = false;
 add_tick_fn(debug_frame_times);
+
+let MUSIC_BUS = 1;
+
+set_bus_gain(
+    MUSIC_BUS,
+    gain=0.1,
+);
+
+let tempo = 135;
+let music_paused = true;
 
 let viewport = None;
 let state = Game();
@@ -762,6 +1028,45 @@ let frame_num = 0;
 fn loop() {
     viewport = window_size();
     state.tick();
+
+    if key.E.just_pressed {
+        show_debug_frame_times = !show_debug_frame_times;
+    }
+
+    if key.K.just_pressed_with_repeat {
+        tempo += 1;
+    }
+    if key.J.just_pressed_with_repeat {
+        tempo -= 1;
+    }
+    let tempo_bps = tempo/60;
+
+    if !music_paused {
+        while song_frame_next_note == 0 {
+            let action = song[song_idx];
+            song_idx += 1;
+            song_idx %= song.len();
+            if action.__type__ == Wait {
+                let duration = action.period/tempo_bps;
+                song_frame_next_note = (duration*60).round();
+            } else if action.__type__ == Note {
+                play_sine(
+                    action.frequency,
+                    action.period/tempo_bps,
+                    bus=MUSIC_BUS,
+                );
+                play_square(
+                    action.frequency*2,
+                    action.period/tempo_bps,
+                    amp=0.05,
+                    bus=MUSIC_BUS,
+                );
+            } else {
+                log_lines.append("Unknown song action \(action)");
+            }
+        }
+        song_frame_next_note -= 1;
+    }
 
     for func in tick_fns {
         func();
