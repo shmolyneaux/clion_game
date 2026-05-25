@@ -486,6 +486,11 @@ struct Menu {
 
         if key.Enter.just_pressed and self.selected_button == MENU_BUTTONS.index("START") {
             state = Game();
+            set_bus_lowpass(
+                48000,
+                ramp=0.5,
+                bus=MUSIC_BUS,
+            );
         }
     }
 }
@@ -613,6 +618,11 @@ struct Game {
     fn tick(self) {
         if key.Escape.just_pressed {
             state = Menu();
+            set_bus_lowpass(
+                730,
+                ramp=0.5,
+                bus=MUSIC_BUS,
+            );
             return;
         }
 
@@ -759,12 +769,22 @@ struct Game {
                     );
 
                     if self.game_over {
+                        set_bus_lowpass(
+                            500,
+                            ramp=0.5,
+                            bus=MUSIC_BUS,
+                        );
                         let reset_count = 0;
                         fn reset_after_delay() {
                             reset_count += 1;
                             if reset_count > 100 {
                                 if key.Space.just_pressed {
                                     state = Game();
+                                    set_bus_lowpass(
+                                        48000,
+                                        ramp=0.5,
+                                        bus=MUSIC_BUS,
+                                    );
                                 }
                             }
                         }
@@ -1008,6 +1028,7 @@ fn debug_frame_times() {
 
 let song_frame_next_note = 0;
 let song_idx = 0;
+let lowpass_cutoff = 44000;
 
 let show_debug_frame_times = false;
 add_tick_fn(debug_frame_times);
@@ -1019,8 +1040,51 @@ set_bus_gain(
     gain=0.1,
 );
 
+let instruments = dict();
+instruments["flute"] = [
+    (1, 1.0),
+    (2, 0.15),
+    (3, 0.03),
+];
+instruments["clarinet"] = [
+    (1, 1.0),
+    (2, 0.05),
+    (3, 0.65),
+    (4, 0.05),
+    (5, 0.35),
+    (7, 0.15),
+];
+instruments["trumpet"] = [
+    (1, 1.0),
+    (2, 0.75),
+    (3, 0.70),
+    (4, 0.50),
+    (5, 0.35),
+    (6, 0.25),
+    (7, 0.20),
+    (8, 0.15),
+    (9, 0.10),
+    (10, 0.05),
+];
+instruments["violin"] = [
+    (1, 0.70),
+    (2, 1.0),
+    (3, 0.60),
+    (4, 0.50),
+    (5, 0.40),
+];
+
+let instrument_num = 1;
+let instrument_names = {
+    let lst = [];
+    for key in instruments {
+        lst.append(key);
+    }
+    lst
+};
+
 let tempo = 135;
-let music_paused = true;
+let music_paused = false;
 
 let viewport = None;
 let state = Game();
@@ -1028,6 +1092,13 @@ let frame_num = 0;
 fn loop() {
     viewport = window_size();
     state.tick();
+
+    if key.L.just_pressed_with_repeat {
+        lowpass_cutoff *= 1.1;
+    }
+    if key.H.just_pressed_with_repeat {
+        lowpass_cutoff *= 1/1.1;
+    }
 
     if key.E.just_pressed {
         show_debug_frame_times = !show_debug_frame_times;
@@ -1041,6 +1112,33 @@ fn loop() {
     }
     let tempo_bps = tempo/60;
 
+    if key.Y.just_pressed {
+        instrument_num += 1;
+        instrument_num %= instrument_names.len();
+    }
+
+    if key.T.just_pressed {
+        set_bus_lowpass(
+            22000,
+            ramp=0.5,
+            bus=MUSIC_BUS,
+        );
+    }
+    if key.R.just_pressed {
+        set_bus_lowpass(
+            730,
+            ramp=0.5,
+            bus=MUSIC_BUS,
+        );
+    }
+
+    draw_text(
+        0,
+        500,
+        "Instrument: \(instrument_names[instrument_num])",
+        size=4.0,
+    );
+
     if !music_paused {
         while song_frame_next_note == 0 {
             let action = song[song_idx];
@@ -1050,17 +1148,14 @@ fn loop() {
                 let duration = action.period/tempo_bps;
                 song_frame_next_note = (duration*60).round();
             } else if action.__type__ == Note {
-                play_sine(
-                    action.frequency,
-                    action.period/tempo_bps,
-                    bus=MUSIC_BUS,
-                );
-                play_square(
-                    action.frequency*2,
-                    action.period/tempo_bps,
-                    amp=0.05,
-                    bus=MUSIC_BUS,
-                );
+                for harmonic, amp in instruments[instrument_names[instrument_num]] {
+                    play_sine(
+                        action.frequency*harmonic,
+                        action.period/tempo_bps,
+                        amp=amp,
+                        bus=MUSIC_BUS,
+                    );
+                }
             } else {
                 log_lines.append("Unknown song action \(action)");
             }

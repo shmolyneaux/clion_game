@@ -307,6 +307,7 @@ pub enum SoundCmd {
         bus: u32,
         cutoff: f32,
         q: f32,
+        ramp: f32,
     },
     ClearBusEffects {
         bus: u32,
@@ -1225,11 +1226,13 @@ fn shim_set_bus_lowpass(interpreter: &mut Interpreter, args: &ArgBundle) -> Resu
     let bus = parse_bus(Some(unpacker.required(b"bus")?))?;
     let cutoff = unpacker.required_number(b"cutoff")?;
     let q = unpacker.optional_number(b"q", std::f32::consts::FRAC_1_SQRT_2)?;
+    let ramp = unpacker.optional_number(b"ramp", 0.01)?.max(0.0);
     unpacker.end()?;
     interpreter.fetch_mut::<SoundList>().items.push(SoundCmd::SetBusLowPass {
         bus,
         cutoff,
         q,
+        ramp,
     });
     Ok(ShimValue::None)
 }

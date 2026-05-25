@@ -168,17 +168,19 @@ impl Biquad {
 
 /// A per-bus DSP effect. Processes an interleaved stereo buffer in place.
 enum Effect {
-    LowPass(Biquad),
+    LowPass { biquad: Biquad, cutoff: Ramp, q: f32 },
 }
 
 impl Effect {
     fn process(&mut self, buffer: &mut [f32]) {
         match self {
-            Effect::LowPass(bq) => {
+            Effect::LowPass { biquad, cutoff, q } => {
                 let frames = buffer.len() / 2;
+                let cur = cutoff.advance(frames as u64).exp();
+                biquad.set_low_pass(cur, *q);
                 for f in 0..frames {
-                    buffer[f * 2] = bq.process_sample(buffer[f * 2], 0);
-                    buffer[f * 2 + 1] = bq.process_sample(buffer[f * 2 + 1], 1);
+                    buffer[f * 2] = biquad.process_sample(buffer[f * 2], 0);
+                    buffer[f * 2 + 1] = biquad.process_sample(buffer[f * 2 + 1], 1);
                 }
             }
         }
@@ -440,13 +442,26 @@ fn apply_command(m: &mut Mixer, cmd: SoundCmd) {
                 b.gain.set_target(gain, secs_to_samples(ramp));
             }
         }
-        SoundCmd::SetBusLowPass { bus, cutoff, q } => {
+        SoundCmd::SetBusLowPass { bus, cutoff, q, ramp } => {
             if let Some(b) = m.buses.get_mut(bus as usize) {
+                let ramp_samples = secs_to_samples(ramp);
                 match b.effects.iter_mut().find_map(|e| match e {
-                    Effect::LowPass(bq) => Some(bq),
+                    Effect::LowPass { cutoff, q, .. } => Some((cutoff, q)),
                 }) {
-                    Some(bq) => bq.set_low_pass(cutoff, q),
-                    None => b.effects.push(Effect::LowPass(Biquad::low_pass(cutoff, q))),
+                    Some((cr, qr)) => {
+                        cr.set_target(cutoff.ln(), ramp_samples);
+                        *qr = q;
+                    }
+                    None => {
+                        let start = if ramp_samples > 0 { SAMPLE_RATE as f32 * 0.49 } else { cutoff };
+                        let mut cutoff_ramp = Ramp::new(start.ln());
+                        cutoff_ramp.set_target(cutoff.ln(), ramp_samples);
+                        b.effects.push(Effect::LowPass {
+                            biquad: Biquad::low_pass(start, q),
+                            cutoff: cutoff_ramp,
+                            q,
+                        });
+                    }
                 }
             }
         }
