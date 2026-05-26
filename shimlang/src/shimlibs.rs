@@ -842,7 +842,7 @@ impl ShimDict {
     fn print_entries(&self, interpreter: &Interpreter) {
         eprintln!("Entries");
         let _entries: &[DictEntry] = unsafe {
-            let u64_slice = &interpreter.mem.mem[usize::from(self.entries)
+            let u64_slice = &interpreter.mem.mem()[usize::from(self.entries)
                 ..usize::from(self.entries) + 3 * (self.entry_count as usize)];
             std::slice::from_raw_parts(u64_slice.as_ptr() as *const DictEntry, u64_slice.len() / 3)
         };
@@ -1153,7 +1153,7 @@ impl ShimDict {
         let size = 1 << self.size_pow;
         let start = usize::from(self.indices);
         let len = size / stride;
-        let u64_slice = &interpreter.mem.mem[start..start + len];
+        let u64_slice = &interpreter.mem.mem()[start..start + len];
         unsafe {
             std::slice::from_raw_parts_mut(u64_slice.as_ptr() as *mut T, u64_slice.len() * stride)
         }
@@ -1164,7 +1164,7 @@ impl ShimDict {
      */
     pub(crate) fn entries_array(&self, interpreter: &Interpreter) -> &'static [DictEntry] {
         unsafe {
-            let u64_slice = &interpreter.mem.mem[usize::from(self.entries)
+            let u64_slice = &interpreter.mem.mem()[usize::from(self.entries)
                 ..usize::from(self.entries) + 3 * (self.entry_count as usize)];
             std::slice::from_raw_parts(u64_slice.as_ptr() as *const DictEntry, u64_slice.len() / 3)
         }
@@ -1175,8 +1175,7 @@ impl ShimDict {
      */
     fn entries_mut(&self, interpreter: &mut Interpreter) -> &'static mut [DictEntry] {
         unsafe {
-            let u64_slice = &mut interpreter.mem.mem[usize::from(self.entries)
-                ..usize::from(self.entries) + 3 * self.capacity()];
+            let u64_slice = interpreter.mem.mem_mut(usize::from(self.entries), 3 * self.capacity());
             std::slice::from_raw_parts_mut(
                 u64_slice.as_mut_ptr() as *mut DictEntry,
                 u64_slice.len() / 3,
@@ -1185,13 +1184,14 @@ impl ShimDict {
     }
 
     fn get_entry(&self, interpreter: &Interpreter, idx: usize) -> &DictEntry {
-        unsafe { std::mem::transmute(&interpreter.mem.mem[usize::from(self.entries) + 3 * idx]) }
+        unsafe { &*(interpreter.mem.mem()[usize::from(self.entries) + 3 * idx..].as_ptr() as *const DictEntry) }
     }
 
     #[allow(clippy::mut_from_ref)]
     fn get_entry_mut(&self, interpreter: &mut Interpreter, idx: usize) -> &mut DictEntry {
         unsafe {
-            std::mem::transmute(&mut interpreter.mem.mem[usize::from(self.entries) + 3 * idx])
+            let start = usize::from(self.entries) + 3 * idx;
+            &mut *(interpreter.mem.mem_mut(start, 3).as_mut_ptr() as *mut DictEntry)
         }
     }
 
@@ -1329,17 +1329,17 @@ impl ShimList {
     }
 
     pub fn raw_data<'a>(&self, mem: &'a MMU) -> &'a [u64] {
-        &mem.mem[usize::from(self.data)..usize::from(self.data + self.len)]
+        &mem.mem()[usize::from(self.data)..usize::from(self.data + self.len)]
     }
 
     pub fn get(&self, mem: &MMU, idx: isize) -> Result<ShimValue, String> {
         let idx = self.wrap_idx(idx)?;
-        unsafe { Ok(ShimValue::from_u64(mem.mem[usize::from(self.data) + idx])) }
+        unsafe { Ok(ShimValue::from_u64(mem.mem()[usize::from(self.data) + idx])) }
     }
 
     pub fn set(&self, mem: &mut MMU, idx: isize, value: ShimValue) -> Result<(), String> {
         let idx = self.wrap_idx(idx)?;
-        mem.mem[usize::from(self.data) + idx] = value.to_u64();
+        mem.mem_mut(usize::from(self.data) + idx, 1)[0] = value.to_u64();
         Ok(())
     }
 
@@ -1356,13 +1356,14 @@ impl ShimList {
             let new_data = usize::from(self.data);
 
             for idx in 0..self.len() {
-                mem.mem[new_data + idx] = mem.mem[old_data + idx];
+                let val = mem.mem()[old_data + idx];
+                mem.mem_mut(new_data + idx, 1)[0] = val;
             }
 
             mem.free(old_data.into(), old_capacity.into());
         }
 
-        mem.mem[usize::from(self.data) + self.len()] = val.to_u64();
+        mem.mem_mut(usize::from(self.data) + self.len(), 1)[0] = val.to_u64();
         self.len = (usize::from(self.len) + 1).into();
     }
 }
@@ -1614,8 +1615,8 @@ pub(crate) fn compare_values(
 
             let min_len = len_a.min(len_b);
             for idx in 0..min_len {
-                let item_a = unsafe { ShimValue::from_u64(interpreter.mem.mem[pos_a+idx]) };
-                let item_b = unsafe { ShimValue::from_u64(interpreter.mem.mem[pos_b+idx]) };
+                let item_a = unsafe { ShimValue::from_u64(interpreter.mem.mem()[pos_a+idx]) };
+                let item_b = unsafe { ShimValue::from_u64(interpreter.mem.mem()[pos_b+idx]) };
                 match compare_values(interpreter, &item_a, &item_b)? {
                     Ordering::Equal => continue,
                     other => return Ok(other),

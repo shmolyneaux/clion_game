@@ -36,6 +36,7 @@ impl std::fmt::Debug for u24 {
     }
 }
 pub(crate) const MAX_U24: u32 = 0xFFFFFF;
+pub(crate) const PAGE_SIZE: usize = 64;
 
 impl From<usize> for u24 {
     fn from(val: usize) -> Self {
@@ -194,10 +195,9 @@ unsafe impl Sync for NativeTypeInfo {}
 #[cfg_attr(feature = "facet", derive(Facet))]
 pub struct MMU {
     // This is the raw memory managed by the MMU
-    #[cfg(feature = "dev")]
-    pub mem: Vec<u64>,
-    #[cfg(not(feature = "dev"))]
     mem: Vec<u64>,
+    // Dirty bitmask: each bit represents a PAGE_SIZE-word page.
+    dirty: Vec<u64>,
 
     // This is a list of chunks of free memory
     // The first value is the position in words
@@ -244,8 +244,10 @@ impl MMU {
         // This ensures no allocation ever returns position 0, which is used
         // as a "null" / "no scope" sentinel by consumers.
         let free_list = vec![FreeBlock::new(1u32.into(), word_count - u24::from(1u32))];
+        let dirty = vec![0u64; usize::from(word_count).div_ceil(PAGE_SIZE * 64)];
         Self {
             mem,
+            dirty,
             free_list,
             native_type_ids: HashMap::new(),
             native_type_registry: Vec::new(),
@@ -258,6 +260,34 @@ impl MMU {
     }
     */
 
+    pub fn mem(&self) -> &[u64] {
+        &self.mem
+    }
+
+    pub fn mem_mut(&mut self, start: usize, len: usize) -> &mut [u64] {
+        self.mark_dirty_range(start, start + len);
+        &mut self.mem[start..start + len]
+    }
+
+    fn mark_dirty_range(&mut self, start: usize, end: usize) {
+        if start >= end {
+            return;
+        }
+        let first_page = start / PAGE_SIZE;
+        let last_page = (end - 1) / PAGE_SIZE;
+        for page in first_page..=last_page {
+            self.dirty[page / 64] |= 1u64 << (page % 64);
+        }
+    }
+
+    fn clear_dirty_range(&mut self, start: usize, end: usize) {
+        let first_full_page = start.div_ceil(PAGE_SIZE);
+        let last_full_page = end / PAGE_SIZE;
+        for page in first_full_page..last_full_page {
+            self.dirty[page / 64] &= !(1u64 << (page % 64));
+        }
+    }
+
     pub(crate) unsafe fn get<T: 'static>(&self, word: u24) -> &T {
         unsafe {
             let ptr: *const T = &self.mem[usize::from(word)] as *const u64 as *const T;
@@ -265,9 +295,20 @@ impl MMU {
         }
     }
 
+    /// Like `get_mut` but returns a raw pointer so the MMU borrow is released
+    /// immediately. Callers that need to reborrow the MMU after obtaining a
+    /// mutable reference into it must use this instead of `get_mut`.
+    pub(crate) fn get_ptr_mut<T>(&mut self, word: u24) -> *mut T {
+        let word_usize = usize::from(word);
+        self.mark_dirty_range(word_usize, word_usize + std::mem::size_of::<T>().div_ceil(8));
+        self.mem.as_mut_ptr().wrapping_add(word_usize) as *mut T
+    }
+
     pub(crate) unsafe fn get_mut<T>(&mut self, word: u24) -> &mut T {
+        let word_usize = usize::from(word);
+        self.mark_dirty_range(word_usize, word_usize + std::mem::size_of::<T>().div_ceil(8));
         unsafe {
-            let ptr: *mut T = &mut self.mem[usize::from(word)] as *mut u64 as *mut T;
+            let ptr: *mut T = &mut self.mem[word_usize] as *mut u64 as *mut T;
             &mut *ptr
         }
     }
@@ -341,6 +382,7 @@ impl MMU {
                 // There are further enhancements if we split things into buckets,
                 // but we can keep things simple for now.
 
+                self.mark_dirty_range(usize::from(returned_pos), usize::from(returned_pos) + usize::from(words));
                 return returned_pos;
             }
         }
@@ -363,6 +405,8 @@ impl MMU {
         if u32::from(pos) == 0 || u32::from(size) == 0 {
             return;
         }
+
+        self.clear_dirty_range(usize::from(pos), usize::from(pos) + usize::from(size));
 
         // eprintln!("Free {}: {}", usize::from(size.0), usize::from(pos));
 

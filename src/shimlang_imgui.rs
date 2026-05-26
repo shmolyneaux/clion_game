@@ -103,7 +103,7 @@ impl Navigation {
             );
 
             igText(
-                CString::new(format!("Mem size is {}", interpreter.mem.mem.len()))
+                CString::new(format!("Mem size is {}", interpreter.mem.mem().len()))
                     .unwrap()
                     .as_ptr(),
             );
@@ -134,7 +134,7 @@ impl Navigation {
             // Memory viewer
 
             igText(
-                CString::new(format!("Mem size is {}", interpreter.mem.mem.len()))
+                CString::new(format!("Mem size is {}", interpreter.mem.mem().len()))
                     .unwrap()
                     .as_ptr(),
             );
@@ -156,7 +156,7 @@ impl Navigation {
             let mem_end: usize = if let Some(block) = interpreter.mem.free_list.last() {
                 block.pos.into()
             } else {
-                interpreter.mem.mem.len()
+                interpreter.mem.mem().len()
             };
 
             if (self.memory_page + 1) * (page_size as u32) < mem_end as u32 {
@@ -188,7 +188,7 @@ impl Navigation {
             let cell_size = 16.0;
             for (relative_idx, x) in interpreter
                 .mem
-                .mem
+                .mem()
                 .iter()
                 .skip(item_offset)
                 .take(page_size)

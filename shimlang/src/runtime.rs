@@ -71,7 +71,7 @@ impl EnvScope {
         }
         let start = usize::from(self.data);
         let word_count = (self.used as usize).div_ceil(8);
-        let u64_slice = &mem.mem[start..start + word_count];
+        let u64_slice = &mem.mem()[start..start + word_count];
         let ptr = u64_slice.as_ptr() as *const u8;
         unsafe { std::slice::from_raw_parts(ptr, self.used as usize) }
     }
@@ -81,7 +81,7 @@ impl EnvScope {
     /// reference is obtained via raw pointer.
     unsafe fn raw_bytes_mut_from(mem: &mut MMU, data: u24, capacity: u32) -> &mut [u8] {
         let start = usize::from(data);
-        let u64_slice = &mut mem.mem[start..start + capacity as usize];
+        let u64_slice = mem.mem_mut(start, capacity as usize);
         let ptr = u64_slice.as_mut_ptr() as *mut u8;
         unsafe { std::slice::from_raw_parts_mut(ptr, capacity as usize * 8) }
     }
@@ -120,9 +120,10 @@ impl EnvScope {
             let new_start = usize::from(new_data);
             let old_word_count = (used as usize).div_ceil(8);
             unsafe {
+                let base = mem.mem().as_ptr() as *mut u64;
                 std::ptr::copy_nonoverlapping(
-                    mem.mem.as_ptr().add(old_start),
-                    mem.mem.as_mut_ptr().add(new_start),
+                    base.add(old_start),
+                    base.add(new_start),
                     old_word_count,
                 );
             }
@@ -260,9 +261,10 @@ impl Environment {
 
         // Read current scope header via raw pointer to avoid borrow issues
         let (data, capacity, used) = unsafe {
-            let scope_ptr: *mut EnvScope = interpreter.mem.mem
-                [usize::from(u24::from(self.current_scope))..]
-                .as_mut_ptr() as *mut EnvScope;
+            let scope_ptr: *mut EnvScope = interpreter.mem.mem_mut(
+                usize::from(u24::from(self.current_scope)),
+                std::mem::size_of::<EnvScope>().div_ceil(8),
+            ).as_mut_ptr() as *mut EnvScope;
             ((*scope_ptr).data, (*scope_ptr).capacity, (*scope_ptr).used)
         };
 
@@ -289,9 +291,10 @@ impl Environment {
 
         // Update scope header (data/capacity may have changed)
         unsafe {
-            let scope_ptr: *mut EnvScope = interpreter.mem.mem
-                [usize::from(u24::from(self.current_scope))..]
-                .as_mut_ptr() as *mut EnvScope;
+            let scope_ptr: *mut EnvScope = interpreter.mem.mem_mut(
+                usize::from(u24::from(self.current_scope)),
+                std::mem::size_of::<EnvScope>().div_ceil(8),
+            ).as_mut_ptr() as *mut EnvScope;
             (*scope_ptr).data = data;
             (*scope_ptr).capacity = capacity;
         }
@@ -315,9 +318,10 @@ impl Environment {
 
         // Update used in scope header
         unsafe {
-            let scope_ptr: *mut EnvScope = interpreter.mem.mem
-                [usize::from(u24::from(self.current_scope))..]
-                .as_mut_ptr() as *mut EnvScope;
+            let scope_ptr: *mut EnvScope = interpreter.mem.mem_mut(
+                usize::from(u24::from(self.current_scope)),
+                std::mem::size_of::<EnvScope>().div_ceil(8),
+            ).as_mut_ptr() as *mut EnvScope;
             (*scope_ptr).used = new_used as u32;
         }
     }
@@ -679,9 +683,7 @@ impl<'a> ArgUnpacker<'a> {
             .ok_or_else(|| format!("Missing required argument: '{}'", debug_u8s(name)))?
         {
             ShimValue::List(position) => unsafe {
-                Ok(std::mem::transmute::<&mut u64, &mut ShimList>(
-                    &mut interpreter.mem.mem[usize::from(position)],
-                ))
+                Ok(std::mem::transmute(interpreter.mem.get_mut::<ShimList>(position)))
             },
             _ => Err(format!("Argument {} is not a list", debug_u8s(name))),
         }
@@ -869,7 +871,7 @@ impl ShimValue {
                 let len = usize::from(*len);
                 let pos = usize::from(*pos);
                 for idx in 0..len {
-                    let item = unsafe { ShimValue::from_u64(interpreter.mem.mem[pos+idx]) };
+                    let item = unsafe { ShimValue::from_u64(interpreter.mem.mem()[pos+idx]) };
                     hash = fnv1a_hash_extend(hash, &item.hash(interpreter)?.to_be_bytes());
                 }
 
@@ -907,11 +909,7 @@ impl ShimValue {
                         type_name::<T>()
                     ));
                 }
-                Ok(unsafe {
-                    let ptr: *mut T =
-                        &mut interpreter.mem.mem[usize::from(*position)] as *mut u64 as *mut T;
-                    &mut *ptr
-                })
+                Ok(unsafe { &mut *interpreter.mem.get_ptr_mut::<T>(*position) })
             }
             _ => Err(format!(
                 "Can't try_into non-native {}",
@@ -933,8 +931,8 @@ impl ShimValue {
             }
             ShimValue::BoundMethod(pos) => {
                 let pos: usize = (*pos).into();
-                let obj = unsafe { ShimValue::from_u64(interpreter.mem.mem[pos]) };
-                let fn_pos_u64: u64 = interpreter.mem.mem[pos + 1];
+                let obj = unsafe { ShimValue::from_u64(interpreter.mem.mem()[pos]) };
+                let fn_pos_u64: u64 = interpreter.mem.mem()[pos + 1];
                 let fn_pos: u24 = u24::from(fn_pos_u64);
                 // push struct pos to start of arg list then return the pc of the method
                 args.args.insert(0, obj);
@@ -967,8 +965,12 @@ impl ShimValue {
                 let new_pos = alloc!(interpreter.mem, word_count, "Struct instantiation");
 
                 // The remaining words get copies of the arguments to the initializer
-                for (idx, arg) in args.args.iter().enumerate() {
-                    interpreter.mem.mem[usize::from(new_pos) + idx] = arg.to_u64();
+                {
+                    let args_len = args.args.len();
+                    let slice = interpreter.mem.mem_mut(usize::from(new_pos), args_len);
+                    for (idx, arg) in args.args.iter().enumerate() {
+                        slice[idx] = arg.to_u64();
+                    }
                 }
 
                 Ok(CallResult::ReturnValue(ShimValue::Struct(
@@ -1096,7 +1098,7 @@ impl ShimValue {
                     let vtable =
                         interpreter.mem.native_type_registry[usize::from(*type_idx)].vtable;
                     let data_ptr =
-                        interpreter.mem.mem.as_ptr().add(usize::from(*position)) as *const ();
+                        interpreter.mem.mem().as_ptr().add(usize::from(*position)) as *const ();
                     let fat_ptr: (*const (), *const ()) = (data_ptr, vtable);
                     let native_ptr: *const dyn ShimNative = std::mem::transmute(fat_ptr);
                     (*native_ptr).get_attr(self, interpreter, ident)?
@@ -1240,10 +1242,7 @@ impl ShimValue {
     pub fn dict_mut(&self, interpreter: &mut Interpreter) -> Result<&mut ShimDict, String> {
         match self {
             ShimValue::Dict(position) => {
-                let dict: &mut ShimDict = unsafe {
-                    std::mem::transmute(&mut interpreter.mem.mem[usize::from(*position)])
-                };
-                Ok(dict)
+                Ok(unsafe { &mut *interpreter.mem.get_ptr_mut(*position) })
             }
             _ => Err("Not a dict".to_string()),
         }
@@ -1251,21 +1250,18 @@ impl ShimValue {
 
     pub fn dict(&self, interpreter: &Interpreter) -> Result<&ShimDict, String> {
         match self {
-            ShimValue::Dict(position) => {
-                let dict: &ShimDict =
-                    unsafe { std::mem::transmute(&interpreter.mem.mem[usize::from(*position)]) };
-                Ok(dict)
-            }
+            ShimValue::Dict(position) => unsafe {
+                let ptr = interpreter.mem.mem().as_ptr().add(usize::from(*position)) as *const ShimDict;
+                Ok(&*ptr)
+            },
             _ => Err("Not a dict".to_string()),
         }
     }
 
     pub fn list_mut(&self, interpreter: &mut Interpreter) -> Result<&mut ShimList, String> {
         match self {
-            ShimValue::List(position) => unsafe {
-                Ok(std::mem::transmute::<&mut u64, &mut ShimList>(
-                    &mut interpreter.mem.mem[usize::from(*position)],
-                ))
+            ShimValue::List(position) => {
+                Ok(unsafe { &mut *interpreter.mem.get_ptr_mut(*position) })
             },
             _ => Err("Not a list".to_string()),
         }
@@ -1274,7 +1270,8 @@ impl ShimValue {
     pub fn list_from_mem(&self, mem: &MMU) -> Result<&ShimList, String> {
         match self {
             ShimValue::List(position) => unsafe {
-                Ok(std::mem::transmute::<&u64, &ShimList>(&mem.mem[usize::from(*position)]))
+                let ptr = mem.mem().as_ptr().add(usize::from(*position)) as *const ShimList;
+                Ok(&*ptr)
             },
             _ => Err("Not a list".to_string()),
         }
@@ -1291,7 +1288,7 @@ impl ShimValue {
                 let position: usize = (*position).into();
                 let vtable = mem.native_type_registry[type_idx].vtable;
                 unsafe {
-                    let data_ptr = &mem.mem[position] as *const u64 as *const ();
+                    let data_ptr = &mem.mem()[position] as *const u64 as *const ();
                     let fat_ptr: (*const (), *const ()) = (data_ptr, vtable);
                     Ok(std::mem::transmute::<(*const (), *const ()), &dyn ShimNative>(fat_ptr))
                 }
@@ -1311,7 +1308,8 @@ impl ShimValue {
                 let position: usize = (*position).into();
                 let vtable = mem.native_type_registry[type_idx].vtable;
                 unsafe {
-                    let data_ptr = &mut mem.mem[position] as *mut u64 as *mut ();
+                    let word_count = mem.native_type_registry[type_idx].word_count;
+                    let data_ptr = mem.mem_mut(position, word_count).as_mut_ptr() as *mut ();
                     let fat_ptr: (*mut (), *const ()) = (data_ptr, vtable);
                     Ok(std::mem::transmute::<
                         (*mut (), *const ()),
@@ -1343,7 +1341,7 @@ impl ShimValue {
                 let total_len: usize = (offset + len).div_ceil(8);
 
                 let bytes: &[u8] = unsafe {
-                    let u64_slice = &mem.mem[position_usize..(position_usize + total_len)];
+                    let u64_slice = &mem.mem()[position_usize..(position_usize + total_len)];
                     std::slice::from_raw_parts((u64_slice.as_ptr() as *const u8).add(offset), len)
                 };
                 Ok(bytes)
@@ -1384,8 +1382,7 @@ impl ShimValue {
                 Ok(interpreter.mem.alloc_str(&[b]))
             }
             (ShimValue::List(position), ShimValue::Integer(idx)) => unsafe {
-                let lst: &ShimList =
-                    std::mem::transmute(&interpreter.mem.mem[usize::from(*position)]);
+                let lst: &ShimList = interpreter.mem.get(*position);
                 lst.get(&interpreter.mem, *idx as isize)
             },
             (ShimValue::Tuple(len, position), ShimValue::Integer(idx)) => unsafe {
@@ -1393,7 +1390,7 @@ impl ShimValue {
                 if *idx < 0 || (*idx as usize) >= len_usize {
                     return Err(format!("Index {idx} out of range of {}-tuple", len_usize));
                 }
-                Ok(ShimValue::from_u64(interpreter.mem.mem[usize::from(*position) + (*idx as usize)]))
+                Ok(ShimValue::from_u64(interpreter.mem.mem()[usize::from(*position) + (*idx as usize)]))
             },
             (ShimValue::Dict(_), some_key) => {
                 let dict = self.dict_mut(interpreter)?;
@@ -1417,16 +1414,12 @@ impl ShimValue {
         match (self, index) {
             (ShimValue::List(position), ShimValue::Integer(index)) => {
                 let index = *index as usize;
-                let list: &mut ShimList = unsafe {
-                    std::mem::transmute(&mut interpreter.mem.mem[usize::from(*position)])
-                };
+                let list: &mut ShimList = unsafe { &mut *interpreter.mem.get_ptr_mut(*position) };
                 list.set(&mut interpreter.mem, index as isize, *value)?;
                 Ok(())
             }
             (ShimValue::Dict(position), index) => {
-                let dict: &mut ShimDict = unsafe {
-                    std::mem::transmute(&mut interpreter.mem.mem[usize::from(*position)])
-                };
+                let dict: &mut ShimDict = unsafe { &mut *interpreter.mem.get_ptr_mut(*position) };
 
                 dict.set(interpreter, *index, *value)
             }
@@ -1478,7 +1471,7 @@ impl ShimValue {
                         out.push(',');
                         out.push(' ');
                     }
-                    let item = unsafe { ShimValue::from_u64(mem.mem[pos+idx]) };
+                    let item = unsafe { ShimValue::from_u64(mem.mem()[pos+idx]) };
                     out.push_str(&item.to_string_mem(mem));
                 }
                 if len == 1 {
@@ -1667,8 +1660,8 @@ impl ShimValue {
 
                 let len = len_a;
                 for idx in 0..len {
-                    let item_a = unsafe { ShimValue::from_u64(interpreter.mem.mem[pos_a+idx]) };
-                    let item_b = unsafe { ShimValue::from_u64(interpreter.mem.mem[pos_b+idx]) };
+                    let item_a = unsafe { ShimValue::from_u64(interpreter.mem.mem()[pos_a+idx]) };
+                    let item_b = unsafe { ShimValue::from_u64(interpreter.mem.mem()[pos_b+idx]) };
                     if !item_a.equal_inner(interpreter, &item_b)? {
                         return Ok(false);
                     }
@@ -1685,11 +1678,11 @@ impl ShimValue {
                 let pos_a: usize = (*pos_a).into();
                 let pos_b: usize = (*pos_b).into();
 
-                let obj_a = unsafe { ShimValue::from_u64(interpreter.mem.mem[pos_a]) };
-                let fn_a: u64 = interpreter.mem.mem[pos_a + 1];
+                let obj_a = unsafe { ShimValue::from_u64(interpreter.mem.mem()[pos_a]) };
+                let fn_a: u64 = interpreter.mem.mem()[pos_a + 1];
 
-                let obj_b = unsafe { ShimValue::from_u64(interpreter.mem.mem[pos_b]) };
-                let fn_b: u64 = interpreter.mem.mem[pos_b + 1];
+                let obj_b = unsafe { ShimValue::from_u64(interpreter.mem.mem()[pos_b]) };
+                let fn_b: u64 = interpreter.mem.mem()[pos_b + 1];
 
                 Ok(
                     match (obj_a, obj_b) {
@@ -1820,11 +1813,7 @@ impl ShimValue {
     ) -> Result<ShimValue, String> {
         match self {
             ShimValue::Dict(position) => {
-                let dict: &mut ShimDict = unsafe {
-                    let ptr: &mut ShimDict =
-                        std::mem::transmute(&mut interpreter.mem.mem[usize::from(*position)]);
-                    ptr
-                };
+                let dict: &mut ShimDict = unsafe { &mut *interpreter.mem.get_ptr_mut(*position) };
 
                 if dict.get(interpreter, *some_key).is_ok() {
                     Ok(ShimValue::Bool(true))
@@ -1960,7 +1949,7 @@ impl ShimValue {
                     let vtable =
                         interpreter.mem.native_type_registry[usize::from(*type_idx)].vtable;
                     let data_ptr =
-                        interpreter.mem.mem.as_ptr().add(usize::from(*position)) as *const ();
+                        interpreter.mem.mem().as_ptr().add(usize::from(*position)) as *const ();
                     let fat_ptr: (*const (), *const ()) = (data_ptr, vtable);
                     let native_ptr: *const dyn ShimNative = std::mem::transmute(fat_ptr);
                     (*native_ptr).set_attr(interpreter, ident, val)
@@ -2025,7 +2014,7 @@ impl Interpreter {
         let mut idx = 0;
         for block in self.mem.free_list.iter() {
             while idx < block.pos.into() {
-                println!("{:06}: {:016x}", idx, self.mem.mem[idx]);
+                println!("{:06}: {:016x}", idx, self.mem.mem()[idx]);
                 idx += 1;
                 count += 1
             }
@@ -2793,7 +2782,7 @@ impl Interpreter {
                             }
                             let pos = usize::from(pos);
                             for idx in (0..inst_len).rev() {
-                                let item = unsafe { ShimValue::from_u64(self.mem.mem[pos+idx]) };
+                                let item = unsafe { ShimValue::from_u64(self.mem.mem()[pos+idx]) };
                                 stack.push(item);
                             }
                         }
@@ -2820,7 +2809,8 @@ impl Interpreter {
                     let len = ((bytes[pc + 1] as usize) << 8) + bytes[pc + 2] as usize;
 
                     let lst_val = self.mem.alloc_list();
-                    let lst = lst_val.list_mut(self)?;
+                    let lst_pos = match lst_val { ShimValue::List(p) => p, _ => unreachable!() };
+                    let lst: &mut ShimList = unsafe { &mut *self.mem.get_ptr_mut(lst_pos) };
                     for item in stack.drain(stack.len() - len..) {
                         lst.push(&mut self.mem, item);
                     }
@@ -2894,8 +2884,7 @@ impl Interpreter {
                     );
 
                     unsafe {
-                        let ptr: *mut StructDef =
-                            &mut self.mem.mem[usize::from(pos)] as *mut u64 as *mut StructDef;
+                        let ptr: *mut StructDef = self.mem.get_mut::<StructDef>(pos) as *mut StructDef;
                         ptr.write(StructDef {
                             name,
                             member_count,
