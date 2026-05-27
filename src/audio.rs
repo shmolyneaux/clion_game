@@ -476,11 +476,12 @@ fn apply_command(m: &mut Mixer, cmd: SoundCmd) {
             if let Some(b) = m.buses.get_mut(bus as usize) {
                 let ramp_samples = secs_to_samples(ramp);
                 match b.effects.iter_mut().find_map(|e| match e {
-                    Effect::LowPass { cutoff, q, .. } => Some((cutoff, q)),
+                    Effect::LowPass { cutoff, q, fading_out, .. } => Some((cutoff, q, fading_out)),
                 }) {
-                    Some((cr, qr)) => {
+                    Some((cr, qr, fo)) => {
                         cr.set_target(cutoff.ln(), ramp_samples);
                         *qr = q;
+                        *fo = false;
                     }
                     None => {
                         let start = if ramp_samples > 0 { SAMPLE_RATE as f32 * 0.49 } else { cutoff };
