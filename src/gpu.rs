@@ -616,7 +616,6 @@ impl ShaderProgram {
     pub fn uniform_location(&self, uniform_name: &CStr) -> gl::types::GLint {
         unsafe {
             let mut cache = self.uniform_location_cache.as_mut_unchecked();
-            let zone = zone_scoped!("ShaderProgram::uniform_location");
             let s: &str = uniform_name.to_str().unwrap();
             if let Some(loc) = cache.get(s) {
                 *loc
@@ -1004,11 +1003,10 @@ impl StaticMesh {
 
             let mut texture_unit = 0;
             {
-                //let _zone = zone_scoped!("iterate self.shader.uniforms");
+                let _zone = zone_scoped!("iterate self.shader.uniforms");
                 for uniform_info in self.shader.uniforms() {
                     {
                         let loc = {
-                            //let zone = zone_scoped!("self.shader.uniform_location");
                             self.shader
                                 .uniform_location(&CString::new(uniform_info.name.clone()).unwrap())
                         };
@@ -1020,23 +1018,18 @@ impl StaticMesh {
                                 .unwrap_or_else(|| panic!("Could not get uniform {}", &uniform_info.name)),
                         ) {
                             (ShaderDataType::Float, ShaderValue::Float(v)) => {
-                                let zone = zone_scoped!("gl::Uniform1f");
                                 gl::Uniform1f(loc, *v);
                             }
                             (ShaderDataType::Vec2, ShaderValue::Vec2(v)) => {
-                                let zone = zone_scoped!("gl::Uniform2f");
                                 gl::Uniform2f(loc, v.x, v.y);
                             }
                             (ShaderDataType::Vec3, ShaderValue::Vec3(v)) => {
-                                let zone = zone_scoped!("gl::Uniform3f");
                                 gl::Uniform3f(loc, v.x, v.y, v.z);
                             }
                             (ShaderDataType::Vec4, ShaderValue::Vec4(v)) => {
-                                let zone = zone_scoped!("gl::Uniform4f");
                                 gl::Uniform4f(loc, v.x, v.y, v.z, v.w);
                             }
                             (ShaderDataType::Mat4, ShaderValue::Mat4(v)) => {
-                                let zone = zone_scoped!("gl::UniformMatrix4fv");
                                 gl::UniformMatrix4fv(
                                     loc,
                                     1,
@@ -1045,7 +1038,6 @@ impl StaticMesh {
                                 );
                             }
                             (ShaderDataType::Sampler2D, ShaderValue::Sampler2D(v)) => {
-                                let zone = zone_scoped!("gl::Sampler2D");
                                 gl::ActiveTexture(match texture_unit {
                                     0 => gl::TEXTURE0,
                                     1 => gl::TEXTURE1,
