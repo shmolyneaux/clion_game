@@ -52,6 +52,10 @@ impl Ramp {
         Self { current: value, target: value, step: 0.0, remaining: 0 }
     }
 
+    fn is_settled(&self) -> bool {
+        self.remaining == 0
+    }
+
     fn set_target(&mut self, target: f32, ramp_samples: u64) {
         self.target = target;
         if ramp_samples == 0 {
@@ -172,13 +176,13 @@ impl Biquad {
 
 /// A per-bus DSP effect. Processes an interleaved stereo buffer in place.
 enum Effect {
-    LowPass { biquad: Biquad, cutoff: Ramp, q: f32 },
+    LowPass { biquad: Biquad, cutoff: Ramp, q: f32, fading_out: bool },
 }
 
 impl Effect {
     fn process(&mut self, buffer: &mut [f32]) {
         match self {
-            Effect::LowPass { biquad, cutoff, q } => {
+            Effect::LowPass { biquad, cutoff, q, .. } => {
                 let frames = buffer.len() / 2;
                 let cur = cutoff.advance(frames as u64).exp();
                 biquad.set_low_pass(cur, *q);
@@ -187,6 +191,22 @@ impl Effect {
                     buffer[f * 2 + 1] = biquad.process_sample(buffer[f * 2 + 1], 1);
                 }
             }
+        }
+    }
+
+    /// Ramp toward a passthrough state. The effect removes itself once settled.
+    fn fade_out(&mut self, ramp_samples: u64) {
+        match self {
+            Effect::LowPass { cutoff, fading_out, .. } => {
+                cutoff.set_target((SAMPLE_RATE as f32 * 0.49).ln(), ramp_samples);
+                *fading_out = true;
+            }
+        }
+    }
+
+    fn is_faded_out(&self) -> bool {
+        match self {
+            Effect::LowPass { fading_out, cutoff, .. } => *fading_out && cutoff.is_settled(),
         }
     }
 }
@@ -470,6 +490,7 @@ fn apply_command(m: &mut Mixer, cmd: SoundCmd) {
                             biquad: Biquad::low_pass(start, q),
                             cutoff: cutoff_ramp,
                             q,
+                            fading_out: false,
                         });
                     }
                 }
@@ -478,6 +499,27 @@ fn apply_command(m: &mut Mixer, cmd: SoundCmd) {
         SoundCmd::ClearBusEffects { bus } => {
             if let Some(b) = m.buses.get_mut(bus as usize) {
                 b.effects.clear();
+            }
+        }
+        SoundCmd::ResetAudio { fade_secs } => {
+            let fade = secs_to_samples(fade_secs).max(PROC_FADE);
+            for voice in m.voices.iter_mut() {
+                if voice.delay_remaining > 0 {
+                    voice.total_samples = 0;
+                    voice.position = 0;
+                } else {
+                    match &mut voice.envelope {
+                        Envelope::FadeInOut { fade_out, .. } => *fade_out = fade,
+                        Envelope::Adsr { release, .. } => *release = fade,
+                    }
+                    voice.total_samples = voice.position + fade;
+                }
+            }
+            for bus in m.buses.iter_mut() {
+                bus.gain.set_target(1.0, fade);
+                for fx in bus.effects.iter_mut() {
+                    fx.fade_out(fade);
+                }
             }
         }
     }
@@ -536,9 +578,10 @@ pub fn mix(stream: &mut [i16]) {
             bus.gain.advance(frames as u64);
             continue;
         }
-        for fx in bus.effects.iter_mut() {
+        bus.effects.retain_mut(|fx| {
             fx.process(&mut bus.accum);
-        }
+            !fx.is_faded_out()
+        });
         for f in 0..frames {
             let g = bus.gain.next();
             master[f * 2] += bus.accum[f * 2] * g;

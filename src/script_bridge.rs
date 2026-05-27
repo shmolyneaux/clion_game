@@ -320,6 +320,9 @@ pub enum SoundCmd {
     ClearBusEffects {
         bus: u32,
     },
+    ResetAudio {
+        fade_secs: f32,
+    },
 }
 
 /// Number of mixer buses. Buses are addressed 0..NUM_BUSES.
@@ -1272,6 +1275,17 @@ fn shim_clear_bus_effects(interpreter: &mut Interpreter, args: &ArgBundle) -> Re
     Ok(ShimValue::None)
 }
 
+fn shim_reset_audio(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let fade_secs = unpacker.optional_number(b"fade", 0.05)?.max(0.0);
+    unpacker.end()?;
+    interpreter
+        .fetch_mut::<SoundList>()
+        .items
+        .push(SoundCmd::ResetAudio { fade_secs });
+    Ok(ShimValue::None)
+}
+
 fn shim_window_size(
     interpreter: &mut Interpreter,
     args: &ArgBundle,
@@ -1326,6 +1340,7 @@ fn load_script(bytes: &[u8]) -> Result<(Interpreter, Environment, ShimValue), St
         (b"set_bus_gain", shim_set_bus_gain),
         (b"set_bus_lowpass", shim_set_bus_lowpass),
         (b"clear_bus_effects", shim_clear_bus_effects),
+        (b"reset_audio", shim_reset_audio),
     ];
     for (name, func) in builtins {
         let position = interpreter.mem.alloc_and_set(
@@ -1457,6 +1472,7 @@ impl ScriptBridge {
                     ScriptWatcherMessage::Loaded(interpreter, env, loop_fn) => {
                         self.state = BridgeState::Paused(Box::new(interpreter), env, loop_fn);
                         self.interpreter_errors = Vec::new();
+                        crate::audio::submit(std::iter::once(SoundCmd::ResetAudio { fade_secs: 0.05 }));
                     }
                     ScriptWatcherMessage::Error(msg) => {
                         self.interpreter_errors.push(msg);
