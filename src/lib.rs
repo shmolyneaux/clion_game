@@ -253,6 +253,7 @@ impl State {
         &mut self,
         ctx: &mut HashMap<String, ShaderValue>,
     ) {
+        let _zone = zone_scoped!("handle_draw_list");
         unsafe {
             gl::Disable(gl::DEPTH_TEST);
             gl::Enable(gl::BLEND);
@@ -849,7 +850,10 @@ fn frame(state: &mut State, delta: f32) {
             new_perf.gc = state.script_bridge.last_gc_time;
             new_perf.script = (script_total - new_perf.gc).max(0.0);
 
-            audio::submit(state.script_bridge.sound_list.drain(..));
+            {
+                let _zone = zone_scoped!("audio::submit");
+                audio::submit(state.script_bridge.sound_list.drain(..));
+            }
         }
 
         update_keys(state);
@@ -924,10 +928,13 @@ fn frame(state: &mut State, delta: f32) {
             );
         }
 
-        log_opengl_errors!();
+        //log_opengl_errors!();
 
-        // The log window only displays if it has content
-        draw_log_window();
+        {
+            let _zone = zone_scoped!("draw log window");
+            // The log window only displays if it has content
+            draw_log_window();
+        }
 
         if state.frame_num == 0 {
             println!("Finished first frame");
@@ -954,6 +961,7 @@ pub unsafe extern "C" fn rust_audio_callback(
     stream: *mut u8,
     len: c_int,
 ) {
+    let _zone = zone_scoped!("Audio Callback");
     let sample_count = (len as usize) / std::mem::size_of::<i16>();
     let out = unsafe { slice::from_raw_parts_mut(stream as *mut i16, sample_count) };
     audio::mix(out);
