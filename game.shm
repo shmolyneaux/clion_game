@@ -119,11 +119,14 @@ let HALF = 2.0;
 struct Note {
     frequency,
     period,
+    instrument=1, // Clarinet
 }
 
 struct Wait {
     period,
 }
+
+let BASS_INSTRUMENT = 3;
 
 // Korobeiniki ("Tetris Theme A"). The melody and a root bass line are merged
 // into a single event stream: a `Note` triggers a sound without advancing time,
@@ -133,132 +136,132 @@ struct Wait {
 let song = [
     // --- Section A, phrase 1 ---
     // m1: Em
-    Note(E5, QUARTER), Note(E2, HALF),
+    Note(E5, QUARTER), Note(E2, HALF, BASS_INSTRUMENT),
     Wait(QUARTER),
     Note(B4, EIGHTH),
     Wait(EIGHTH),
     Note(C5, EIGHTH),
     Wait(EIGHTH),
-    Note(D5, QUARTER), Note(E2, HALF),
+    Note(D5, QUARTER), Note(E2, HALF, BASS_INSTRUMENT),
     Wait(QUARTER),
     Note(C5, EIGHTH),
     Wait(EIGHTH),
     Note(B4, EIGHTH),
     Wait(EIGHTH),
     // m2: Am
-    Note(A4, QUARTER), Note(A2, HALF),
+    Note(A4, QUARTER), Note(A2, HALF, BASS_INSTRUMENT),
     Wait(QUARTER),
     Note(A4, EIGHTH),
     Wait(EIGHTH),
     Note(C5, EIGHTH),
     Wait(EIGHTH),
-    Note(E5, QUARTER), Note(A2, HALF),
+    Note(E5, QUARTER), Note(A2, HALF, BASS_INSTRUMENT),
     Wait(QUARTER),
     Note(D5, EIGHTH),
     Wait(EIGHTH),
     Note(C5, EIGHTH),
     Wait(EIGHTH),
     // m3: B
-    Note(B4, DOT_QUARTER), Note(B2, HALF),
+    Note(B4, DOT_QUARTER), Note(B2, HALF, BASS_INSTRUMENT),
     Wait(DOT_QUARTER),
     Note(C5, EIGHTH),
     Wait(EIGHTH),
-    Note(D5, QUARTER), Note(B2, HALF),
+    Note(D5, QUARTER), Note(B2, HALF, BASS_INSTRUMENT),
     Wait(QUARTER),
     Note(E5, QUARTER),
     Wait(QUARTER),
     // m4: Em
-    Note(C5, QUARTER), Note(E2, HALF),
+    Note(C5, QUARTER), Note(E2, HALF, BASS_INSTRUMENT),
     Wait(QUARTER),
     Note(A4, QUARTER),
     Wait(QUARTER),
-    Note(A4, QUARTER), Note(E2, HALF),
+    Note(A4, QUARTER), Note(E2, HALF, BASS_INSTRUMENT),
     Wait(QUARTER),
     Wait(QUARTER),
 
     // --- Section A, phrase 2 ---
     // m5: Dm
-    Note(D5, DOT_QUARTER), Note(D2, HALF),
+    Note(D5, DOT_QUARTER), Note(D2, HALF, BASS_INSTRUMENT),
     Wait(DOT_QUARTER),
     Note(F5, EIGHTH),
     Wait(EIGHTH),
-    Note(A5, QUARTER), Note(D2, HALF),
+    Note(A5, QUARTER), Note(D2, HALF, BASS_INSTRUMENT),
     Wait(QUARTER),
     Note(G5, EIGHTH),
     Wait(EIGHTH),
     Note(F5, EIGHTH),
     Wait(EIGHTH),
     // m6: C
-    Note(E5, DOT_QUARTER), Note(C2, HALF),
+    Note(E5, DOT_QUARTER), Note(C2, HALF, BASS_INSTRUMENT),
     Wait(DOT_QUARTER),
     Note(C5, EIGHTH),
     Wait(EIGHTH),
-    Note(E5, QUARTER), Note(C2, HALF),
+    Note(E5, QUARTER), Note(C2, HALF, BASS_INSTRUMENT),
     Wait(QUARTER),
     Note(D5, EIGHTH),
     Wait(EIGHTH),
     Note(C5, EIGHTH),
     Wait(EIGHTH),
     // m7: B
-    Note(B4, DOT_QUARTER), Note(B2, HALF),
+    Note(B4, DOT_QUARTER), Note(B2, HALF, BASS_INSTRUMENT),
     Wait(DOT_QUARTER),
     Note(C5, EIGHTH),
     Wait(EIGHTH),
-    Note(D5, QUARTER), Note(B2, HALF),
+    Note(D5, QUARTER), Note(B2, HALF, BASS_INSTRUMENT),
     Wait(QUARTER),
     Note(E5, QUARTER),
     Wait(QUARTER),
     // m8: Am -> Em
-    Note(C5, QUARTER), Note(A2, HALF),
+    Note(C5, QUARTER), Note(A2, HALF, BASS_INSTRUMENT),
     Wait(QUARTER),
     Note(A4, QUARTER),
     Wait(QUARTER),
-    Note(A4, QUARTER), Note(E2, HALF),
+    Note(A4, QUARTER), Note(E2, HALF, BASS_INSTRUMENT),
     Wait(QUARTER),
     Wait(QUARTER),
 
     // --- Section B ---
     // b1
-    Note(E5, HALF), Note(E2, HALF),
+    Note(E5, HALF), Note(E2, HALF, BASS_INSTRUMENT),
     Wait(HALF),
-    Note(C5, HALF), Note(C2, HALF),
+    Note(C5, HALF), Note(C2, HALF, BASS_INSTRUMENT),
     Wait(HALF),
     // b2
-    Note(D5, HALF), Note(D2, HALF),
+    Note(D5, HALF), Note(D2, HALF, BASS_INSTRUMENT),
     Wait(HALF),
-    Note(B4, HALF), Note(B2, HALF),
+    Note(B4, HALF), Note(B2, HALF, BASS_INSTRUMENT),
     Wait(HALF),
     // b3
-    Note(C5, HALF), Note(C2, HALF),
+    Note(C5, HALF), Note(C2, HALF, BASS_INSTRUMENT),
     Wait(HALF),
-    Note(A4, HALF), Note(A2, HALF),
+    Note(A4, HALF), Note(A2, HALF, BASS_INSTRUMENT),
     Wait(HALF),
     // b4
-    Note(Gs4, HALF), Note(E2, HALF),
+    Note(Gs4, HALF), Note(E2, HALF, BASS_INSTRUMENT),
     Wait(HALF),
-    Note(B4, HALF), Note(E2, HALF),
+    Note(B4, HALF), Note(E2, HALF, BASS_INSTRUMENT),
     Wait(HALF),
     // b5
-    Note(E5, HALF), Note(E2, HALF),
+    Note(E5, HALF), Note(E2, HALF, BASS_INSTRUMENT),
     Wait(HALF),
-    Note(C5, HALF), Note(C2, HALF),
+    Note(C5, HALF), Note(C2, HALF, BASS_INSTRUMENT),
     Wait(HALF),
     // b6
-    Note(D5, HALF), Note(D2, HALF),
+    Note(D5, HALF), Note(D2, HALF, BASS_INSTRUMENT),
     Wait(HALF),
-    Note(B4, HALF), Note(B2, HALF),
+    Note(B4, HALF), Note(B2, HALF, BASS_INSTRUMENT),
     Wait(HALF),
     // b7
-    Note(C5, QUARTER), Note(A2, HALF),
+    Note(C5, QUARTER), Note(A2, HALF, BASS_INSTRUMENT),
     Wait(QUARTER),
     Note(E5, QUARTER),
     Wait(QUARTER),
-    Note(A5, HALF), Note(A2, HALF),
+    Note(A5, HALF), Note(A2, HALF, BASS_INSTRUMENT),
     Wait(HALF),
     // b8
-    Note(Gs5, HALF), Note(E2, HALF),
+    Note(Gs5, HALF), Note(E2, HALF, BASS_INSTRUMENT),
     Wait(HALF),
-    Note(E2, HALF),
+    Note(E2, HALF, BASS_INSTRUMENT),
     Wait(HALF),
 ];
 let current_note = 0;
@@ -586,9 +589,6 @@ struct Game {
     count = 0,
     bag = new_bag(),
     line_count = 0,
-
-    // Starting tempo
-    tempo = 150,
 
     fn shape_block_offsets(self) {
         shape_block_offsets(self.current_shape, self.shape_rotation)
@@ -1026,7 +1026,7 @@ fn debug_frame_times() {
     );
 }
 
-let song_frame_next_note = 0;
+let song_secs_next_note = 0.0;
 let song_idx = 0;
 let lowpass_cutoff = 44000;
 
@@ -1096,13 +1096,6 @@ fn loop() {
     if key.E.just_pressed {
         show_debug_frame_times = !show_debug_frame_times;
     }
-
-    if key.K.just_pressed_with_repeat {
-        tempo += 1;
-    }
-    if key.J.just_pressed_with_repeat {
-        tempo -= 1;
-    }
     let tempo_bps = tempo/60;
 
     if key.Y.just_pressed {
@@ -1133,15 +1126,16 @@ fn loop() {
     );
 
     if !music_paused {
-        while song_frame_next_note == 0 {
+        while song_secs_next_note <= 1.0/60.0 {
             let action = song[song_idx];
             song_idx += 1;
             song_idx %= song.len();
             if action.__type__ == Wait {
                 let duration = action.period/tempo_bps;
-                song_frame_next_note = (duration*60).round();
+                song_secs_next_note += duration;
             } else if action.__type__ == Note {
-                let instrument = instruments[instrument_names[instrument_num]];
+                let note_delay = (0.0).max(song_secs_next_note);
+                let instrument = instruments[instrument_names[action.instrument]];
                 for harmonic, amp in instrument.harmonics {
                     play_sine(
                         action.frequency*harmonic,
@@ -1152,13 +1146,16 @@ fn loop() {
                         release=instrument.release,
                         amp=amp,
                         bus=MUSIC_BUS,
+                        delay=note_delay,
                     );
                 }
             } else {
                 log_lines.append("Unknown song action \(action)");
+                break;
             }
         }
-        song_frame_next_note -= 1;
+
+        song_secs_next_note -= 1.0/60.0;
     }
 
     for func in tick_fns {
