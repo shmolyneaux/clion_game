@@ -801,7 +801,6 @@ impl<'a> GC<'a> {
         let _zone = zone_scoped!("GC mark");
         unsafe {
             while !vals.is_empty() {
-                let _zone = zone_scoped!("GC mark item");
                 match vals.pop().unwrap() {
                     ShimValue::Integer(_)
                     | ShimValue::Float(_)
