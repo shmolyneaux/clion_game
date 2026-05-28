@@ -15,6 +15,7 @@ glam = "0.30.4"
 png = "0.18.1"
 shimlang = { path = "shimlang" }
 shm-tracy = { path = "shm-tracy" }
+tinyjson = "2.5.1"
 
 [patch.crates-io]
 glam = { path = "glam-rs" }

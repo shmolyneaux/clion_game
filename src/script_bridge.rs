@@ -1,9 +1,10 @@
-use shimlang::ArgBundle;
-use shimlang::runtime::{ArgUnpacker, CallResult, NativeFn};
+use shimlang::{ArgBundle, Ident};
+use shimlang::runtime::{ArgUnpacker, CallResult, NativeFn, StructDef, StructAttribute, ShimFn};
 use shimlang::{Environment, Interpreter, ShimNative, ShimValue, debug_u8s};
 use std::collections::HashSet;
 use std::ffi::CString;
 use std::mem;
+use tinyjson::JsonValue;
 
 use crate::shimlang_imgui;
 //use crate::test_mocks::igBegin;
@@ -1307,6 +1308,296 @@ fn shim_window_size(
     Ok(new_lst_val)
 }
 
+fn shim_save_data(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let data = unpacker.required(b"data")?;
+    let path = unpacker.required(b"path")?.to_string(interpreter);
+    unpacker.end()?;
+
+    let json = value_to_json(interpreter, data)?;
+    let data = json.stringify().unwrap(); // This only fails for NaN and Inf?
+    fs::write(&path, &data).map_err(|e| format!("{e:?}"))?;
+
+    Ok(ShimValue::None)
+}
+
+fn value_to_json(
+    interpreter: &Interpreter,
+    data: ShimValue,
+) -> Result<JsonValue, String> {
+    Ok(
+        JsonValue::Object(
+            match data {
+                ShimValue::None => [
+                    ("type".to_string(), JsonValue::String("None".to_string())),
+                    ("data".to_string(), JsonValue::Null),
+                ].into_iter().collect(),
+                ShimValue::Integer(i) => [
+                    ("type".to_string(), JsonValue::String("int".to_string())),
+                    ("data".to_string(), JsonValue::Number(i as f64)),
+                ].into_iter().collect(),
+                ShimValue::Float(f) => [
+                    ("type".to_string(), JsonValue::String("float".to_string())),
+                    ("data".to_string(), JsonValue::Number(f as f64)),
+                ].into_iter().collect(),
+                ShimValue::Bool(b) => [
+                    ("type".to_string(), JsonValue::String("bool".to_string())),
+                    ("data".to_string(), JsonValue::Boolean(b)),
+                ].into_iter().collect(),
+                s @ ShimValue::String(..) => [
+                    ("type".to_string(), JsonValue::String("str".to_string())),
+                    ("data".to_string(), JsonValue::String(String::from_utf8_lossy(s.string(interpreter)?).into_owned())),
+                ].into_iter().collect(),
+                ShimValue::Tuple(len, pos) => {
+                    let pos = usize::from(pos);
+                    let len = usize::from(len);
+                    let mut lst = Vec::new();
+
+                    for idx in pos..(pos+len) {
+                        unsafe {
+                            lst.push(
+                                value_to_json(
+                                    interpreter,
+                                    ShimValue::from_u64(interpreter.mem.mem()[idx])
+                                )?
+                            );
+                        }
+                    }
+                    [
+                        ("type".to_string(), JsonValue::String("tuple".to_string())),
+                        ("data".to_string(), JsonValue::Array(lst)),
+                    ].into_iter().collect()
+                },
+                lst @ ShimValue::List(u24) => {
+                    let lst = lst.list(interpreter)?;
+                    let mut out = Vec::new();
+
+                    for word in lst.raw_data(&interpreter.mem) {
+                        unsafe {
+                            out.push(
+                                value_to_json(
+                                    interpreter,
+                                    ShimValue::from_u64(*word),
+                                )?
+                            );
+                        }
+                    }
+                    [
+                        ("type".to_string(), JsonValue::String("list".to_string())),
+                        ("data".to_string(), JsonValue::Array(out)),
+                    ].into_iter().collect()
+                },
+                d @ ShimValue::Dict(u24) => {
+                    let d = d.dict(interpreter)?;
+                    // We use a Vec since we want to preserve insertion order and we
+                    // want to have non-string keys
+                    let mut attrs: Vec<JsonValue> = Vec::new();
+                    for entry in d.entries_array(interpreter) {
+                        attrs.push(
+                            JsonValue::Array(
+                                vec![
+                                    value_to_json(interpreter, entry.key)?,
+                                    value_to_json(interpreter, entry.value)?,
+                                ]
+                            )
+                        )
+                    }
+                    [
+                        ("type".to_string(), JsonValue::String("dict".to_string())),
+                        ("data".to_string(), JsonValue::Array(attrs)),
+                    ].into_iter().collect()
+                },
+                ShimValue::Struct(def_pos, pos) => {
+                    unsafe {
+                        let mut attrs = HashMap::new();
+                        let def: &StructDef = interpreter.mem.get(def_pos);
+                        for (attr, loc) in def.lookup.iter() {
+                            match loc {
+                                StructAttribute::MemberInstanceOffset(offset) => {
+                                    let val: ShimValue = *interpreter.mem.get(pos + *offset as u32);
+                                    attrs.insert(String::from_utf8_lossy(attr).to_string(), value_to_json(interpreter, val)?);
+                                }
+                                StructAttribute::MethodDef(fn_pos) => (),
+                            };
+                        }
+                        [
+                            ("type".to_string(), JsonValue::String(String::from_utf8_lossy(&def.name).to_string())),
+                            ("data".to_string(), JsonValue::Object(attrs)),
+                        ].into_iter().collect()
+                    }
+                },
+                other => return Err(format!("Can't JSON-ify {other:?}")),
+            }
+        )
+    )
+}
+
+fn value_from_json(
+    interpreter: &mut Interpreter,
+    env: &mut Environment,
+    data: &JsonValue,
+) -> Result<ShimValue, String> {
+    let obj: &HashMap<_, _> = data.get().ok_or(format!("JSON not an object"))?;
+    let type_name: &String = obj.get("type").ok_or(format!("JSON has no type"))?.get::<String>().ok_or(format!("type not a string"))?;
+    let data: &JsonValue = obj.get("data").ok_or(format!("JSON has no data"))?;
+    match type_name.as_str() {
+        "int" => {
+            let val: &f64 = data.get().ok_or(format!("JSON data not a float(int)"))?;
+            Ok(
+                ShimValue::Integer(*val as i32)
+            )
+        },
+        "float" => {
+            let val: &f64 = data.get().ok_or(format!("JSON data not a float"))?;
+            Ok(
+                ShimValue::Float(*val as f32)
+            )
+        },
+        "bool" => {
+            let val: &bool = data.get().ok_or(format!("JSON data not a bool"))?;
+            Ok(
+                ShimValue::Bool(*val)
+            )
+        },
+        "str" => {
+            let val: &String = data.get().ok_or(format!("JSON data not a str"))?;
+            Ok(
+                interpreter.mem.alloc_str(val.as_bytes())
+            )
+        },
+        "None" => {
+            Ok(ShimValue::None)
+        },
+        "list" => {
+            let val: &Vec<_> = data.get().ok_or(format!("JSON data not a list"))?;
+            let items: Vec<ShimValue> = val.iter()
+                .map(|item| value_from_json(interpreter, env, item))
+                .collect::<Result<_, _>>()?;
+            let lst = interpreter.mem.alloc_list();
+            let lst_inner = lst.list_mut(interpreter)?;
+            for item in items {
+                lst_inner.push(&mut interpreter.mem, item);
+            }
+            Ok(lst)
+        },
+        "dict" => {
+            let val: &Vec<_> = data.get().ok_or(format!("JSON data not an list(dict)"))?;
+            let pairs: Vec<(ShimValue, ShimValue)> = val.iter()
+                .map(|pair| {
+                    let pair: &Vec<JsonValue> = pair.get().ok_or(format!("JSON dict item not a pair"))?;
+                    if pair.len() != 2 {
+                        return Err(format!("Got unexpected length {} for dict item", pair.len()));
+                    }
+                    let shim_key = value_from_json(interpreter, env, &pair[0])?;
+                    let shim_value = value_from_json(interpreter, env, &pair[1])?;
+                    Ok((shim_key, shim_value))
+                })
+                .collect::<Result<_, String>>()?;
+            let dict = interpreter.mem.alloc_dict();
+            let dict_inner = dict.dict_mut(interpreter)?;
+            for (shim_key, shim_value) in pairs {
+                dict_inner.set(interpreter, shim_key, shim_value)?;
+            }
+            Ok(dict)
+        },
+        "tuple" => {
+            // TODO: It seems like the size of the tuple should be encoded in the type?
+            let val: &Vec<_> = data.get().ok_or(format!("JSON data not a list(tuple)"))?;
+            let mut vec_of_shimvals = Vec::new();
+            for item in val.iter() {
+                vec_of_shimvals.push(
+                    value_from_json(interpreter, env, item)?
+                );
+            }
+            Ok(interpreter.mem.alloc_tuple(&vec_of_shimvals))
+        },
+        _ => {
+            let val: &HashMap<_, _> = data.get().ok_or(format!("JSON data not an object"))?;
+            let ty = env.get(interpreter, type_name.as_bytes()).ok_or(format!("env has no type_name {type_name}"))?;
+            let kwargs: Vec<(Ident, ShimValue)> = val.iter()
+                .map(|(key, value)| {
+                    let shim_key = key.as_bytes().to_vec();
+                    let shim_value = value_from_json(interpreter, env, value)?;
+                    Ok((shim_key, shim_value))
+                })
+                .collect::<Result<_, String>>()?;
+            let mut args = ArgBundle {
+                kwargs,
+                args: Vec::new(),
+            };
+            match ty.call(interpreter, &mut args) {
+                Ok(CallResult::ReturnValue(val)) => Ok(val),
+                Ok(CallResult::PC(pc, captured_scope)) => {
+                    let mut new_env = Environment::with_scope(captured_scope);
+                    match interpreter.execute_bytecode_extended(
+                        &mut (pc as usize),
+                        args,
+                        &mut new_env,
+                    ) {
+                        Ok(val) => Ok(val),
+                        Err(e) => Err(e),
+                    }
+                }
+                Err(e) => Err(e),
+            }
+
+        }
+    }
+}
+
+fn shim_load_data(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    // NOTE: It feels like we shouldn't need to specify the type, but this
+    // gives us the captured environment we need to get the type definitions.
+    // We could have `struct Foo` defined in multiple places, but that captured
+    // environment gives us the exact type to use.
+    let mut env = match unpacker.required(b"type")? {
+        ShimValue::StructDef(struct_def_pos) => {
+            let struct_def: &StructDef = unsafe { interpreter.mem.get(struct_def_pos) };
+            if let Some(StructAttribute::MethodDef(fn_pos)) = struct_def.find(b"__init__") {
+                let shim_fn: &ShimFn = unsafe { interpreter.mem.get(fn_pos) };
+                Environment::with_scope(shim_fn.captured_scope)
+            } else {
+                return Err("INTERNAL: no __init__ on StructDef".to_string());
+            }
+        },
+        otherwise => return Err(format!("Can't `load_data` for value {otherwise:?}")),
+    };
+    let path = unpacker.required(b"path")?.to_string(interpreter);
+    let default = unpacker.optional(b"default");
+    let default_fn = unpacker.optional(b"default_fn");
+    unpacker.end()?;
+
+    if default.is_some() && default_fn.is_some() {
+        return Err(format!("Can't provide 'default' and 'default_fn' to load_data"));
+    }
+
+    match (fs::read_to_string(&path), default, default_fn) {
+        (Ok(contents), _, _) => {
+            let data: JsonValue = contents.parse().map_err(|e| format!("Could not parse JSON: {e:?}"))?;
+            value_from_json(interpreter, &mut env, &data)
+        },
+        (Err(_), Some(val), _) => Ok(val),
+        (Err(_), _, Some(func)) => {
+            let mut args = ArgBundle::new();
+            match func.call(interpreter, &mut args)? {
+                CallResult::ReturnValue(val) => Ok(val),
+                CallResult::PC(pc, captured_scope) => {
+                    let mut new_env = Environment::with_scope(captured_scope);
+                    interpreter.execute_bytecode_extended(&mut (pc as usize), args, &mut new_env)
+                }
+            }
+        },
+        (Err(e), None, None) => Err(format!("Could not read path {path}: {e:?}")),
+    }
+}
+
 fn load_script(bytes: &[u8]) -> Result<(Interpreter, Environment, ShimValue), String> {
     let ast = shimlang::ast_from_text(bytes)?;
     let program = shimlang::compile_ast(&ast)?;
@@ -1341,6 +1632,8 @@ fn load_script(bytes: &[u8]) -> Result<(Interpreter, Environment, ShimValue), St
         (b"set_bus_lowpass", shim_set_bus_lowpass),
         (b"clear_bus_effects", shim_clear_bus_effects),
         (b"reset_audio", shim_reset_audio),
+        (b"save_data", shim_save_data),
+        (b"load_data", shim_load_data),
     ];
     for (name, func) in builtins {
         let position = interpreter.mem.alloc_and_set(

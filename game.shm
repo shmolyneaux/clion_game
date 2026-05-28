@@ -432,6 +432,7 @@ let shapes = [
 
 let MENU_BUTTONS = [
     "START",
+    "TRACKER",
     "OPTIONS",
 ];
 let BUTTON_PADDING = 10;
@@ -439,7 +440,20 @@ struct Menu {
     button_highlight_start_frame = 0,
     selected_button = 0,
 
+    first_frame = true,
+
     fn tick(self) {
+        if self.first_frame {
+            music_paused = false;
+            log_lines.append("Set low pass \(rand())");
+            set_bus_lowpass(
+                730,
+                ramp=0.5,
+                bus=MUSIC_BUS,
+            );
+            self.first_frame = false;
+        }
+
         let button_num = 0;
 
         self.selected_button += if key.W.just_pressed_with_repeat or key.Up.just_pressed_with_repeat { self.button_highlight_start_frame = frame_num; -1 } else { 0 };
@@ -489,11 +503,10 @@ struct Menu {
 
         if key.Enter.just_pressed and self.selected_button == MENU_BUTTONS.index("START") {
             state = Game();
-            set_bus_lowpass(
-                48000,
-                ramp=0.5,
-                bus=MUSIC_BUS,
-            );
+        }
+
+        if key.Enter.just_pressed and self.selected_button == MENU_BUTTONS.index("TRACKER") {
+            state = Tracker();
         }
     }
 }
@@ -590,6 +603,8 @@ struct Game {
     bag = new_bag(),
     line_count = 0,
 
+    first_frame = true,
+
     fn shape_block_offsets(self) {
         shape_block_offsets(self.current_shape, self.shape_rotation)
     }
@@ -616,13 +631,31 @@ struct Game {
     }
 
     fn tick(self) {
-        if key.Escape.just_pressed {
-            state = Menu();
+        if self.first_frame {
+            music_paused = false;
+            log_lines.append("Cleared low pass");
             set_bus_lowpass(
-                730,
+                48000,
                 ramp=0.5,
                 bus=MUSIC_BUS,
             );
+            self.first_frame = false;
+        }
+
+        if key.S.just_pressed {
+            save_data(self, "game.sav");
+            log_lines.append("Game saved");
+        }
+
+        if key.L.just_pressed {
+            state = load_data(Game, "game.sav");
+            log_lines.append("Game loaded");
+            self.draw();
+            return;
+        }
+
+        if key.Escape.just_pressed {
+            state = Menu();
             return;
         }
 
@@ -769,6 +802,7 @@ struct Game {
                     );
 
                     if self.game_over {
+                        log_lines.append("Game over low pass");
                         set_bus_lowpass(
                             500,
                             ramp=0.5,
@@ -780,11 +814,6 @@ struct Game {
                             if reset_count > 100 {
                                 if key.Space.just_pressed {
                                     state = Game();
-                                    set_bus_lowpass(
-                                        48000,
-                                        ramp=0.5,
-                                        bus=MUSIC_BUS,
-                                    );
                                 }
                             }
                         }
@@ -1026,6 +1055,49 @@ fn debug_frame_times() {
     );
 }
 
+struct MyInt {
+    val=0
+}
+
+struct Tracker {
+    first_frame = true,
+    val = load_data(MyInt, "my_int", default_fn=MyInt),
+    seed = rand(),
+
+    fn tick(self) {
+        if self.first_frame {
+            music_paused = true;
+            self.first_frame = false;
+        }
+
+        self.val.val += 1;
+
+        if ig_begin("test") {
+            ig_text(self.val.val);
+            ig_end();
+        }
+
+        self.draw();
+    }
+
+    fn draw(self) {
+        draw_text(
+            viewport[0]/2,
+            viewport[1]/2,
+            "\(self.val)",
+            center=true,
+            size=4.0,
+        );
+        draw_text(
+            viewport[0]/2,
+            viewport[1]/2 + 50,
+            "\(self.seed)",
+            center=true,
+            size=4.0,
+        );
+    }
+}
+
 let song_secs_next_note = 0.0;
 let song_idx = 0;
 let lowpass_cutoff = 44000;
@@ -1034,7 +1106,6 @@ let show_debug_frame_times = false;
 add_tick_fn(debug_frame_times);
 
 let MUSIC_BUS = 1;
-
 set_bus_gain(
     MUSIC_BUS,
     gain=0.1,
@@ -1086,46 +1157,8 @@ fn loop() {
     viewport = window_size();
     state.tick();
 
-    if key.L.just_pressed_with_repeat {
-        lowpass_cutoff *= 1.1;
-    }
-    if key.H.just_pressed_with_repeat {
-        lowpass_cutoff *= 1/1.1;
-    }
-
-    if key.E.just_pressed {
-        show_debug_frame_times = !show_debug_frame_times;
-    }
-    let tempo_bps = tempo/60;
-
-    if key.Y.just_pressed {
-        instrument_num += 1;
-        instrument_num %= instrument_names.len();
-    }
-
-    if key.T.just_pressed {
-        set_bus_lowpass(
-            22000,
-            ramp=0.5,
-            bus=MUSIC_BUS,
-        );
-    }
-    if key.R.just_pressed {
-        set_bus_lowpass(
-            730,
-            ramp=0.5,
-            bus=MUSIC_BUS,
-        );
-    }
-
-    draw_text(
-        0,
-        500,
-        "Instrument: \(instrument_names[instrument_num])",
-        size=4.0,
-    );
-
     if !music_paused {
+        let tempo_bps = tempo/60;
         while song_secs_next_note <= 1.0/60.0 {
             let action = song[song_idx];
             song_idx += 1;
