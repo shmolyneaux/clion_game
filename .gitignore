@@ -9,3 +9,4 @@ shimlang-vscode/shimlang-0.1.0.vsix
 shimlang/benchmark_scripts/*.py
 shimlang/benchmark_scripts/*.lua
 game.sav
+.claude/settings.local.json

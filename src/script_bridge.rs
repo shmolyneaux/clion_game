@@ -858,6 +858,9 @@ fn shim_draw_text(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shi
         x -= dim.0/2.0;
         // Offset by size since the top row of pixels in the font is transparent
         y -= dim.1/2.0 + size;
+    } else {
+        // Offset by size since the top row of pixels in the font is transparent
+        y -= size;
     }
 
     interpreter
@@ -1795,16 +1798,20 @@ impl ScriptBridge {
 
                 {
                     let _zone = zone_scoped!("Wait for interpreter response");
-                    match self.rx.recv().unwrap() {
-                        ScriptResponse::Error(interpreter, env, loop_fn, msg) => {
+                    match self.rx.recv() {
+                        Ok(ScriptResponse::Error(interpreter, env, loop_fn, msg)) => {
                             self.state = BridgeState::Paused(Box::new(interpreter), env, loop_fn);
                             self.interpreter_errors.push(msg);
                         }
-                        ScriptResponse::LoopComplete(interpreter, env, loop_fn, draw_list, sound_list, gc_time) => {
+                        Ok(ScriptResponse::LoopComplete(interpreter, env, loop_fn, draw_list, sound_list, gc_time)) => {
                             self.state = BridgeState::Paused(Box::new(interpreter), env, loop_fn);
                             self.draw_list = draw_list;
                             self.sound_list = sound_list;
                             self.last_gc_time = gc_time;
+                        }
+                        Err(e) => {
+                            dbg!(e);
+                            panic!("Received error for recv");
                         }
                     }
                 }

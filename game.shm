@@ -1102,7 +1102,7 @@ let song_secs_next_note = 0.0;
 let song_idx = 0;
 let lowpass_cutoff = 44000;
 
-let show_debug_frame_times = false;
+let show_debug_frame_times = true;
 add_tick_fn(debug_frame_times);
 
 let MUSIC_BUS = 1;
@@ -1147,13 +1147,290 @@ let instrument_names = {
     lst
 };
 
+let mouse_hovered = [];
+
+struct Text {
+    value,
+    size=5.0,
+    fn measure(self) {
+        let size = text_size(self.value, size=self.size);
+        (
+            size[0],
+            size[1],
+        )
+    }
+
+    fn draw(self, x, y) {
+        draw_text(
+            x,
+            y,
+            self.value,
+            size=self.size
+        );
+        self.measure()
+    }
+}
+
+struct Button {
+    content,
+    on_click=None,
+    padding=0,
+    padding_top=padding,
+    padding_left=padding,
+    padding_right=padding,
+    padding_bottom=padding,
+    texture=None,
+    color=if texture { None } else {
+        (
+            rand(),
+            rand(),
+            rand(),
+        )
+    },
+
+    fn measure(self) {
+        let content_size = self.content.measure();
+        (
+            content_size[0] + self.padding_left + self.padding_right,
+            content_size[1] + self.padding_top + self.padding_bottom,
+        )
+    }
+
+    fn draw(self, x, y) {
+        let size = self.measure();
+        let color = self.color or (None, None, None);
+        let pos = mouse_pos();
+        let hovered = (
+            pos[0].in_range(x, x+size[0]) and
+            pos[1].in_range(y, y+size[1])
+        );
+        if self.color {
+            draw_rect(
+                x,
+                y,
+                size[0],
+                size[1],
+                r=self.color[0],
+                g=self.color[1],
+                b=self.color[2],
+            );
+        } else {
+            let r = 1.0;
+            let g = 1.0;
+            let b = 1.0;
+            if hovered {
+                r = 0.7;
+                g = 0.7;
+                b = 0.7;
+            }
+            draw_rect(
+                x,
+                y,
+                size[0],
+                size[1],
+                texture=self.texture,
+                r=r,
+                g=g,
+                b=b,
+            );
+        }
+        self.content.draw(
+            x+self.padding_left,
+            y+self.padding_top,
+        );
+        print("IMAGINARY CLICK");
+        self.on_click();
+        if hovered and mouse_just_pressed(MOUSE_LEFT) {
+            if self.on_click {
+            }
+        }
+        size
+    }
+}
+
+struct Column {
+    items,
+    gap=0,
+    padding=0,
+    padding_top=padding,
+    padding_left=padding,
+    padding_right=padding,
+    padding_bottom=padding,
+    color=(
+        rand(),
+        rand(),
+        rand(),
+    ),
+
+    fn measure(self) {
+        let min_width = 0;
+        let min_height = self.padding_top + self.padding_bottom;
+        for item in self.items {
+            let measure = item.measure();
+            // The largest `min_width` is our min_width
+            min_width = min_width.max(measure[0]);
+            // Not valid for first item, but we remove it below
+            min_height += self.gap + measure[1];
+        }
+        if self.items.len() > 1 {
+            // We added an invalid gap for the first item we remove here
+            min_height -= self.gap;
+        }
+        (
+            min_width + self.padding_left + self.padding_right,
+            min_height,
+        )
+    }
+
+    fn draw(self, x, y) {
+        let size = self.measure();
+        draw_rect(
+            x,
+            y,
+            size[0],
+            size[1],
+            r=self.color[0],
+            g=self.color[1],
+            b=self.color[2],
+        );
+
+        let starting_y = y;
+        x += self.padding_left;
+        y += self.padding_top;
+        let max_width = 0;
+        for item in self.items {
+            let size = item.draw(
+                x,
+                y,
+            );
+            y += self.gap + size[1];
+            max_width = max_width.max(size[0]);
+        }
+        if self.items.len() > 1 {
+            x -= self.gap;
+        }
+        size
+    }
+}
+
+struct Row {
+    items,
+    gap=0,
+    padding=0,
+    padding_top=padding,
+    padding_left=padding,
+    padding_right=padding,
+    padding_bottom=padding,
+    color=(
+        rand(),
+        rand(),
+        rand(),
+    ),
+
+    fn measure(self) {
+        let min_width = self.padding_left + self.padding_right;
+        let min_height = 0;
+        for item in self.items {
+            let measure = item.measure();
+            // The largest `min_height` is our min_height
+            min_height = min_height.max(measure[1]);
+            // Not valid for first item, but we remove it below
+            min_width += self.gap + measure[0];
+        }
+        if self.items.len() > 1 {
+            // We added an invalid gap for the first item we remove here
+            min_width -= self.gap;
+        }
+        (
+            min_width,
+            min_height + self.padding_left + self.padding_right,
+        )
+    }
+
+    fn draw(self, x, y) {
+        let size = self.measure();
+        draw_rect(
+            x,
+            y,
+            size[0],
+            size[1],
+            r=self.color[0],
+            g=self.color[1],
+            b=self.color[2],
+        );
+
+        let starting_x = x;
+        x += self.padding_left;
+        y += self.padding_top;
+
+        let max_height = 0;
+
+        for item in self.items {
+            let size = item.draw(
+                x,
+                y,
+            );
+            x += self.gap + size[0];
+            max_height = max_height.max(size[1]);
+        }
+        if self.items.len() > 1 {
+            x -= self.gap;
+        }
+        size
+    }
+}
+
+struct Rect {
+    min_width=0,
+    min_height=0,
+}
+
+struct Layout {
+    data,
+    x,
+    y,
+
+    fn draw(self) {
+        self.data.draw(
+            self.x,
+            self.y,
+        );
+    }
+}
+
+struct UITest {
+    layout=Layout(
+        Column(
+            [
+                Text("Test-string"),
+                Text("Next-string"),
+                Row([Text("Double"), Text("String")], gap=75, padding=5),
+                Row([Text("Left"), Text("Middle\nLine"), Text("Right")], gap=75, padding=5),
+                Button(Text("Press Me!"), on_click=fn() {log_lines.append("Button pressed!")}, padding=20, texture=BUTTON_TEXTURE),
+            ],
+            gap=50,
+            padding=5,
+        ),
+        x=100,
+        y=100,
+    ),
+    fn tick(self) {
+        self.draw();
+    }
+
+    fn draw(self) {
+        let draw_list = self.layout.draw();
+    }
+}
+
 let tempo = 135;
 let music_paused = false;
 
 let viewport = None;
-let state = Game();
+let state = UITest();
 let frame_num = 0;
 fn loop() {
+    mouse_hovered = [];
     viewport = window_size();
     state.tick();
 
