@@ -24,7 +24,7 @@ facet-reflect = { path = "facet/facet-reflect" }
 
 
 [profile.dev]
-debug = "line-tables-only"
+debug = 2
 
 [features]
 default = ["facet", "dev"]
