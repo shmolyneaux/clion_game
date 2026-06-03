@@ -618,6 +618,7 @@ impl ShimNative for PerfModule {
             b"gc" => *gc,
             b"render" => *render,
             b"vsync" => *vsync,
+            b"mem_high_point" => return Ok(ShimValue::Integer(interpreter.mem.mem_high_point() as i32)),
             _ => return Err(format!(
                 "PerfModule has no attribute '{}'",
                 debug_u8s(ident)

@@ -1481,4 +1481,16 @@ fn loop() {
     }
 
     frame_num += 1;
+
+    //let lst = [];
+    //for i in 0..1502 {
+    //    lst.append(i);
+    //}
+
+    draw_text(
+        0,
+        0,
+        perf.mem_high_point,
+        size=4.0,
+    );
 }
