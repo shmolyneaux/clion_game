@@ -10,7 +10,6 @@ use crate::shimlang_imgui;
 //use crate::test_mocks::igBegin;
 use crate::*;
 
-#[cfg(not(target_arch = "wasm32"))]
 use std::fs;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -948,7 +947,7 @@ fn shim_mouse_pos(
     let mut x = 0;
     let mut y = 0;
     unsafe {
-        SDL_GetMouseState(&mut x as *mut i32, &mut y as *mut i32);
+        SHM_GetMouseState(&mut x as *mut i32, &mut y as *mut i32);
     }
 
     let new_lst_val = interpreter.mem.alloc_list();
@@ -1312,6 +1311,15 @@ fn shim_window_size(
     Ok(new_lst_val)
 }
 
+#[cfg(target_arch = "wasm32")]
+fn shim_save_data(
+    _interpreter: &mut Interpreter,
+    _args: &ArgBundle,
+) -> Result<ShimValue, String> {
+    Err("save_data is not supported on web".to_string())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn shim_save_data(
     interpreter: &mut Interpreter,
     args: &ArgBundle,
@@ -1552,6 +1560,15 @@ fn value_from_json(
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+fn shim_load_data(
+    _interpreter: &mut Interpreter,
+    _args: &ArgBundle,
+) -> Result<ShimValue, String> {
+    Err("load_data is not supported on web".to_string())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn shim_load_data(
     interpreter: &mut Interpreter,
     args: &ArgBundle,
@@ -1748,6 +1765,11 @@ impl ScriptBridge {
 
         #[cfg(target_arch = "wasm32")]
         {
+            let (interpreter, env, loop_fn) = fs::read(&script_path)
+                .ok()
+                .and_then(|bytes| load_script(&bytes).ok())
+                .unwrap_or((interpreter, env, loop_fn));
+
             Self {
                 state: BridgeState::Paused(Box::new(interpreter), env, loop_fn),
                 interpreter_errors: Vec::new(),
@@ -1862,13 +1884,14 @@ impl ScriptBridge {
                     ks.keys = keys.to_vec();
                     ks.last_keys = last_keys.to_vec();
                     let buttons = unsafe {
-                        SDL_GetMouseState(std::ptr::null_mut(), std::ptr::null_mut())
+                        SHM_GetMouseState(std::ptr::null_mut(), std::ptr::null_mut())
                     };
                     let ms = interpreter.fetch_mut::<MouseState>();
                     ms.last_buttons = ms.buttons;
                     ms.buttons = buttons;
                     *interpreter.fetch_mut::<PerfTimer>() = perf;
                     interpreter.fetch_mut::<SoundList>().finished.extend(finished.iter().copied());
+                    env.update(interpreter, b"delta", ShimValue::Float(delta)).expect("delta should be in env");
                     match call_loop_fn(interpreter, env, loop_fn) {
                         Ok(gc_time) => self.last_gc_time = gc_time,
                         Err(msg) => self.interpreter_errors.push(msg),
@@ -1984,7 +2007,7 @@ fn script_thread_logic(rx: Receiver<ScriptRequest>, tx: Sender<ScriptResponse>) 
                     ks.keys = keys;
                     ks.last_keys = last_keys;
                     let buttons = unsafe {
-                        SDL_GetMouseState(std::ptr::null_mut(), std::ptr::null_mut())
+                        SHM_GetMouseState(std::ptr::null_mut(), std::ptr::null_mut())
                     };
                     let ms = interpreter.fetch_mut::<MouseState>();
                     ms.last_buttons = ms.buttons;

@@ -66,7 +66,7 @@ set(SOURCES
     ${IMGUI_DIR}/imgui_draw.cpp
     ${IMGUI_DIR}/imgui_tables.cpp
     ${IMGUI_DIR}/imgui_widgets.cpp
-    ${IMGUI_DIR}/backends/imgui_impl_sdl2.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_sdl3.cpp
     ${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp
 )
 
@@ -99,30 +99,31 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     set(WEB_DIR ${CMAKE_BINARY_DIR}/web)
     file(MAKE_DIRECTORY ${WEB_DIR})
     set(CMAKE_EXECUTABLE_SUFFIX ".html")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -sUSE_SDL=2")
-    target_link_options(game PRIVATE 
-        "-sWASM=1" "-sUSE_SDL=2" "-sMIN_WEBGL_VERSION=2" "-sMAX_WEBGL_VERSION=2" 
-        "-sALLOW_MEMORY_GROWTH=1" "-sNO_EXIT_RUNTIME=0" "-sASSERTIONS=1" "-sNO_FILESYSTEM=1"
-        "SHELL:--shell-file ${IMGUI_DIR}/examples/libs/emscripten/shell_minimal.html"
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -sUSE_SDL=3")
+    target_link_options(game PRIVATE
+        "-sWASM=1" "-sUSE_SDL=3" "-sMIN_WEBGL_VERSION=2" "-sMAX_WEBGL_VERSION=2"
+        "-sALLOW_MEMORY_GROWTH=1" "-sNO_EXIT_RUNTIME=0" "-sASSERTIONS=1"
+        "-g"
+        "-sSTACK_SIZE=8388608"
+        "SHELL:--shell-file ${CMAKE_SOURCE_DIR}/shell.html"
     )
     target_compile_definitions(game PRIVATE IMGUI_IMPL_OPENGL_ES3)
     target_link_libraries(game PRIVATE ${OBJECT_FILE})
 
 elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # --- LINUX SETUP ---
-    find_package(SDL2 REQUIRED)
+    find_package(SDL3 REQUIRED)
     find_package(GLEW REQUIRED)
-    
-    # Add includes (This fixes "SDL.h not found" for ImGui too)
-    target_include_directories(game PRIVATE ${SDL2_INCLUDE_DIRS} ${GLEW_INCLUDE_DIRS})
-    
+
+    target_include_directories(game PRIVATE ${GLEW_INCLUDE_DIRS})
+
     # Link Libraries
-    target_link_libraries(game 
-        PRIVATE 
-        ${SDL2_LIBRARIES} 
-        ${GLEW_LIBRARIES} 
-        GL 
-        TracyClient 
+    target_link_libraries(game
+        PRIVATE
+        SDL3::SDL3
+        ${GLEW_LIBRARIES}
+        GL
+        TracyClient
         Threads::Threads
         ${CMAKE_DL_LIBS}
     )
@@ -137,22 +138,22 @@ elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
 
 else()
     # --- WINDOWS SETUP ---
-    set(SDL2_PATH "C:/lib/SDL2-2.30.11-VC")
+    set(SDL3_PATH "C:/lib/SDL3-3.4.10")
     set(GLEW_PATH "C:/lib/glew-2.1.0")
-    
-    target_include_directories(game PRIVATE ${SDL2_PATH}/include ${GLEW_PATH}/include)
-    target_link_directories(game PRIVATE 
-        ${SDL2_PATH}/lib/x64 
-        ${GLEW_PATH}/lib/Release/x64
-    )
 
-    target_link_libraries(game SDL2 SDL2main opengl32 glew32 ws2_32 userenv ntdll TracyClient)
+    list(APPEND CMAKE_PREFIX_PATH "${SDL3_PATH}")
+    find_package(SDL3 CONFIG REQUIRED)
+
+    target_include_directories(game PRIVATE ${GLEW_PATH}/include)
+    target_link_directories(game PRIVATE ${GLEW_PATH}/lib/Release/x64)
+
+    target_link_libraries(game PRIVATE SDL3::SDL3 opengl32 glew32 ws2_32 userenv ntdll TracyClient)
 
     # DLL Copying
-    set(SDL2_DLL "${SDL2_PATH}/lib/x64/SDL2.dll")
+    set(SDL3_DLL "${SDL3_PATH}/lib/x64/SDL3.dll")
     set(GLEW_DLL "${GLEW_PATH}/bin/Release/x64/glew32.dll")
     add_custom_command(TARGET game POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${SDL2_DLL}" "$<TARGET_FILE_DIR:game>/SDL2.dll"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${SDL3_DLL}" "$<TARGET_FILE_DIR:game>/SDL3.dll"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${GLEW_DLL}" "$<TARGET_FILE_DIR:game>/glew32.dll"
     )
 endif()

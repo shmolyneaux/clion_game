@@ -870,9 +870,9 @@ fn frame(state: &mut State, delta: f32) {
             let mut xrel = 0;
             let mut yrel = 0;
             let button_bitmask =
-                SDL_GetRelativeMouseState(&mut xrel as *mut i32, &mut yrel as *mut i32);
+                SHM_GetRelativeMouseState(&mut xrel as *mut i32, &mut yrel as *mut i32);
             if state.keys.pressed(SDL_SCANCODE_GRAVE) {
-                SDL_SetRelativeMouseMode(false);
+                SHM_SetRelativeMouseMode(false);
                 state.edit_mode = true;
                 // TODO: stash mouse capture setting
             }

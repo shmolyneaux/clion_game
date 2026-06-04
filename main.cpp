@@ -1,8 +1,8 @@
 #include "imgui.h"
-#include "imgui_impl_sdl2.h"
+#include "imgui_impl_sdl3.h"
 #include "imgui_impl_opengl3.h"
 #include <stdio.h>
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <GL/glew.h>
 
 #if defined(_WIN32)
@@ -21,12 +21,12 @@
 #include "stb_image.h"
 
 #if defined(IMGUI_IMPL_OPENGL_ES2)
-#include <SDL_opengles2.h>
-#else
-#include <SDL_opengl.h>
+#include <SDL3/SDL_opengles2.h>
+#elif !defined(IMGUI_IMPL_OPENGL_ES3)
+#include <SDL3/SDL_opengl.h>
 #endif
 
-#if defined(__linux__) || defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__)
 #include "imgui-docking/examples/libs/emscripten/emscripten_mainloop_stub.h"
 #endif
 
@@ -68,7 +68,7 @@ int main(int, char**)
     bool startup_error = false;
 
     // Setup SDL
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_GAMECONTROLLER | SDL_INIT_AUDIO) != 0)
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_AUDIO))
     {
         log_error("SDL_Init Error:");
         log_error(SDL_GetError());
@@ -116,12 +116,8 @@ int main(int, char**)
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
     SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
-    SDL_WindowFlags window_flags = (SDL_WindowFlags)(
-            SDL_WINDOW_OPENGL
-            | SDL_WINDOW_RESIZABLE
-            | SDL_WINDOW_ALLOW_HIGHDPI
-            );
-    window = SDL_CreateWindow("CLion Game", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1920, 1080, window_flags);
+    SDL_WindowFlags window_flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+    window = SDL_CreateWindow("CLion Game", 1920, 1080, window_flags);
     if (window == nullptr)
     {
         log_error("SDL_CreateWindow Error:");
@@ -151,7 +147,7 @@ int main(int, char**)
     glewExperimental = GL_TRUE;
     if (glewInit() != GLEW_OK) {
         log_error("Failed to initialize GLEW");
-        SDL_GL_DeleteContext(gl_context);
+        SDL_GL_DestroyContext(gl_context);
         SDL_DestroyWindow(window);
         SDL_Quit();
         return -1;
@@ -162,7 +158,9 @@ int main(int, char**)
     glGetError();
 
     SDL_GL_MakeCurrent(window, gl_context);
+#ifndef __EMSCRIPTEN__
     SDL_GL_SetSwapInterval(1); // Enable vsync
+#endif
 
     // Setup Dear ImGui context
     IMGUI_CHECKVERSION();
@@ -243,7 +241,7 @@ int main(int, char**)
     }
 
     // Setup Platform/Renderer backends
-    ImGui_ImplSDL2_InitForOpenGL(window, gl_context);
+    ImGui_ImplSDL3_InitForOpenGL(window, gl_context);
     ImGui_ImplOpenGL3_Init(glsl_version);
     // ImGui's internal GL loader probes extensions and can leave spurious errors.
     while (glGetError() != GL_NO_ERROR) {}
@@ -256,19 +254,29 @@ int main(int, char**)
     Uint64 frequency = SDL_GetPerformanceFrequency();
     Uint64 ticks = 0;
 
+    // SDL3 audio uses a push-model stream callback. We reuse rust_audio_callback
+    // to fill a stack buffer, then push it into the stream each call.
+    auto sdl3_audio_callback = [](void*, SDL_AudioStream* stream, int additional_amount, int) {
+        constexpr int kChunk = 4096;
+        Uint8 buf[kChunk];
+        while (additional_amount > 0) {
+            int bytes = additional_amount < kChunk ? additional_amount : kChunk;
+            rust_audio_callback(nullptr, buf, bytes);
+            SDL_PutAudioStreamData(stream, buf, bytes);
+            additional_amount -= bytes;
+        }
+    };
     SDL_AudioSpec want{};
     want.freq = kAudioSampleRate;
-    want.format = AUDIO_S16SYS;
+    want.format = SDL_AUDIO_S16;
     want.channels = 2;
-    want.samples = 1024;
-    want.callback = rust_audio_callback;
-    SDL_AudioSpec have{};
-    SDL_AudioDeviceID audio_device = SDL_OpenAudioDevice(nullptr, 0, &want, &have, 0);
-    if (audio_device == 0) {
-        log_error("SDL_OpenAudioDevice Error:");
+    SDL_AudioStream* audio_stream = SDL_OpenAudioDeviceStream(
+        SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &want, sdl3_audio_callback, nullptr);
+    if (!audio_stream) {
+        log_error("SDL_OpenAudioDeviceStream Error:");
         log_error(SDL_GetError());
     } else {
-        SDL_PauseAudioDevice(audio_device, 0);
+        SDL_ResumeAudioStreamDevice(audio_stream);
     }
 
     if (rust_init()) {
@@ -304,11 +312,11 @@ int main(int, char**)
         SDL_Event event;
         while (SDL_PollEvent(&event))
         {
-            ImGui_ImplSDL2_ProcessEvent(&event);
-            if (event.type == SDL_QUIT) {
+            ImGui_ImplSDL3_ProcessEvent(&event);
+            if (event.type == SDL_EVENT_QUIT) {
                 done = true;
             }
-            if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE && event.window.windowID == SDL_GetWindowID(window)) {
+            if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED && event.window.windowID == SDL_GetWindowID(window)) {
                 done = true;
             }
         }
@@ -322,7 +330,7 @@ int main(int, char**)
 
         // Start the Dear ImGui frame
         ImGui_ImplOpenGL3_NewFrame();
-        ImGui_ImplSDL2_NewFrame();
+        ImGui_ImplSDL3_NewFrame();
         ImGui::NewFrame();
 
         // Fullscreen DockSpace
@@ -355,7 +363,7 @@ int main(int, char**)
         }
 
         int display_w, display_h;
-        SDL_GL_GetDrawableSize(window, &display_w, &display_h);
+        SDL_GetWindowSizeInPixels(window, &display_w, &display_h);
         glViewport(0, 0, display_w, display_h);
         // glClearColor(clear_color.x * clear_color.w, clear_color.y * clear_color.w, clear_color.z * clear_color.w, clear_color.w);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -411,14 +419,14 @@ int main(int, char**)
 
     // Cleanup
     ImGui_ImplOpenGL3_Shutdown();
-    ImGui_ImplSDL2_Shutdown();
+    ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
 
-    if (audio_device != 0) {
-        SDL_CloseAudioDevice(audio_device);
+    if (audio_stream) {
+        SDL_DestroyAudioStream(audio_stream);
     }
 
-    SDL_GL_DeleteContext(gl_context);
+    SDL_GL_DestroyContext(gl_context);
     SDL_DestroyWindow(window);
     SDL_Quit();
 

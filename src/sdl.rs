@@ -2,9 +2,9 @@
 unsafe extern "C" {
     pub fn SDL_GL_GetProcAddress(proc: *const i8) -> *mut std::ffi::c_void;
     pub fn SDL_GetKeyboardState(numkeys: *mut i32) -> *const u8;
-    pub fn SDL_GetRelativeMouseState(x: *mut i32, y: *mut i32) -> u32;
-    pub fn SDL_SetRelativeMouseMode(enabled: bool) -> i32;
-    pub fn SDL_GetMouseState(x: *mut i32, y: *mut i32) -> u32;
+    pub fn SHM_GetRelativeMouseState(x: *mut i32, y: *mut i32) -> u32;
+    pub fn SHM_SetRelativeMouseMode(enabled: bool);
+    pub fn SHM_GetMouseState(x: *mut i32, y: *mut i32) -> u32;
     pub fn SHM_SetCursorVisible(visible: bool);
     pub fn SHM_SetWindowTitle(title: *const i8);
     pub fn SHM_GetWindowFlags() -> u32;
@@ -19,14 +19,14 @@ mod test_mocks {
     pub fn SDL_GetKeyboardState(numkeys: *mut i32) -> *const u8 {
         panic!("Can't call SDL_GetKeyboardState in test context")
     }
-    pub fn SDL_GetRelativeMouseState(x: *mut i32, y: *mut i32) -> u32 {
-        panic!("Can't call SDL_GetRelativeMouseState in test context")
+    pub fn SHM_GetRelativeMouseState(x: *mut i32, y: *mut i32) -> u32 {
+        panic!("Can't call SHM_GetRelativeMouseState in test context")
     }
-    pub fn SDL_SetRelativeMouseMode(enabled: bool) -> i32 {
-        panic!("Can't call SDL_SetRelativeMouseMode in test context")
+    pub fn SHM_SetRelativeMouseMode(enabled: bool) {
+        panic!("Can't call SHM_SetRelativeMouseMode in test context")
     }
-    pub fn SDL_GetMouseState(x: *mut i32, y: *mut i32) -> u32 {
-        panic!("Can't call SDL_GetMouseState in test context")
+    pub fn SHM_GetMouseState(x: *mut i32, y: *mut i32) -> u32 {
+        panic!("Can't call SHM_GetMouseState in test context")
     }
     pub fn SHM_SetCursorVisible(visible: bool) {
         panic!("Can't call SHM_SetCursorVisible in test context")

@@ -1,7 +1,7 @@
 #include "imgui.h"
-#include "imgui_impl_sdl2.h"
+#include "imgui_impl_sdl3.h"
 #include "imgui_impl_opengl3.h"
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 #if defined(_WIN32)
 #include "Tracy.hpp"
@@ -149,7 +149,30 @@ extern "C" {
 
     void SHM_GetDrawableSize(int *display_w, int *display_h) {
         ZoneScoped;
-        SDL_GL_GetDrawableSize(window, display_w, display_h);
+        SDL_GetWindowSizeInPixels(window, display_w, display_h);
+    }
+
+    // SDL3 changed GetMouseState/GetRelativeMouseState to use float coords and
+    // removed the global SDL_SetRelativeMouseMode in favour of a per-window call.
+    // These wrappers keep the Rust side unchanged.
+    uint32_t SHM_GetMouseState(int *x, int *y) {
+        float fx = 0, fy = 0;
+        SDL_MouseButtonFlags buttons = SDL_GetMouseState(&fx, &fy);
+        if (x) *x = (int)fx;
+        if (y) *y = (int)fy;
+        return (uint32_t)buttons;
+    }
+
+    uint32_t SHM_GetRelativeMouseState(int *x, int *y) {
+        float fx = 0, fy = 0;
+        SDL_MouseButtonFlags buttons = SDL_GetRelativeMouseState(&fx, &fy);
+        if (x) *x = (int)fx;
+        if (y) *y = (int)fy;
+        return (uint32_t)buttons;
+    }
+
+    void SHM_SetRelativeMouseMode(bool enabled) {
+        SDL_SetWindowRelativeMouseMode(window, enabled);
     }
 
     void SHM_SetCursorVisible(bool visible) {
