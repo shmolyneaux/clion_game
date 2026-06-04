@@ -114,7 +114,6 @@ pub enum Expression {
     BooleanOp(BooleanOp),
     BinaryOp(BinaryOp),
     UnaryOp(UnaryOp),
-    Stringify(Box<ExprNode>),
     Call(Box<ExprNode>, Vec<ExprNode>, Vec<(Ident, ExprNode)>),
     Index(Box<ExprNode>, Box<ExprNode>),
     Attribute(Box<ExprNode>, Vec<u8>),

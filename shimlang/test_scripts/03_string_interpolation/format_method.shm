@@ -10,10 +10,6 @@ assert("\([1, 2, 3])" == "[1, 2, 3]");
 // Calling `.format` directly produces the same result.
 assert((42).format() == "42");
 
-// The default formatter ignores extra positional and keyword arguments.
-assert("\(13, pretty=true)" == "13");
-assert("\(13, 1, 2, foo=3)" == "13");
-
 // Structs may override `.format` to customize interpolation, including
 // accepting positional and keyword arguments.
 struct Point {

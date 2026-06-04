@@ -1160,6 +1160,7 @@ impl ShimValue {
             }
             ShimValue::Float(_) => {
                 let func = match ident {
+                    b"format" => shim_float_format,
                     b"bool" => shim_bool,
                     b"int" => shim_int,
                     b"float" => shim_float,
@@ -1461,11 +1462,6 @@ impl ShimValue {
                 b.to_string_mem(&interpreter.mem)
             )),
         }
-    }
-
-    fn to_shimvalue_string(self, interpreter: &mut Interpreter) -> ShimValue {
-        let s = self.to_string(interpreter);
-        interpreter.mem.alloc_str(&s.into_bytes())
     }
 
     pub fn to_string_mem(&self, mem: &MMU) -> String {
@@ -2350,10 +2346,6 @@ impl Interpreter {
                 val if val == ByteCode::Negate as u8 => {
                     let a = stack.pop().expect("Operand for ByteCode::Negate");
                     stack.push(a.neg(self)?);
-                }
-                val if val == ByteCode::Stringify as u8 => {
-                    let a = stack.pop().expect("Operand for ByteCode::Stringify");
-                    stack.push(a.to_shimvalue_string(self));
                 }
                 val if val == ByteCode::LiteralNone as u8 => {
                     stack.push(ShimValue::None);
