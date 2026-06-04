@@ -2222,6 +2222,25 @@ pub(crate) fn shim_dict_shrink_to_fit(
     Ok(ShimValue::None)
 }
 
+/// Default implementation of the `.format` method available on every
+/// `ShimValue`. It is used by string interpolation (`"\(value)"`) and may be
+/// overridden by structs or native types that define their own `format`
+/// method. The default implementation renders the value's string
+/// representation and ignores any extra positional or keyword arguments (such
+/// as `pretty=true`) so that all value types share a uniform interface.
+pub(crate) fn shim_format(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let obj = unpacker.required(b"obj")?;
+    // Intentionally do not call `unpacker.end()`: the default formatter
+    // tolerates (and ignores) additional formatting arguments.
+
+    let s = obj.to_string_mem(&interpreter.mem);
+    Ok(interpreter.mem.alloc_str(s.as_bytes()))
+}
+
 pub(crate) fn shim_str_len(
     interpreter: &mut Interpreter,
     args: &ArgBundle,

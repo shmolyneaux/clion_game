@@ -1213,6 +1213,24 @@ impl ShimValue {
         }
     }
 
+    /// Like `resolve_attr`, but provides a default `format` method for every
+    /// `ShimValue` type. Types that define their own `format` (e.g. via a
+    /// struct method or a native `get_attr`) are resolved normally and take
+    /// precedence; only when no `format` is found does the default formatter
+    /// (`shim_format`) get used. This backs string interpolation, where
+    /// `"\(value)"` lowers to `value.format()`.
+    fn resolve_attr_or_format(
+        &self,
+        interpreter: &mut Interpreter,
+        ident: &[u8],
+    ) -> Result<ResolvedAttr, String> {
+        match self.resolve_attr(interpreter, ident) {
+            Ok(resolved) => Ok(resolved),
+            Err(_) if ident == b"format" => Ok(ResolvedAttr::NativeMethod(*self, shim_format)),
+            Err(e) => Err(e),
+        }
+    }
+
     pub fn attr_call(
         &self,
         ident: &[u8],
@@ -1229,7 +1247,7 @@ impl ShimValue {
                 return Err("__name__ is not callable".to_string());
             }
         }
-        match self.resolve_attr(interpreter, ident)? {
+        match self.resolve_attr_or_format(interpreter, ident)? {
             ResolvedAttr::Value(v) => v.call(interpreter, args),
             ResolvedAttr::BoundMethod(self_val, fn_pos) => {
                 args.args.insert(0, self_val);
@@ -1911,7 +1929,7 @@ impl ShimValue {
                 }
             }
         }
-        match self.resolve_attr(interpreter, ident)? {
+        match self.resolve_attr_or_format(interpreter, ident)? {
             ResolvedAttr::Value(v) => Ok(v),
             ResolvedAttr::BoundMethod(self_val, fn_pos) => {
                 Ok(interpreter.mem.alloc_bound_method(&self_val, fn_pos))

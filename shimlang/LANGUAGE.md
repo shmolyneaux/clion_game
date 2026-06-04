@@ -1403,6 +1403,44 @@ Output:
 You say: 'hello Alice' to me
 ```
 
+### The `.format` method
+
+Interpolating a value is implemented by calling its `.format` method, so
+`"Value: \(x)"` is equivalent to `"Value: " + x.format()`. Every value type
+has a default `.format` implementation that produces its standard string
+representation.
+
+The interpolation may pass positional and keyword arguments to `.format`. For
+example, `"\(value, pretty=true)"` calls `value.format(pretty=true)`. The
+default `.format` ignores any extra arguments, but a struct can override
+`format` to customize how it is rendered:
+
+```rust
+struct Point {
+    x,
+    y,
+
+    fn format(self, pretty=false) {
+        if pretty {
+            "Point { x: \(self.x), y: \(self.y) }"
+        } else {
+            "(\(self.x), \(self.y))"
+        }
+    }
+}
+
+let p = Point(1, 2);
+print("\(p)");
+print("\(p, pretty=true)");
+```
+
+Output:
+
+```
+(1, 2)
+Point { x: 1, y: 2 }
+```
+
 ## Block Expressions
 
 Curly braces create block expressions. The value of the last expression in a

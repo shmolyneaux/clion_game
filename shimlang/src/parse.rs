@@ -211,8 +211,31 @@ pub fn parse_primary(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                 match *tokens.peek()? {
                     Token::StringInterpolationStart => {
                         tokens.advance()?;
-                        let interp_expr = parse_expression(tokens)?;
-                        tokens.consume(Token::StringInterpolationEnd)?;
+                        let value_expr = parse_expression(tokens)?;
+
+                        // After the value to format, allow optional positional
+                        // and keyword arguments that are forwarded to the value's
+                        // `.format` method, e.g. `\(value, pretty=true)`.
+                        let (args, kwargs) = if *tokens.peek()? == Token::Comma {
+                            tokens.advance()?;
+                            parse_fn_arguments(tokens, Token::StringInterpolationEnd)?
+                        } else {
+                            tokens.consume(Token::StringInterpolationEnd)?;
+                            (Vec::new(), Vec::new())
+                        };
+
+                        // `\(value, ...)` is lowered to `value.format(...)`.
+                        let format_call = Expression::Call(
+                            Box::new(Node {
+                                data: Expression::Attribute(
+                                    Box::new(value_expr),
+                                    b"format".to_vec(),
+                                ),
+                                span,
+                            }),
+                            args,
+                            kwargs,
+                        );
 
                         let token = tokens.pop()?;
                         match token {
@@ -220,7 +243,7 @@ pub fn parse_primary(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                                 expr = Expression::BinaryOp(BinaryOp::Add(
                                     Box::new(Node { data: expr, span }),
                                     Box::new(Node {
-                                        data: Expression::Stringify(Box::new(interp_expr)),
+                                        data: format_call,
                                         span,
                                     }),
                                 ));
