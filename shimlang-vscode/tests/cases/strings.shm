@@ -34,3 +34,11 @@
 //                 ^^ constant.numeric.integer.shim
 //                   ^ punctuation.section.interpolation.end.shim
 //                          ^ punctuation.section.interpolation.end.shim
+
+"format args \(value, pretty=true) end";
+//           ^^ punctuation.section.interpolation.begin.shim
+//             ^^^^^ variable.other.shim
+//                    ^^^^^^ variable.other.shim
+//                          ^ keyword.operator.assignment.shim
+//                           ^^^^ constant.language.boolean.true.shim
+//                               ^ punctuation.section.interpolation.end.shim
