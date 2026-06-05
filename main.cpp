@@ -38,8 +38,60 @@ SDL_Window* window;
 extern "C" int rust_init();
 extern "C" int rust_frame(float delta);
 extern "C" void rust_audio_callback(void* userdata, Uint8* stream, int len);
+extern "C" int rust_save_screenshot(const char* path, int w, int h);
+extern "C" void rust_set_headless(bool enabled);
+extern "C" void rust_set_script_path(const char* path);
 
 static constexpr int kAudioSampleRate = 44100;
+
+// Command-line configuration, populated from argv.
+//
+// `script_path` selects which script the engine runs and applies in all modes
+// (interactive and headless); when empty the engine uses its built-in default
+// ("game.shm").
+//
+// The headless options are only meaningful when `enabled` is set: the engine then
+// renders offscreen (no visible window) for `frames` frames and writes each
+// composited frame to `screenshot_dir` as a PNG, then exits. Intended for
+// automation / CI graphics validation.
+struct CliConfig {
+    bool enabled = false;            // --headless
+    int frames = 1;                  // --frames
+    std::string screenshot_dir = "frames"; // --screenshot-dir
+    int width = 1920;                // --width
+    int height = 1080;               // --height
+    std::string script_path;         // --script (empty => engine default)
+};
+
+static CliConfig parse_cli_config(int argc, char** argv) {
+    CliConfig cfg;
+    auto next_int = [&](int& i, int fallback) -> int {
+        if (i + 1 < argc) {
+            return SDL_atoi(argv[++i]);
+        }
+        return fallback;
+    };
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--headless") {
+            cfg.enabled = true;
+        } else if (arg == "--frames") {
+            cfg.frames = next_int(i, cfg.frames);
+        } else if (arg == "--screenshot-dir") {
+            if (i + 1 < argc) cfg.screenshot_dir = argv[++i];
+        } else if (arg == "--width") {
+            cfg.width = next_int(i, cfg.width);
+        } else if (arg == "--height") {
+            cfg.height = next_int(i, cfg.height);
+        } else if (arg == "--script") {
+            if (i + 1 < argc) cfg.script_path = argv[++i];
+        } else if (arg == "--fixed-delta") {
+            // Deterministic delta is implied in headless mode; accepted for clarity.
+        }
+    }
+    if (cfg.frames < 1) cfg.frames = 1;
+    return cfg;
+}
 
 
 // Function to log error messages
@@ -63,12 +115,26 @@ void error_window() {
 }
 
 // Main code
-int main(int, char**)
+int main(int argc, char** argv)
 {
     bool startup_error = false;
 
+    CliConfig headless = parse_cli_config(argc, argv);
+
+    if (headless.enabled) {
+        // Use the offscreen (EGL surfaceless) video driver so a GL context can be
+        // created with no X server / display, and the dummy audio driver so we
+        // don't need an audio device.
+        SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "offscreen");
+        SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
+    }
+
     // Setup SDL
-    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_AUDIO))
+    Uint32 init_flags = SDL_INIT_VIDEO | SDL_INIT_GAMEPAD;
+    if (!headless.enabled) {
+        init_flags |= SDL_INIT_AUDIO;
+    }
+    if (!SDL_Init(init_flags))
     {
         log_error("SDL_Init Error:");
         log_error(SDL_GetError());
@@ -117,7 +183,14 @@ int main(int, char**)
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
     SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
     SDL_WindowFlags window_flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
-    window = SDL_CreateWindow("CLion Game", 1920, 1080, window_flags);
+    int window_w = 1920;
+    int window_h = 1080;
+    if (headless.enabled) {
+        window_flags |= SDL_WINDOW_HIDDEN;
+        window_w = headless.width;
+        window_h = headless.height;
+    }
+    window = SDL_CreateWindow("CLion Game", window_w, window_h, window_flags);
     if (window == nullptr)
     {
         log_error("SDL_CreateWindow Error:");
@@ -146,11 +219,18 @@ int main(int, char**)
     // CHECK: Is GLEW not needed for the web?
     glewExperimental = GL_TRUE;
     if (glewInit() != GLEW_OK) {
-        log_error("Failed to initialize GLEW");
-        SDL_GL_DestroyContext(gl_context);
-        SDL_DestroyWindow(window);
-        SDL_Quit();
-        return -1;
+        // Under the offscreen/EGL driver GLEW may fail to initialize, but the
+        // core GL calls this file makes resolve via libGL directly, so don't
+        // treat it as fatal in headless mode.
+        if (headless.enabled) {
+            log_error("glewInit failed under headless mode; continuing");
+        } else {
+            log_error("Failed to initialize GLEW");
+            SDL_GL_DestroyContext(gl_context);
+            SDL_DestroyWindow(window);
+            SDL_Quit();
+            return -1;
+        }
     }
     // glewInit() with glewExperimental calls glGetString(GL_EXTENSIONS) which
     // is invalid in a core profile context, leaving a spurious INVALID_ENUM in
@@ -159,7 +239,7 @@ int main(int, char**)
 
     SDL_GL_MakeCurrent(window, gl_context);
 #ifndef __EMSCRIPTEN__
-    SDL_GL_SetSwapInterval(1); // Enable vsync
+    SDL_GL_SetSwapInterval(headless.enabled ? 0 : 1); // Enable vsync (off in headless)
 #endif
 
     // Setup Dear ImGui context
@@ -169,7 +249,10 @@ int main(int, char**)
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;         // Enable Docking
-    io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;       // Enable Multi-Viewport / Platform Windows
+    if (!headless.enabled) {
+        // Multi-viewport spawns real OS windows, which is impossible offscreen.
+        io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;   // Enable Multi-Viewport / Platform Windows
+    }
 
     ImGui::StyleColorsDark();
 
@@ -266,17 +349,33 @@ int main(int, char**)
             additional_amount -= bytes;
         }
     };
-    SDL_AudioSpec want{};
-    want.freq = kAudioSampleRate;
-    want.format = SDL_AUDIO_S16;
-    want.channels = 2;
-    SDL_AudioStream* audio_stream = SDL_OpenAudioDeviceStream(
-        SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &want, sdl3_audio_callback, nullptr);
-    if (!audio_stream) {
-        log_error("SDL_OpenAudioDeviceStream Error:");
+    SDL_AudioStream* audio_stream = nullptr;
+    if (!headless.enabled) {
+        SDL_AudioSpec want{};
+        want.freq = kAudioSampleRate;
+        want.format = SDL_AUDIO_S16;
+        want.channels = 2;
+        audio_stream = SDL_OpenAudioDeviceStream(
+            SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &want, sdl3_audio_callback, nullptr);
+        if (!audio_stream) {
+            log_error("SDL_OpenAudioDeviceStream Error:");
+            log_error(SDL_GetError());
+        } else {
+            SDL_ResumeAudioStreamDevice(audio_stream);
+        }
+    }
+
+    if (headless.enabled && !SDL_CreateDirectory(headless.screenshot_dir.c_str())) {
+        log_error("Failed to create screenshot directory:");
         log_error(SDL_GetError());
-    } else {
-        SDL_ResumeAudioStreamDevice(audio_stream);
+    }
+
+    // Must be set before rust_init(): ScriptBridge::new() reads these. The headless
+    // flag controls synchronous script loading / skipping the hot-reload watcher;
+    // the script path (when provided) overrides the engine's default script.
+    rust_set_headless(headless.enabled);
+    if (!headless.script_path.empty()) {
+        rust_set_script_path(headless.script_path.c_str());
     }
 
     if (rust_init()) {
@@ -286,6 +385,7 @@ int main(int, char**)
 
     // Main loop
     bool done = false;
+    int headless_frame = 0;
 #ifdef __EMSCRIPTEN__
     // For an Emscripten build we are disabling file-system access, so let's not attempt to do a fopen() of the imgui.ini file.
     // You may manually call LoadIniSettingsFromMemory() to load settings from your own storage.
@@ -304,6 +404,11 @@ int main(int, char**)
 
         ticks = current_ticks;
 
+        // Headless renders use a fixed delta so frames are reproducible run-to-run.
+        if (headless.enabled) {
+            delta = 1.0f / 60.0f;
+        }
+
         // Poll and handle events (inputs, window resize, etc.)
         // You can read the io.WantCaptureMouse, io.WantCaptureKeyboard flags to tell if dear imgui wants to use your inputs.
         // - When io.WantCaptureMouse is true, do not dispatch mouse input data to your main application, or clear/overwrite your copy of the mouse data.
@@ -321,8 +426,8 @@ int main(int, char**)
             }
         }
 
-        // Skip rendering when minimized
-        if (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED)
+        // Skip rendering when minimized (never happens for a hidden headless window)
+        if (!headless.enabled && (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED))
         {
             SDL_Delay(10);
             continue;
@@ -406,6 +511,22 @@ int main(int, char**)
             ImGui::UpdatePlatformWindows();
             ImGui::RenderPlatformWindowsDefault();
             SDL_GL_MakeCurrent(backup_current_window, backup_current_context);
+        }
+
+        // Capture the composited back buffer before swapping. Exit once we've
+        // written the requested number of frames.
+        if (headless.enabled) {
+            char path[1024];
+            SDL_snprintf(path, sizeof(path), "%s/frame_%04d.png",
+                         headless.screenshot_dir.c_str(), headless_frame);
+            if (rust_save_screenshot(path, display_w, display_h)) {
+                log_error("rust_save_screenshot failed");
+                log_error(path);
+            }
+            headless_frame++;
+            if (headless_frame >= headless.frames) {
+                done = true;
+            }
         }
 
         SDL_GL_SwapWindow(window);

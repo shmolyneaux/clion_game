@@ -785,6 +785,32 @@ fn init_state() -> State {
     }
 }
 
+/// Set when the engine is running headless (offscreen, for automation/CI). Read by
+/// `ScriptBridge::new` to decide whether to load `game.shm` synchronously at startup
+/// instead of relying on the async file-watcher thread, so frame output is
+/// deterministic from frame 0. Must be set before `rust_init`.
+pub static HEADLESS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_set_headless(enabled: bool) {
+    HEADLESS.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Path to the script the engine should run. When unset, `ScriptBridge::new` falls
+/// back to the built-in default ("game.shm"). Applies in all modes; must be set
+/// before `rust_init`.
+pub static SCRIPT_PATH: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_set_script_path(path: *const c_char) {
+    if path.is_null() {
+        return;
+    }
+    if let Ok(s) = unsafe { CStr::from_ptr(path) }.to_str() {
+        *SCRIPT_PATH.lock().unwrap() = Some(s.to_string());
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_init() -> i32 {
     unsafe {
@@ -953,6 +979,76 @@ pub extern "C" fn rust_frame(delta: f32) -> i32 {
     STATE_REFCELL.with_borrow_mut(|value| frame(value.as_mut().unwrap(), delta));
 
     42
+}
+
+/// Read the current default framebuffer back to the CPU and write it to `path` as
+/// a PNG. Used by headless mode to capture frames for automation/CI. `GL_BACK` is
+/// the default read buffer for our double-buffered context, so this must be called
+/// after rendering but before the buffer swap. Returns 0 on success, non-zero on
+/// failure.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_save_screenshot(path: *const c_char, w: i32, h: i32) -> i32 {
+    if path.is_null() || w <= 0 || h <= 0 {
+        return 1;
+    }
+
+    let path = match unsafe { CStr::from_ptr(path) }.to_str() {
+        Ok(p) => p,
+        Err(_) => return 1,
+    };
+
+    let width = w as usize;
+    let height = h as usize;
+    let row_bytes = width * 4;
+    let mut buf = vec![0u8; row_bytes * height];
+
+    unsafe {
+        // Read from the default (window) framebuffer. Tight packing so rows are
+        // contiguous regardless of width.
+        gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
+        gl::PixelStorei(gl::PACK_ALIGNMENT, 1);
+        gl::ReadPixels(
+            0,
+            0,
+            w,
+            h,
+            gl::RGBA,
+            gl::UNSIGNED_BYTE,
+            buf.as_mut_ptr() as *mut std::ffi::c_void,
+        );
+    }
+
+    // OpenGL's origin is bottom-left; flip rows so the PNG is top-down.
+    let mut flipped = vec![0u8; buf.len()];
+    for y in 0..height {
+        let src = &buf[(height - 1 - y) * row_bytes..(height - y) * row_bytes];
+        flipped[y * row_bytes..(y + 1) * row_bytes].copy_from_slice(src);
+    }
+
+    let file = match std::fs::File::create(path) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("rust_save_screenshot: failed to create {path}: {e}");
+            return 1;
+        }
+    };
+    let writer = std::io::BufWriter::new(file);
+    let mut encoder = png::Encoder::new(writer, w as u32, h as u32);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = match encoder.write_header() {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("rust_save_screenshot: failed to write PNG header for {path}: {e}");
+            return 1;
+        }
+    };
+    if let Err(e) = writer.write_image_data(&flipped) {
+        eprintln!("rust_save_screenshot: failed to write PNG data for {path}: {e}");
+        return 1;
+    }
+
+    0
 }
 
 #[unsafe(no_mangle)]

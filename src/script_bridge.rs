@@ -1733,10 +1733,16 @@ impl ScriptBridge {
     pub fn new() -> Self {
         let (interpreter, env, loop_fn) =
             load_script(b"fn loop() {}").expect("Should be able to load hardcoded script");
-        let script_path = "game.shm".to_string();
+        let script_path = crate::SCRIPT_PATH
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap_or_else(|| "game.shm".to_string());
 
         #[cfg(not(target_arch = "wasm32"))]
         {
+            let headless = crate::HEADLESS.load(std::sync::atomic::Ordering::Relaxed);
+
             let (request_tx, request_rx) = channel();
             let (response_tx, response_rx) = channel();
             let (watcher_tx, watcher_rx) = channel();
@@ -1745,10 +1751,24 @@ impl ScriptBridge {
                 script_thread_logic(request_rx, response_tx);
             });
 
-            std::thread::spawn({
-                let path = script_path.clone();
-                move || file_watcher_logic(path, watcher_tx)
-            });
+            // In headless mode, load `game.shm` synchronously so frame output is
+            // deterministic from frame 0 (rather than racing the 200ms file-watcher
+            // poll, which would otherwise run the empty stub for the first frames),
+            // and skip the file-watcher thread entirely: hot-reload is pointless in a
+            // fixed-frame CI run, and its spurious initial reload would reset the
+            // interpreter state mid-run.
+            let (interpreter, env, loop_fn) = if headless {
+                fs::read(&script_path)
+                    .ok()
+                    .and_then(|bytes| load_script(&bytes).ok())
+                    .unwrap_or((interpreter, env, loop_fn))
+            } else {
+                std::thread::spawn({
+                    let path = script_path.clone();
+                    move || file_watcher_logic(path, watcher_tx)
+                });
+                (interpreter, env, loop_fn)
+            };
 
             Self {
                 state: BridgeState::Paused(Box::new(interpreter), env, loop_fn),
