@@ -15,6 +15,17 @@ if (NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     )
     set(TRACY_ON_DEMAND ON CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(tracy)
+
+    # SDL3 is not packaged in apt yet, so build it from source.
+    # Emscripten provides SDL3 via -sUSE_SDL=3 instead (see below).
+    FetchContent_Declare(
+        SDL3
+        GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+        GIT_TAG release-3.2.10
+        GIT_SHALLOW TRUE
+        GIT_PROGRESS TRUE
+    )
+    FetchContent_MakeAvailable(SDL3)
 endif()
 
 # --- Rust Configuration ---
@@ -112,7 +123,7 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
 
 elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # --- LINUX SETUP ---
-    find_package(SDL3 REQUIRED)
+    # SDL3 is provided by FetchContent above (SDL3::SDL3).
     find_package(GLEW REQUIRED)
 
     target_include_directories(game PRIVATE ${GLEW_INCLUDE_DIRS})
@@ -138,11 +149,8 @@ elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
 
 else()
     # --- WINDOWS SETUP ---
-    set(SDL3_PATH "C:/lib/SDL3-3.4.10")
+    # SDL3 is provided by FetchContent above (SDL3::SDL3).
     set(GLEW_PATH "C:/lib/glew-2.1.0")
-
-    list(APPEND CMAKE_PREFIX_PATH "${SDL3_PATH}")
-    find_package(SDL3 CONFIG REQUIRED)
 
     target_include_directories(game PRIVATE ${GLEW_PATH}/include)
     target_link_directories(game PRIVATE ${GLEW_PATH}/lib/Release/x64)
@@ -150,10 +158,9 @@ else()
     target_link_libraries(game PRIVATE SDL3::SDL3 opengl32 glew32 ws2_32 userenv ntdll TracyClient)
 
     # DLL Copying
-    set(SDL3_DLL "${SDL3_PATH}/lib/x64/SDL3.dll")
     set(GLEW_DLL "${GLEW_PATH}/bin/Release/x64/glew32.dll")
     add_custom_command(TARGET game POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${SDL3_DLL}" "$<TARGET_FILE_DIR:game>/SDL3.dll"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:SDL3::SDL3>" "$<TARGET_FILE_DIR:game>/SDL3.dll"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${GLEW_DLL}" "$<TARGET_FILE_DIR:game>/glew32.dll"
     )
 endif()

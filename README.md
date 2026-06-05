@@ -19,12 +19,23 @@ The following are explicit non-goals:
 
 ## Building on Linux?
 
+SDL3 is built from source automatically via CMake's FetchContent (it isn't
+packaged in apt yet), so you only need GLEW and a Rust toolchain installed:
+
 ```
-sudo apt-get install libsdl2-dev libglew-dev
-mkdir build && cd build
-# For release build
-cmake ..
-# For debug
-cmake -DCMAKE_BUILD_TYPE=Debug ..
-cmake --build .
+sudo apt-get install libglew-dev
+# Rust (if not already installed): https://rustup.rs
+
+# For a release build
+cmake -B build
+# ...or for a debug build
+cmake -B build -DCMAKE_BUILD_TYPE=Debug
+
+cmake --build build -j
+
+# Run it
+./build/game
 ```
+
+The first configure clones and builds SDL3 (and Tracy), so it takes a while;
+subsequent builds reuse the cached copies under `build/_deps`.
