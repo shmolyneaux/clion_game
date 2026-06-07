@@ -192,7 +192,7 @@ fn scan_for_key(bytes: &[u8], key: &[u8]) -> Option<usize> {
     None
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Environment {
     // Points to the current EnvScope in MMU
     // u32 is used as u24 converted to u32, 0 means no scope (empty environment)
@@ -217,29 +217,33 @@ impl Environment {
 
     pub fn new_with_builtins(interpreter: &mut Interpreter) -> Self {
         let mut env = Self::new(&mut interpreter.mem);
-        let builtins: &[(&[u8], Box<NativeFn>)] = &[
-            (b"print", Box::new(shim_print)),
-            (b"panic", Box::new(shim_panic)),
-            (b"dict", Box::new(shim_dict)),
-            (b"Range", Box::new(shim_range)),
-            (b"enumerate", Box::new(shim_enumerate)),
-            (b"average", Box::new(shim_average)),
-            (b"assert", Box::new(shim_assert)),
-            (b"str", Box::new(shim_str)),
-            (b"int", Box::new(shim_int)),
-            (b"float", Box::new(shim_float)),
-            (b"try_int", Box::new(shim_try_int)),
-            (b"try_float", Box::new(shim_try_float)),
+        let builtins: &[(&[u8], NativeFn)] = &[
+            (b"print", shim_print),
+            (b"panic", shim_panic),
+            (b"dict", shim_dict),
+            (b"Range", shim_range),
+            (b"enumerate", shim_enumerate),
+            (b"average", shim_average),
+            (b"assert", shim_assert),
+            (b"str", shim_str),
+            (b"int", shim_int),
+            (b"float", shim_float),
+            (b"try_int", shim_try_int),
+            (b"try_float", shim_try_float),
         ];
 
         for (name, func) in builtins {
-            let position = interpreter
-                .mem
-                .alloc_and_set(**func, &format!("builtin func {}", debug_u8s(name)));
-            env.insert_new(interpreter, name.to_vec(), ShimValue::NativeFn(position));
+            env.insert_native_fn(interpreter, name, *func);
         }
 
         env
+    }
+
+    pub fn insert_native_fn(&mut self, interpreter: &mut Interpreter, name: &[u8], func: NativeFn) {
+        let position = interpreter
+            .mem
+            .alloc_and_set(func, &format!("native fn {}", debug_u8s(name)));
+        self.insert_new(interpreter, name.to_vec(), ShimValue::NativeFn(position));
     }
 
     pub fn insert_new(&mut self, interpreter: &mut Interpreter, key: Vec<u8>, val: ShimValue) {
@@ -2037,6 +2041,7 @@ pub struct Interpreter {
     pub source: HashMap<String, String>,
     pub program: Arc<Program>,
     singletons: HashMap<TypeId, Box<dyn Any + Send>>,
+    pub root_env: Environment,
 }
 
 impl Interpreter {
@@ -2151,12 +2156,37 @@ impl Interpreter {
     pub fn create(config: &Config, program: Program) -> Self {
         let mmu = MMU::with_capacity(u24::from(config.memory_space_bytes / 8));
 
-        Self {
+        let mut interp = Self {
             mem: mmu,
             source: HashMap::new(),
             program: Arc::new(program),
             singletons: HashMap::new(),
-        }
+            root_env: Environment::default(),
+        };
+        interp.root_env = Environment::new_with_builtins(&mut interp);
+        interp
+    }
+
+    /// Add a native function to the interpreter's root environment.
+    pub fn add_native_fn(&mut self, name: &[u8], func: NativeFn) {
+        let mut env = std::mem::take(&mut self.root_env);
+        env.insert_native_fn(self, name, func);
+        self.root_env = env;
+    }
+
+    /// Run the GC using the stored root environment as the root.
+    pub fn gc_root(&mut self) {
+        let env = std::mem::take(&mut self.root_env);
+        self.gc(&env);
+        self.root_env = env;
+    }
+
+    /// Execute bytecode using the stored root environment.
+    pub fn execute_root(&mut self, pc: &mut usize) -> Result<ShimValue, String> {
+        let mut env = std::mem::take(&mut self.root_env);
+        let result = self.execute_bytecode_extended(pc, ArgBundle::new(), &mut env);
+        self.root_env = env;
+        result
     }
 
     pub fn fetch_mut<T: Default + Send + 'static>(&mut self) -> &mut T {
