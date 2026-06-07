@@ -1527,7 +1527,7 @@ fn value_from_json(
         },
         _ => {
             let val: &HashMap<_, _> = data.get().ok_or(format!("JSON data not an object"))?;
-            let ty = env.get(interpreter, type_name.as_bytes()).ok_or(format!("env has no type_name {type_name}"))?;
+            let ty = env.get(&interpreter.mem, type_name.as_bytes()).ok_or(format!("env has no type_name {type_name}"))?;
             let kwargs: Vec<(Ident, ShimValue)> = val.iter()
                 .map(|(key, value)| {
                     let shim_key = key.as_bytes().to_vec();
