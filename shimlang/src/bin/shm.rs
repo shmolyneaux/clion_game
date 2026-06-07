@@ -124,16 +124,11 @@ fn run() -> Result<(), String> {
                 };
                 let program = shimlang::compile_ast(&ast)?;
                 let mut interpreter = shimlang::Interpreter::create(&Config::default(), program);
-                let mut env = shimlang::Environment::new_with_builtins(&mut interpreter);
                 let mut pc = 0;
-                match interpreter.execute_bytecode_extended(
-                    &mut pc,
-                    shimlang::ArgBundle::new(),
-                    &mut env,
-                ) {
+                match interpreter.execute_root(&mut pc) {
                     Ok(_) => {
                         if args.gc {
-                            interpreter.gc(&env);
+                            interpreter.gc();
                         }
                     }
                     Err(msg) => {
@@ -177,7 +172,6 @@ fn run() -> Result<(), String> {
         let ast = shimlang::ast_from_text(b"").unwrap();
         let program = shimlang::compile_ast(&ast)?;
         let mut interpreter = shimlang::Interpreter::create(&Config::default(), program);
-        let mut env = shimlang::Environment::new_with_builtins(&mut interpreter);
 
         let mut pc = 0;
 
@@ -201,11 +195,7 @@ fn run() -> Result<(), String> {
             let program = shimlang::compile_ast(&ast)?;
 
             interpreter.append_program(program)?;
-            match interpreter.execute_bytecode_extended(
-                &mut pc,
-                shimlang::ArgBundle::new(),
-                &mut env,
-            ) {
+            match interpreter.execute_root(&mut pc) {
                 Ok(shimlang::ShimValue::None) => (),
                 Ok(val) => {
                     println!("{}", val.to_string(&mut interpreter));

@@ -383,50 +383,33 @@ fn try_take_pending_source() -> Option<Vec<u8>> {
     }
 }
 
-fn load_script(text: &[u8]) -> Result<(Interpreter, Environment, ShimValue), String> {
-    let interpreter_config = shimlang::Config::default();
+fn load_script(text: &[u8]) -> Result<(Interpreter, ShimValue), String> {
     let ast = shimlang::ast_from_text(text)?;
 
     let program = shimlang::compile_ast(&ast)?;
     let mut interpreter = shimlang::Interpreter::create(&shimlang::Config::default(), program);
-    let mut env = shimlang::Environment::new_with_builtins(&mut interpreter);
 
-    let builtins: &[(&[u8], Box<NativeFn>)] = &[
-        (b"draw_circle", Box::new(shim_draw_circle)),
-        (b"draw_rectangle", Box::new(shim_draw_rectangle)),
-        (b"draw_line", Box::new(shim_draw_line)),
-        (b"draw_text", Box::new(shim_draw_text)),
-        (b"clear_background", Box::new(shim_clear_background)),
-        (b"new_bloop", Box::new(shim_new_bloop)),
-    ];
-
-    for (name, func) in builtins {
-        let position = interpreter.mem.alloc_and_set(**func, &format!("builtin func {}", debug_u8s(name)));
-        env.insert_new(&mut interpreter, name.to_vec(), ShimValue::NativeFn(position));
-    }
+    interpreter.add_native_fn(b"draw_circle", shim_draw_circle);
+    interpreter.add_native_fn(b"draw_rectangle", shim_draw_rectangle);
+    interpreter.add_native_fn(b"draw_line", shim_draw_line);
+    interpreter.add_native_fn(b"draw_text", shim_draw_text);
+    interpreter.add_native_fn(b"clear_background", shim_clear_background);
+    interpreter.add_native_fn(b"new_bloop", shim_new_bloop);
 
     let key_val = interpreter.mem.alloc_native(KeyMap);
-    env.insert_new(&mut interpreter, b"key".to_vec(), key_val);
+    interpreter.insert_in_root_env(b"key", key_val);
 
     let mut pc = 0;
-    interpreter.execute_bytecode_extended(&mut pc, shimlang::ArgBundle::new(), &mut env)?;
-    interpreter.gc(&env);
+    interpreter.execute_root(&mut pc)?;
+    interpreter.gc();
 
-    // Technically this is an external reference that should be passed to the
-    // gc as a root, but since it's in the `env` it should already be marked.
-    let loop_fn = match env.get(&mut interpreter, b"loop") {
-        Some(func @ ShimValue::Fn(_)) => {
-            func
-        },
-        None => {
-            return Err("No loop function found".to_string());
-        },
-        _ => {
-            return Err("Identifier 'loop' is not a function".to_string());
-        },
+    let loop_fn = match interpreter.get_from_root_env(b"loop") {
+        Some(func @ ShimValue::Fn(_)) => func,
+        None => return Err("No loop function found".to_string()),
+        _ => return Err("Identifier 'loop' is not a function".to_string()),
     };
 
-    Ok((interpreter, env, loop_fn))
+    Ok((interpreter, loop_fn))
 }
 
 fn generate_bloop_wav(start_freq: f32, end_freq: f32) -> Vec<u8> {
@@ -487,7 +470,7 @@ async fn main() {
         SOUND_MANAGER.write(SoundManager::new());
     }
 
-    let (mut interpreter, mut env, mut loop_fn) = load_script(b"fn loop() {}").expect("Should be able to load hardcoded script");
+    let (mut interpreter, mut loop_fn) = load_script(b"fn loop() {}").expect("Should be able to load hardcoded script");
     let mut script_errors = Vec::new();
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -504,7 +487,7 @@ async fn main() {
         if let Some(bytes) = try_take_pending_source() {
             match load_script(&bytes) {
                 Ok(res) => {
-                    (interpreter, env, loop_fn) = res;
+                    (interpreter, loop_fn) = res;
                     script_errors = Vec::new();
                 },
                 Err(msg) => {
@@ -558,7 +541,7 @@ async fn main() {
                         &mut new_env,
                     ) {
                         Err(msg) => script_errors.push(msg),
-                        Ok(_) => interpreter.gc(&env),
+                        Ok(_) => interpreter.gc(),
                     }
                 },
                 Err(msg) => {

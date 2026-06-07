@@ -2132,8 +2132,9 @@ impl Interpreter {
         }
     }
 
-    pub fn gc(&mut self, env: &Environment) {
+    pub fn gc(&mut self) {
         let _zone = zone_scoped!("GC");
+        let env = std::mem::take(&mut self.root_env);
 
         unsafe {
             let _scope: &EnvScope = self.mem.get(u24::from(env.current_scope));
@@ -2151,6 +2152,8 @@ impl Interpreter {
             gc.sweep();
             gc.drop_orphaned_native_types();
         }
+
+        self.root_env = env;
     }
 
     pub fn create(config: &Config, program: Program) -> Self {
@@ -2174,19 +2177,32 @@ impl Interpreter {
         self.root_env = env;
     }
 
-    /// Run the GC using the stored root environment as the root.
-    pub fn gc_root(&mut self) {
-        let env = std::mem::take(&mut self.root_env);
-        self.gc(&env);
-        self.root_env = env;
-    }
-
     /// Execute bytecode using the stored root environment.
     pub fn execute_root(&mut self, pc: &mut usize) -> Result<ShimValue, String> {
         let mut env = std::mem::take(&mut self.root_env);
         let result = self.execute_bytecode_extended(pc, ArgBundle::new(), &mut env);
         self.root_env = env;
         result
+    }
+
+    pub fn insert_in_root_env(&mut self, key: &[u8], val: ShimValue) {
+        let mut env = std::mem::take(&mut self.root_env);
+        env.insert_new(self, key.to_vec(), val);
+        self.root_env = env;
+    }
+
+    pub fn update_in_root_env(&mut self, key: &[u8], val: ShimValue) -> Result<(), String> {
+        let mut env = std::mem::take(&mut self.root_env);
+        let result = env.update(self, key, val);
+        self.root_env = env;
+        result
+    }
+
+    pub fn get_from_root_env(&mut self, key: &[u8]) -> Option<ShimValue> {
+        let env = std::mem::take(&mut self.root_env);
+        let val = env.get(self, key);
+        self.root_env = env;
+        val
     }
 
     pub fn fetch_mut<T: Default + Send + 'static>(&mut self) -> &mut T {
