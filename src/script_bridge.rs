@@ -668,7 +668,7 @@ impl DrawList {
 /// Messages sent from the Engine (Main Thread) to the Script Thread
 #[cfg(not(target_arch = "wasm32"))]
 pub enum ScriptRequest {
-    ExecuteLoop(Interpreter, Environment, ShimValue, Vec<u8>, Vec<u8>, f32, PerfTimer, Vec<u32>),
+    ExecuteLoop(Interpreter, ShimValue, Vec<u8>, Vec<u8>, f32, PerfTimer, Vec<u32>),
 }
 
 /// Messages sent from the Script Thread to the Engine
@@ -676,26 +676,25 @@ pub enum ScriptRequest {
 pub enum ScriptResponse {
     LoopComplete(
         Interpreter,
-        Environment,
         ShimValue,
         Vec<DrawListItem>,
         Vec<SoundCmd>,
         f32,
     ),
-    Error(Interpreter, Environment, ShimValue, String),
+    Error(Interpreter, ShimValue, String),
 }
 
 /// Messages sent from the file watcher thread to the Engine
 #[cfg(not(target_arch = "wasm32"))]
 enum ScriptWatcherMessage {
-    Loaded(Interpreter, Environment, ShimValue),
+    Loaded(Interpreter, ShimValue),
     Error(String),
 }
 
 enum BridgeState {
     #[cfg(not(target_arch = "wasm32"))]
     Running,
-    Paused(Box<Interpreter>, Environment, ShimValue),
+    Paused(Box<Interpreter>, ShimValue),
 }
 
 pub struct ScriptBridge {
@@ -1528,7 +1527,7 @@ fn value_from_json(
         },
         _ => {
             let val: &HashMap<_, _> = data.get().ok_or(format!("JSON data not an object"))?;
-            let ty = env.get(interpreter, type_name.as_bytes()).ok_or(format!("env has no type_name {type_name}"))?;
+            let ty = env.get(&interpreter.mem, type_name.as_bytes()).ok_or(format!("env has no type_name {type_name}"))?;
             let kwargs: Vec<(Ident, ShimValue)> = val.iter()
                 .map(|(key, value)| {
                     let shim_key = key.as_bytes().to_vec();
@@ -1619,95 +1618,74 @@ fn shim_load_data(
     }
 }
 
-fn load_script(bytes: &[u8]) -> Result<(Interpreter, Environment, ShimValue), String> {
+fn load_script(bytes: &[u8]) -> Result<(Interpreter, ShimValue), String> {
     let ast = shimlang::ast_from_text(bytes)?;
     let program = shimlang::compile_ast(&ast)?;
     let mut interpreter = shimlang::Interpreter::create(&shimlang::Config::default(), program);
-    let mut env = shimlang::Environment::new_with_builtins(&mut interpreter);
 
-    let builtins: &[(&[u8], NativeFn)] = &[
-        (b"ig_begin", shim_ig_begin),
-        (b"ig_end", shim_ig_end),
-        (b"ig_text", shim_ig_text),
-        (b"draw_rect", shim_draw_rect),
-        (b"draw_text", shim_draw_text),
-        (b"text_size", shim_text_size),
-        (b"create_texture", shim_create_texture),
-        (b"Rect", shim_rect),
-        (b"window_size", shim_window_size),
-        (b"mouse_pos", shim_mouse_pos),
-        (b"mouse_pressed", shim_mouse_pressed),
-        (b"mouse_just_pressed", shim_mouse_just_pressed),
-        (b"mouse_just_released", shim_mouse_just_released),
-        (b"show_cursor", shim_show_cursor),
-        (b"hide_cursor", shim_hide_cursor),
-        (b"set_window_title", shim_set_window_title),
-        (b"mouse_focus", shim_mouse_focus),
-        (b"input_focus", shim_input_focus),
-        (b"rand", shim_rand),
-        (b"randi", shim_randi),
-        (b"play_square", shim_play_square),
-        (b"play_sine", shim_play_sine),
-        (b"create_sample", shim_create_sample),
-        (b"set_bus_gain", shim_set_bus_gain),
-        (b"set_bus_lowpass", shim_set_bus_lowpass),
-        (b"clear_bus_effects", shim_clear_bus_effects),
-        (b"reset_audio", shim_reset_audio),
-        (b"save_data", shim_save_data),
-        (b"load_data", shim_load_data),
-    ];
-    for (name, func) in builtins {
-        let position = interpreter.mem.alloc_and_set(
-            *func,
-            &format!("builtin imgui::{}", std::str::from_utf8(name).unwrap()),
-        );
-        env.insert_new(
-            &mut interpreter,
-            name.to_vec(),
-            ShimValue::NativeFn(position),
-        );
-    }
+    interpreter.add_native_fn(b"ig_begin", shim_ig_begin);
+    interpreter.add_native_fn(b"ig_end", shim_ig_end);
+    interpreter.add_native_fn(b"ig_text", shim_ig_text);
+    interpreter.add_native_fn(b"draw_rect", shim_draw_rect);
+    interpreter.add_native_fn(b"draw_text", shim_draw_text);
+    interpreter.add_native_fn(b"text_size", shim_text_size);
+    interpreter.add_native_fn(b"create_texture", shim_create_texture);
+    interpreter.add_native_fn(b"Rect", shim_rect);
+    interpreter.add_native_fn(b"window_size", shim_window_size);
+    interpreter.add_native_fn(b"mouse_pos", shim_mouse_pos);
+    interpreter.add_native_fn(b"mouse_pressed", shim_mouse_pressed);
+    interpreter.add_native_fn(b"mouse_just_pressed", shim_mouse_just_pressed);
+    interpreter.add_native_fn(b"mouse_just_released", shim_mouse_just_released);
+    interpreter.add_native_fn(b"show_cursor", shim_show_cursor);
+    interpreter.add_native_fn(b"hide_cursor", shim_hide_cursor);
+    interpreter.add_native_fn(b"set_window_title", shim_set_window_title);
+    interpreter.add_native_fn(b"mouse_focus", shim_mouse_focus);
+    interpreter.add_native_fn(b"input_focus", shim_input_focus);
+    interpreter.add_native_fn(b"rand", shim_rand);
+    interpreter.add_native_fn(b"randi", shim_randi);
+    interpreter.add_native_fn(b"play_square", shim_play_square);
+    interpreter.add_native_fn(b"play_sine", shim_play_sine);
+    interpreter.add_native_fn(b"create_sample", shim_create_sample);
+    interpreter.add_native_fn(b"set_bus_gain", shim_set_bus_gain);
+    interpreter.add_native_fn(b"set_bus_lowpass", shim_set_bus_lowpass);
+    interpreter.add_native_fn(b"clear_bus_effects", shim_clear_bus_effects);
+    interpreter.add_native_fn(b"reset_audio", shim_reset_audio);
+    interpreter.add_native_fn(b"save_data", shim_save_data);
+    interpreter.add_native_fn(b"load_data", shim_load_data);
 
     let key_val = interpreter.mem.alloc_native(KeyMap);
-    env.insert_new(&mut interpreter, b"key".to_vec(), key_val);
-    env.insert_new(&mut interpreter, b"delta".to_vec(), ShimValue::Float(0.0));
+    interpreter.insert_in_root_env(b"key", key_val);
+    interpreter.insert_in_root_env(b"delta", ShimValue::Float(0.0));
 
     let perf_module = interpreter.mem.alloc_native(PerfModule);
-    env.insert_new(&mut interpreter, b"perf".to_vec(), perf_module);
+    interpreter.insert_in_root_env(b"perf", perf_module);
 
-    let mouse_buttons: &[(&[u8], i32)] = &[
-        (b"MOUSE_LEFT", 1),
-        (b"MOUSE_MIDDLE", 2),
-        (b"MOUSE_RIGHT", 3),
-        (b"MOUSE_X1", 4),
-        (b"MOUSE_X2", 5),
-    ];
-    for (name, value) in mouse_buttons {
-        env.insert_new(&mut interpreter, name.to_vec(), ShimValue::Integer(*value));
-    }
+    interpreter.insert_in_root_env(b"MOUSE_LEFT", ShimValue::Integer(1));
+    interpreter.insert_in_root_env(b"MOUSE_MIDDLE", ShimValue::Integer(2));
+    interpreter.insert_in_root_env(b"MOUSE_RIGHT", ShimValue::Integer(3));
+    interpreter.insert_in_root_env(b"MOUSE_X1", ShimValue::Integer(4));
+    interpreter.insert_in_root_env(b"MOUSE_X2", ShimValue::Integer(5));
 
-    let mut pc = 0;
-    interpreter.execute_bytecode_extended(&mut pc, shimlang::ArgBundle::new(), &mut env)?;
-    interpreter.gc(&env);
+    interpreter.execute()?;
+    interpreter.gc();
 
-    let loop_fn = match env.get(&mut interpreter, b"loop") {
+    let loop_fn = match interpreter.get_from_root_env(b"loop") {
         Some(func @ ShimValue::Fn(_)) => func,
         None => return Err("No loop function found".to_string()),
         _ => return Err("Identifier 'loop' is not a function".to_string()),
     };
 
-    Ok((interpreter, env, loop_fn))
+    Ok((interpreter, loop_fn))
 }
 
 fn call_loop_fn(
     interpreter: &mut Interpreter,
-    env: &mut Environment,
     loop_fn: ShimValue,
 ) -> Result<f32, String> {
     match loop_fn.call(interpreter, &mut shimlang::ArgBundle::new()) {
         Ok(CallResult::ReturnValue(_)) => {
             let gc_start = std::time::Instant::now();
-            interpreter.gc(env);
+            interpreter.gc();
             Ok(gc_start.elapsed().as_secs_f32())
         }
         Ok(CallResult::PC(pc, captured_scope)) => {
@@ -1720,7 +1698,7 @@ fn call_loop_fn(
                 Err(msg) => Err(msg),
                 Ok(_) => {
                     let gc_start = std::time::Instant::now();
-                    interpreter.gc(env);
+                    interpreter.gc();
                     Ok(gc_start.elapsed().as_secs_f32())
                 }
             }
@@ -1731,7 +1709,7 @@ fn call_loop_fn(
 
 impl ScriptBridge {
     pub fn new() -> Self {
-        let (interpreter, env, loop_fn) =
+        let (interpreter, loop_fn) =
             load_script(b"fn loop() {}").expect("Should be able to load hardcoded script");
         let script_path = crate::SCRIPT_PATH
             .lock()
@@ -1757,21 +1735,21 @@ impl ScriptBridge {
             // and skip the file-watcher thread entirely: hot-reload is pointless in a
             // fixed-frame CI run, and its spurious initial reload would reset the
             // interpreter state mid-run.
-            let (interpreter, env, loop_fn) = if headless {
+            let (interpreter, loop_fn) = if headless {
                 fs::read(&script_path)
                     .ok()
                     .and_then(|bytes| load_script(&bytes).ok())
-                    .unwrap_or((interpreter, env, loop_fn))
+                    .unwrap_or((interpreter, loop_fn))
             } else {
                 std::thread::spawn({
                     let path = script_path.clone();
                     move || file_watcher_logic(path, watcher_tx)
                 });
-                (interpreter, env, loop_fn)
+                (interpreter, loop_fn)
             };
 
             Self {
-                state: BridgeState::Paused(Box::new(interpreter), env, loop_fn),
+                state: BridgeState::Paused(Box::new(interpreter), loop_fn),
                 interpreter_errors: Vec::new(),
                 draw_list: Vec::new(),
                 sound_list: Vec::new(),
@@ -1785,13 +1763,13 @@ impl ScriptBridge {
 
         #[cfg(target_arch = "wasm32")]
         {
-            let (interpreter, env, loop_fn) = fs::read(&script_path)
+            let (interpreter, loop_fn) = fs::read(&script_path)
                 .ok()
                 .and_then(|bytes| load_script(&bytes).ok())
-                .unwrap_or((interpreter, env, loop_fn));
+                .unwrap_or((interpreter, loop_fn));
 
             Self {
-                state: BridgeState::Paused(Box::new(interpreter), env, loop_fn),
+                state: BridgeState::Paused(Box::new(interpreter), loop_fn),
                 interpreter_errors: Vec::new(),
                 draw_list: Vec::new(),
                 sound_list: Vec::new(),
@@ -1808,8 +1786,8 @@ impl ScriptBridge {
             // Apply any script reloads from the watcher thread
             while let Ok(msg) = self.watcher_rx.try_recv() {
                 match msg {
-                    ScriptWatcherMessage::Loaded(interpreter, env, loop_fn) => {
-                        self.state = BridgeState::Paused(Box::new(interpreter), env, loop_fn);
+                    ScriptWatcherMessage::Loaded(interpreter, loop_fn) => {
+                        self.state = BridgeState::Paused(Box::new(interpreter), loop_fn);
                         self.interpreter_errors = Vec::new();
                         crate::audio::submit(std::iter::once(SoundCmd::ResetAudio { fade_secs: 0.05 }));
                     }
@@ -1823,11 +1801,10 @@ impl ScriptBridge {
                 let state = mem::replace(&mut self.state, BridgeState::Running);
                 match state {
                     BridgeState::Running => panic!("Somehow the interpreter is running"),
-                    BridgeState::Paused(interpreter, env, loop_fn) => {
+                    BridgeState::Paused(interpreter, loop_fn) => {
                         self.tx
                             .send(ScriptRequest::ExecuteLoop(
                                 *interpreter,
-                                env,
                                 loop_fn,
                                 keys.to_vec(),
                                 last_keys.to_vec(),
@@ -1842,12 +1819,12 @@ impl ScriptBridge {
                 {
                     let _zone = zone_scoped!("Wait for interpreter response");
                     match self.rx.recv() {
-                        Ok(ScriptResponse::Error(interpreter, env, loop_fn, msg)) => {
-                            self.state = BridgeState::Paused(Box::new(interpreter), env, loop_fn);
+                        Ok(ScriptResponse::Error(interpreter, loop_fn, msg)) => {
+                            self.state = BridgeState::Paused(Box::new(interpreter), loop_fn);
                             self.interpreter_errors.push(msg);
                         }
-                        Ok(ScriptResponse::LoopComplete(interpreter, env, loop_fn, draw_list, sound_list, gc_time)) => {
-                            self.state = BridgeState::Paused(Box::new(interpreter), env, loop_fn);
+                        Ok(ScriptResponse::LoopComplete(interpreter, loop_fn, draw_list, sound_list, gc_time)) => {
+                            self.state = BridgeState::Paused(Box::new(interpreter), loop_fn);
                             self.draw_list = draw_list;
                             self.sound_list = sound_list;
                             self.last_gc_time = gc_time;
@@ -1890,7 +1867,7 @@ impl ScriptBridge {
         #[cfg(target_arch = "wasm32")]
         {
             if self.interpreter_errors.is_empty() {
-                if let BridgeState::Paused(ref mut interpreter, ref mut env, loop_fn) = self.state {
+                if let BridgeState::Paused(ref mut interpreter, loop_fn) = self.state {
                     let ks = interpreter.fetch_mut::<KeyState>();
                     ks.held_time.resize(keys.len(), 0.0);
                     for (i, &pressed) in keys.iter().enumerate() {
@@ -1911,8 +1888,8 @@ impl ScriptBridge {
                     ms.buttons = buttons;
                     *interpreter.fetch_mut::<PerfTimer>() = perf;
                     interpreter.fetch_mut::<SoundList>().finished.extend(finished.iter().copied());
-                    env.update(interpreter, b"delta", ShimValue::Float(delta)).expect("delta should be in env");
-                    match call_loop_fn(interpreter, env, loop_fn) {
+                    interpreter.update_in_root_env(b"delta", ShimValue::Float(delta)).expect("delta should be in env");
+                    match call_loop_fn(interpreter, loop_fn) {
                         Ok(gc_time) => self.last_gc_time = gc_time,
                         Err(msg) => self.interpreter_errors.push(msg),
                     }
@@ -1940,8 +1917,10 @@ impl ScriptBridge {
         match &mut self.state {
             #[cfg(not(target_arch = "wasm32"))]
             BridgeState::Running => {}
-            BridgeState::Paused(interpreter, env, _loop_fn) => {
-                shimlang_debug_window.debug_window(interpreter, env);
+            BridgeState::Paused(interpreter, _loop_fn) => {
+                let env = std::mem::take(&mut interpreter.root_env);
+                shimlang_debug_window.debug_window(interpreter, &env);
+                interpreter.root_env = env;
             }
         }
     }
@@ -1967,8 +1946,8 @@ fn file_watcher_logic(script_path: String, tx: Sender<ScriptWatcherMessage>) {
                                 Ok(bytes) => {
                                     println!("{}", debug_u8s(&bytes));
                                     let msg = match load_script(&bytes) {
-                                        Ok((interp, env, loop_fn)) => {
-                                            ScriptWatcherMessage::Loaded(interp, env, loop_fn)
+                                        Ok((interp, loop_fn)) => {
+                                            ScriptWatcherMessage::Loaded(interp, loop_fn)
                                         }
                                         Err(msg) => ScriptWatcherMessage::Error(msg),
                                     };
@@ -2013,7 +1992,7 @@ fn script_thread_logic(rx: Receiver<ScriptRequest>, tx: Sender<ScriptResponse>) 
     loop {
         if let Ok(request) = rx.recv() {
             match request {
-                ScriptRequest::ExecuteLoop(mut interpreter, mut env, loop_fn, keys, last_keys, delta, perf, finished) => {
+                ScriptRequest::ExecuteLoop(mut interpreter, loop_fn, keys, last_keys, delta, perf, finished) => {
                     let ks = interpreter.fetch_mut::<KeyState>();
                     ks.held_time.resize(keys.len(), 0.0);
                     for (i, &pressed) in keys.iter().enumerate() {
@@ -2034,8 +2013,8 @@ fn script_thread_logic(rx: Receiver<ScriptRequest>, tx: Sender<ScriptResponse>) 
                     ms.buttons = buttons;
                     *interpreter.fetch_mut::<PerfTimer>() = perf;
                     interpreter.fetch_mut::<SoundList>().finished.extend(finished.iter().copied());
-                    env.update(&mut interpreter, b"delta", ShimValue::Float(delta)).expect("delta should be in env");
-                    tx.send(match call_loop_fn(&mut interpreter, &mut env, loop_fn) {
+                    interpreter.update_in_root_env(b"delta", ShimValue::Float(delta)).expect("delta should be in env");
+                    tx.send(match call_loop_fn(&mut interpreter, loop_fn) {
                         Ok(gc_time) => {
                             let draw_list = interpreter
                                 .fetch_mut::<DrawList>()
@@ -2047,9 +2026,9 @@ fn script_thread_logic(rx: Receiver<ScriptRequest>, tx: Sender<ScriptResponse>) 
                                 .items
                                 .drain(..)
                                 .collect();
-                            ScriptResponse::LoopComplete(interpreter, env, loop_fn, draw_list, sound_list, gc_time)
+                            ScriptResponse::LoopComplete(interpreter, loop_fn, draw_list, sound_list, gc_time)
                         }
-                        Err(msg) => ScriptResponse::Error(interpreter, env, loop_fn, msg),
+                        Err(msg) => ScriptResponse::Error(interpreter, loop_fn, msg),
                     })
                     .unwrap();
                 }
