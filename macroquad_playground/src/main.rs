@@ -399,8 +399,7 @@ fn load_script(text: &[u8]) -> Result<(Interpreter, ShimValue), String> {
     let key_val = interpreter.mem.alloc_native(KeyMap);
     interpreter.insert_in_root_env(b"key", key_val);
 
-    let mut pc = 0;
-    interpreter.execute_root(&mut pc)?;
+    interpreter.execute()?;
     interpreter.gc();
 
     let loop_fn = match interpreter.get_from_root_env(b"loop") {

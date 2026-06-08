@@ -124,8 +124,7 @@ fn run() -> Result<(), String> {
                 };
                 let program = shimlang::compile_ast(&ast)?;
                 let mut interpreter = shimlang::Interpreter::create(&Config::default(), program);
-                let mut pc = 0;
-                match interpreter.execute_root(&mut pc) {
+                match interpreter.execute() {
                     Ok(_) => {
                         if args.gc {
                             interpreter.gc();
@@ -195,7 +194,7 @@ fn run() -> Result<(), String> {
             let program = shimlang::compile_ast(&ast)?;
 
             interpreter.append_program(program)?;
-            match interpreter.execute_root(&mut pc) {
+            match interpreter.execute_at(&mut pc) {
                 Ok(shimlang::ShimValue::None) => (),
                 Ok(val) => {
                     println!("{}", val.to_string(&mut interpreter));

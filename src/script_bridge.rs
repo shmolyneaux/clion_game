@@ -1666,8 +1666,7 @@ fn load_script(bytes: &[u8]) -> Result<(Interpreter, ShimValue), String> {
     interpreter.insert_in_root_env(b"MOUSE_X1", ShimValue::Integer(4));
     interpreter.insert_in_root_env(b"MOUSE_X2", ShimValue::Integer(5));
 
-    let mut pc = 0;
-    interpreter.execute_root(&mut pc)?;
+    interpreter.execute()?;
     interpreter.gc();
 
     let loop_fn = match interpreter.get_from_root_env(b"loop") {

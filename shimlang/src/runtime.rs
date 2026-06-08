@@ -2164,8 +2164,12 @@ impl Interpreter {
         self.root_env.insert_native_fn(&mut self.mem, name, func);
     }
 
-    /// Execute bytecode using the stored root environment.
-    pub fn execute_root(&mut self, pc: &mut usize) -> Result<ShimValue, String> {
+    pub fn execute(&mut self) -> Result<ShimValue, String> {
+        let mut pc = 0;
+        self.execute_at(&mut pc)
+    }
+
+    pub fn execute_at(&mut self, pc: &mut usize) -> Result<ShimValue, String> {
         let mut env = std::mem::take(&mut self.root_env);
         let result = self.execute_bytecode_extended(pc, ArgBundle::new(), &mut env);
         self.root_env = env;

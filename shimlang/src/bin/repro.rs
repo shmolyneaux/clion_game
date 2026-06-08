@@ -39,10 +39,9 @@ fn run() -> Result<(), String> {
     };
     let program = shimlang::compile_ast(&ast)?;
     let mut interpreter = shimlang::Interpreter::create(&Config::default(), program);
-    let mut pc = 0;
 
     for _ in 0..3 {
-        match interpreter.execute_root(&mut pc) {
+        match interpreter.execute() {
             Ok(_) => {
                 interpreter.gc();
             }
