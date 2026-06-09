@@ -38,6 +38,7 @@ use std::borrow::Cow;
 use std::fmt::Formatter;
 
 mod audio;
+mod debug;
 mod debug_draw;
 mod gpu;
 mod imgui;

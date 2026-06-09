@@ -7,7 +7,7 @@ use shm_tracy::zone_scoped;
 use shm_tracy::*;
 
 use crate::compile::*;
-use crate::lex::{debug_u8s, format_script_err};
+use crate::lex::{byte_to_line, debug_u8s, format_script_err};
 use crate::mem::*;
 use crate::parse::*;
 use crate::shimlibs::*;
@@ -403,6 +403,52 @@ impl Environment {
 
     fn contains_key(&self, mem: &MMU, key: &[u8]) -> bool {
         self.get(mem, key).is_some()
+    }
+
+    /// Collect every variable visible in the current scope chain as `(name, value)`
+    /// pairs, walking from the innermost scope outward. When a name appears in more
+    /// than one scope the innermost (shadowing) binding wins. Intended for read-only
+    /// debugger inspection.
+    pub fn collect_vars(&self, mem: &MMU) -> Vec<(Vec<u8>, ShimValue)> {
+        let mut out: Vec<(Vec<u8>, ShimValue)> = Vec::new();
+        let mut seen: std::collections::HashSet<Vec<u8>> = std::collections::HashSet::new();
+        let mut current_scope_pos = self.current_scope;
+
+        while current_scope_pos != 0 {
+            let scope: &EnvScope = unsafe { mem.get(u24::from(current_scope_pos)) };
+            let parent: u32 = scope.parent.into();
+            let bytes = unsafe { scope.raw_bytes(mem) };
+
+            let mut offset = 0usize;
+            while offset < bytes.len() {
+                let key_len = bytes[offset] as usize;
+                let key_start = offset + 1;
+                let key_end = key_start + key_len;
+                let value_offset = key_end;
+                let entry_end = value_offset + 8;
+                if entry_end > bytes.len() {
+                    break;
+                }
+                let key = bytes[key_start..key_end].to_vec();
+                if seen.insert(key.clone()) {
+                    let val: ShimValue = unsafe {
+                        let mut val_bytes = [0u8; 8];
+                        std::ptr::copy_nonoverlapping(
+                            bytes[value_offset..].as_ptr(),
+                            val_bytes.as_mut_ptr(),
+                            8,
+                        );
+                        std::mem::transmute(val_bytes)
+                    };
+                    out.push((key, val));
+                }
+                offset = entry_end;
+            }
+
+            current_scope_pos = parent;
+        }
+
+        out
     }
 
     fn push_scope(&mut self, mem: &mut MMU, captures: bool) {
@@ -2027,6 +2073,99 @@ impl ShimValue {
     }
 }
 
+/// A hook the interpreter invokes once per source-line boundary while a script
+/// executes. It is the integration point for an external debugger (e.g. a UI on
+/// another thread): implementations inspect the read-only [`DebugContext`] and may
+/// block inside [`DebugHook::at_line`] to wait for user commands. Execution resumes
+/// when the call returns. The hook is `Send` so the owning [`Interpreter`] can move
+/// between threads.
+pub trait DebugHook: Send {
+    /// Called immediately before the first instruction of each new source line runs.
+    fn at_line(&mut self, ctx: &DebugContext);
+}
+
+/// A read-only view of the interpreter's live execution state, handed to a
+/// [`DebugHook`]. Accessors derive line numbers, locals, and the call stack from the
+/// current program counter, environment, and frame return addresses.
+pub struct DebugContext<'a> {
+    pc: usize,
+    interp: &'a Interpreter,
+    env: &'a Environment,
+    stack: &'a [ShimValue],
+    frame_return_pcs: &'a [usize],
+}
+
+impl<'a> DebugContext<'a> {
+    fn new(
+        pc: usize,
+        interp: &'a Interpreter,
+        env: &'a Environment,
+        stack: &'a [ShimValue],
+        frame_return_pcs: &'a [usize],
+    ) -> Self {
+        Self {
+            pc,
+            interp,
+            env,
+            stack,
+            frame_return_pcs,
+        }
+    }
+
+    fn line_of_pc(&self, pc: usize) -> u32 {
+        let spans = &self.interp.program.spans;
+        let pc = pc.min(spans.len().saturating_sub(1));
+        byte_to_line(&self.interp.program.script, spans[pc].start)
+    }
+
+    /// Program counter of the instruction about to execute.
+    pub fn pc(&self) -> usize {
+        self.pc
+    }
+
+    /// 1-based source line of the instruction about to execute.
+    pub fn line(&self) -> u32 {
+        self.line_of_pc(self.pc)
+    }
+
+    /// Number of active call frames (0 at top level).
+    pub fn call_depth(&self) -> usize {
+        self.frame_return_pcs.len()
+    }
+
+    /// Depth of the value/operand stack (mainly useful for diagnostics).
+    pub fn value_stack_depth(&self) -> usize {
+        self.stack.len()
+    }
+
+    /// The variables visible in the current scope chain as `(name, formatted value)`
+    /// pairs. Inner scopes shadow outer ones.
+    pub fn locals(&self) -> Vec<(String, String)> {
+        self.env
+            .collect_vars(&self.interp.mem)
+            .into_iter()
+            .map(|(name, val)| {
+                (
+                    String::from_utf8_lossy(&name).into_owned(),
+                    val.to_string_mem(&self.interp.mem),
+                )
+            })
+            .collect()
+    }
+
+    /// Source lines of the active call frames (the call sites), outermost first and
+    /// the current line appended last.
+    pub fn call_stack(&self) -> Vec<u32> {
+        let mut lines: Vec<u32> = self
+            .frame_return_pcs
+            .iter()
+            .map(|&ret_pc| self.line_of_pc(ret_pc))
+            .collect();
+        lines.push(self.line());
+        lines
+    }
+}
+
 // TODO: uncomment #[derive(Facet)]
 pub struct Interpreter {
     pub mem: MMU,
@@ -2034,6 +2173,9 @@ pub struct Interpreter {
     pub program: Arc<Program>,
     singletons: HashMap<TypeId, Box<dyn Any + Send>>,
     pub root_env: Environment,
+    /// Optional debugger hook, invoked at each source-line boundary during execution.
+    /// `None` (the default) means execution runs with no debugger overhead.
+    pub debug_hook: Option<Box<dyn DebugHook>>,
 }
 
 impl Interpreter {
@@ -2156,7 +2298,19 @@ impl Interpreter {
             program: Arc::new(program),
             singletons: HashMap::new(),
             root_env,
+            debug_hook: None,
         }
+    }
+
+    /// Attach a debugger hook to be invoked at each source-line boundary.
+    pub fn set_debug_hook(&mut self, hook: Box<dyn DebugHook>) {
+        self.debug_hook = Some(hook);
+    }
+
+    /// Detach and return the debugger hook, if any. Useful for moving a hook from a
+    /// retired interpreter onto a freshly (re)loaded one.
+    pub fn take_debug_hook(&mut self) -> Option<Box<dyn DebugHook>> {
+        self.debug_hook.take()
     }
 
     /// Add a native function to the interpreter's root environment.
@@ -2257,9 +2411,33 @@ impl Interpreter {
         let mut fn_optional_param_name_idx = 0;
         let mut fn_optional_param_names: Vec<Ident> = Vec::new();
 
+        // Tracks the last source line reported to the debugger so the hook fires once
+        // per line boundary rather than once per instruction.
+        let mut last_dbg_line: Option<u32> = None;
+
         let bytes = &self.program.clone().bytecode;
         while pc < bytes.len() {
             //let _zone = zone_scoped!("Execute Single Instruction");
+
+            // Debugger hook: only active when a hook is attached. Fires at the start of
+            // each new source line, letting an external debugger set breakpoints,
+            // inspect state, and step. The hook is taken out of `self` for the call so
+            // the read-only `DebugContext` can borrow `self` immutably.
+            if self.debug_hook.is_some() && pc < self.program.spans.len() {
+                let line = byte_to_line(&self.program.script, self.program.spans[pc].start);
+                if Some(line) != last_dbg_line {
+                    last_dbg_line = Some(line);
+                    let frame_return_pcs: Vec<usize> =
+                        stack_frame.iter().map(|frame| frame.0).collect();
+                    let mut hook = self.debug_hook.take();
+                    if let Some(hook) = hook.as_mut() {
+                        let ctx = DebugContext::new(pc, self, env, &stack, &frame_return_pcs);
+                        hook.at_line(&ctx);
+                    }
+                    self.debug_hook = hook;
+                }
+            }
+
             match bytes[pc] {
                 val if val == ByteCode::Pop as u8 => {
                     stack.pop();
@@ -3169,6 +3347,119 @@ mod tests {
 
         assert_eq!(interpreter.fetch_mut::<A>().0, 7);
         assert_eq!(interpreter.fetch_mut::<B>().0, "hello");
+    }
+
+    // ----- Debugger hook tests -----
+
+    use std::sync::Mutex;
+
+    #[derive(Default, Debug, Clone)]
+    struct DebugRecording {
+        /// (line, call_depth) at each line boundary the hook saw.
+        events: Vec<(u32, usize)>,
+        /// Locals captured when the hook reached `capture_locals_on`.
+        captured_locals: Vec<(String, String)>,
+    }
+
+    struct RecordingHook {
+        rec: Arc<Mutex<DebugRecording>>,
+        capture_locals_on: Option<u32>,
+    }
+
+    impl DebugHook for RecordingHook {
+        fn at_line(&mut self, ctx: &DebugContext) {
+            let mut rec = self.rec.lock().unwrap();
+            rec.events.push((ctx.line(), ctx.call_depth()));
+            if self.capture_locals_on == Some(ctx.line()) && rec.captured_locals.is_empty() {
+                rec.captured_locals = ctx.locals();
+            }
+        }
+    }
+
+    fn run_with_hook(src: &[u8], capture_locals_on: Option<u32>) -> DebugRecording {
+        let ast = crate::parse::ast_from_text(src).unwrap();
+        let program = crate::compile::compile_ast(&ast).unwrap();
+        let mut interpreter = Interpreter::create(&Config::default(), program);
+        let rec = Arc::new(Mutex::new(DebugRecording::default()));
+        interpreter.set_debug_hook(Box::new(RecordingHook {
+            rec: rec.clone(),
+            capture_locals_on,
+        }));
+        interpreter.execute().unwrap();
+        let guard = rec.lock().unwrap();
+        guard.clone()
+    }
+
+    /// Collapse consecutive duplicate lines so we can compare the visit order.
+    fn collapsed_lines(rec: &DebugRecording) -> Vec<u32> {
+        let mut out: Vec<u32> = Vec::new();
+        for &(line, _) in &rec.events {
+            if out.last() != Some(&line) {
+                out.push(line);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn debug_hook_fires_per_line_in_order() {
+        let src = b"let x = 1;\nlet y = 2;\nlet z = x + y;\n";
+        let rec = run_with_hook(src, None);
+        // The statements are visited in order. (A trailing end-of-program instruction
+        // may map back to the block's start line, so only assert the prefix.)
+        assert!(
+            collapsed_lines(&rec).starts_with(&[1, 2, 3]),
+            "expected lines to start 1,2,3; got {:?}",
+            collapsed_lines(&rec)
+        );
+    }
+
+    #[test]
+    fn debug_hook_inspects_locals() {
+        // When the hook reaches line 3, `a` and `b` are in scope; `c` is not yet bound.
+        let src = b"let a = 10;\nlet b = 20;\nlet c = a + b;\n";
+        let rec = run_with_hook(src, Some(3));
+        let locals = rec.captured_locals;
+        assert!(
+            locals.contains(&("a".to_string(), "10".to_string())),
+            "expected a=10 in {locals:?}"
+        );
+        assert!(
+            locals.contains(&("b".to_string(), "20".to_string())),
+            "expected b=20 in {locals:?}"
+        );
+        assert!(
+            !locals.iter().any(|(name, _)| name == "c"),
+            "c should not be bound yet in {locals:?}"
+        );
+    }
+
+    #[test]
+    fn debug_hook_tracks_call_depth() {
+        // Inside the called function the call depth is deeper than at the call site,
+        // which is what step-over / step-out rely on.
+        let src =
+            b"fn add(x, y) {\n    let s = x + y;\n    s\n}\nlet r = add(1, 2);\n";
+        let rec = run_with_hook(src, None);
+
+        let depth_in_body = rec
+            .events
+            .iter()
+            .filter(|(line, _)| *line == 2 || *line == 3)
+            .map(|(_, depth)| *depth)
+            .max()
+            .expect("function body should have been visited");
+        let depth_at_call = rec
+            .events
+            .iter()
+            .find(|(line, _)| *line == 5)
+            .map(|(_, depth)| *depth)
+            .expect("call site line should have been visited");
+
+        assert!(
+            depth_in_body > depth_at_call,
+            "expected deeper call stack inside function: body={depth_in_body} call={depth_at_call}"
+        );
     }
 }
 

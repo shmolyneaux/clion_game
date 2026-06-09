@@ -704,6 +704,9 @@ pub struct ScriptBridge {
     pub sound_list: Vec<SoundCmd>,
     pub last_gc_time: f32,
     script_path: String,
+    /// When true, the interpreter carries a debug hook and `step` runs in a
+    /// breakpoint-aware, non-blocking mode (see `step`).
+    debug_enabled: bool,
     #[cfg(not(target_arch = "wasm32"))]
     tx: Sender<ScriptRequest>,
     #[cfg(not(target_arch = "wasm32"))]
@@ -711,6 +714,13 @@ pub struct ScriptBridge {
     #[cfg(not(target_arch = "wasm32"))]
     watcher_rx: Receiver<ScriptWatcherMessage>,
 }
+
+/// How long `step` waits for the interpreter loop to finish before giving up for this
+/// frame when debugging is enabled. A fast loop completes well within this budget
+/// (same-frame result); when paused at a breakpoint the wait times out and the main
+/// thread renders the previous frame, keeping the window responsive.
+#[cfg(not(target_arch = "wasm32"))]
+const DEBUG_FRAME_BUDGET: std::time::Duration = std::time::Duration::from_millis(16);
 
 fn shim_ig_begin(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
@@ -1735,7 +1745,7 @@ impl ScriptBridge {
             // and skip the file-watcher thread entirely: hot-reload is pointless in a
             // fixed-frame CI run, and its spurious initial reload would reset the
             // interpreter state mid-run.
-            let (interpreter, loop_fn) = if headless {
+            let (mut interpreter, loop_fn) = if headless {
                 fs::read(&script_path)
                     .ok()
                     .and_then(|bytes| load_script(&bytes).ok())
@@ -1748,6 +1758,19 @@ impl ScriptBridge {
                 (interpreter, loop_fn)
             };
 
+            // Enable the debugger only on an explicit opt-in, and never in headless
+            // (CI) runs where deterministic per-frame output and a blocking step loop
+            // are required. When enabled, attach a hook to the interpreter and spawn a
+            // console debug UI on its own thread.
+            let debug_enabled = !headless && std::env::var("SHIM_DEBUG").is_ok();
+            if debug_enabled {
+                let (cmd_tx, cmd_rx) = channel::<crate::debug::DebugCommand>();
+                let (event_tx, event_rx) = channel::<crate::debug::DebugEvent>();
+                interpreter
+                    .set_debug_hook(Box::new(crate::debug::ChannelDebugHook::new(cmd_rx, event_tx)));
+                crate::debug::spawn_console_debug_ui(cmd_tx, event_rx);
+            }
+
             Self {
                 state: BridgeState::Paused(Box::new(interpreter), loop_fn),
                 interpreter_errors: Vec::new(),
@@ -1755,6 +1778,7 @@ impl ScriptBridge {
                 sound_list: Vec::new(),
                 last_gc_time: 0.0,
                 script_path,
+                debug_enabled,
                 tx: request_tx,
                 rx: response_rx,
                 watcher_rx,
@@ -1775,6 +1799,7 @@ impl ScriptBridge {
                 sound_list: Vec::new(),
                 last_gc_time: 0.0,
                 script_path,
+                debug_enabled: false,
             }
         }
     }
@@ -1782,7 +1807,9 @@ impl ScriptBridge {
     pub fn step(&mut self, keys: &[u8], last_keys: &[u8], delta: f32, perf: PerfTimer, finished: Vec<u32>) {
         let _zone = zone_scoped!("Run interpreter");
         #[cfg(not(target_arch = "wasm32"))]
-        {
+        if self.debug_enabled {
+            self.step_debug(keys, last_keys, delta, perf, finished);
+        } else {
             // Apply any script reloads from the watcher thread
             while let Ok(msg) = self.watcher_rx.try_recv() {
                 match msg {
@@ -1904,6 +1931,99 @@ impl ScriptBridge {
                         .drain(..)
                         .collect();
                 }
+            }
+        }
+    }
+
+    /// Breakpoint-aware, non-blocking variant of the per-frame step used when the
+    /// debugger is enabled.
+    ///
+    /// Unlike the default path, this does not block on the interpreter response.
+    /// A frame request is launched while idle; we then wait only up to
+    /// [`DEBUG_FRAME_BUDGET`] for it to finish. If the interpreter is paused at a
+    /// breakpoint the wait times out, we leave the request in flight, and the caller
+    /// renders the previous frame — so the main thread (and any main-thread UI) stays
+    /// responsive while a separate debug-UI thread inspects the paused interpreter.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn step_debug(
+        &mut self,
+        keys: &[u8],
+        last_keys: &[u8],
+        delta: f32,
+        perf: PerfTimer,
+        finished: Vec<u32>,
+    ) {
+        // Only apply reloads while idle: an in-flight (possibly paused) interpreter must
+        // not be discarded. Carry the debug hook over to the freshly loaded interpreter
+        // so breakpoints and channel endpoints survive a hot reload.
+        if matches!(self.state, BridgeState::Paused(..)) {
+            while let Ok(msg) = self.watcher_rx.try_recv() {
+                match msg {
+                    ScriptWatcherMessage::Loaded(mut interpreter, loop_fn) => {
+                        if let BridgeState::Paused(mut old, _) =
+                            mem::replace(&mut self.state, BridgeState::Running)
+                        {
+                            if let Some(hook) = old.take_debug_hook() {
+                                interpreter.set_debug_hook(hook);
+                            }
+                        }
+                        self.state = BridgeState::Paused(Box::new(interpreter), loop_fn);
+                        self.interpreter_errors = Vec::new();
+                        crate::audio::submit(std::iter::once(SoundCmd::ResetAudio {
+                            fade_secs: 0.05,
+                        }));
+                    }
+                    ScriptWatcherMessage::Error(msg) => {
+                        self.interpreter_errors.push(msg);
+                    }
+                }
+            }
+        }
+
+        if !self.interpreter_errors.is_empty() {
+            return;
+        }
+
+        // If idle, launch this frame's loop. If a request is already in flight (the
+        // interpreter is busy or paused at a breakpoint), don't send another one.
+        if matches!(self.state, BridgeState::Paused(..)) {
+            if let BridgeState::Paused(interpreter, loop_fn) =
+                mem::replace(&mut self.state, BridgeState::Running)
+            {
+                self.tx
+                    .send(ScriptRequest::ExecuteLoop(
+                        *interpreter,
+                        loop_fn,
+                        keys.to_vec(),
+                        last_keys.to_vec(),
+                        delta,
+                        perf,
+                        finished,
+                    ))
+                    .unwrap();
+            }
+        }
+
+        // Wait briefly for completion. A timeout means the loop is still running
+        // (typically paused at a breakpoint); keep the previous frame and try again next
+        // step.
+        let _zone = zone_scoped!("Wait for interpreter response (debug)");
+        match self.rx.recv_timeout(DEBUG_FRAME_BUDGET) {
+            Ok(ScriptResponse::Error(interpreter, loop_fn, msg)) => {
+                self.state = BridgeState::Paused(Box::new(interpreter), loop_fn);
+                self.interpreter_errors.push(msg);
+            }
+            Ok(ScriptResponse::LoopComplete(interpreter, loop_fn, draw_list, sound_list, gc_time)) => {
+                self.state = BridgeState::Paused(Box::new(interpreter), loop_fn);
+                self.draw_list = draw_list;
+                self.sound_list = sound_list;
+                self.last_gc_time = gc_time;
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                // Still running / paused at a breakpoint: leave the request in flight.
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                panic!("Script thread disconnected");
             }
         }
     }

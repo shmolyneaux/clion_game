@@ -113,6 +113,19 @@ pub fn debug_u8s(data: &[u8]) -> &str {
     unsafe { std::str::from_utf8_unchecked(data) }
 }
 
+/// Map a byte offset within `script` to its 1-based source line number.
+/// Offsets at or past the end of the script map to the last line.
+pub fn byte_to_line(script: &[u8], offset: u32) -> u32 {
+    let mut line: u32 = 1;
+    let limit = (offset as usize).min(script.len());
+    for &c in &script[..limit] {
+        if c == b'\n' {
+            line += 1;
+        }
+    }
+    line
+}
+
 pub(crate) fn format_script_err(span: Span, script: &[u8], msg: &str) -> String {
     let script_lines = script_lines(script);
     let mut out = "".to_string();
