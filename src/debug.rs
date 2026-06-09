@@ -215,9 +215,11 @@ impl DebugHook for ChannelDebugHook {
 /// - `b <line>`        — set breakpoint
 /// - `d <line>`        — clear breakpoint
 ///
-/// A real UI (e.g. an imgui panel on the main thread) can be built against the same
-/// `Sender<DebugCommand>` / `Receiver<DebugEvent>` pair instead of using this.
+/// The main debugger UI is the imgui panel in `ScriptBridge::render_debug_panel`; this
+/// console driver is an optional alternative built against the same
+/// `Sender<DebugCommand>` / `Receiver<DebugEvent>` pair (not spawned by default).
 #[cfg(not(target_arch = "wasm32"))]
+#[allow(dead_code)]
 pub fn spawn_console_debug_ui(cmd_tx: Sender<DebugCommand>, event_rx: Receiver<DebugEvent>) {
     use std::io::Write;
 

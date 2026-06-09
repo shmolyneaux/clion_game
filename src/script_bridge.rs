@@ -713,6 +713,29 @@ pub struct ScriptBridge {
     rx: Receiver<ScriptResponse>,
     #[cfg(not(target_arch = "wasm32"))]
     watcher_rx: Receiver<ScriptWatcherMessage>,
+    // ----- Debugger UI state (main thread) -----
+    #[cfg(not(target_arch = "wasm32"))]
+    debug_cmd_tx: Option<Sender<crate::debug::DebugCommand>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    debug_event_rx: Option<Receiver<crate::debug::DebugEvent>>,
+    /// Whether the interpreter is currently paused at a breakpoint.
+    #[cfg(not(target_arch = "wasm32"))]
+    debug_paused: bool,
+    /// Latest snapshot received when execution paused.
+    #[cfg(not(target_arch = "wasm32"))]
+    debug_pause_info: Option<crate::debug::PauseInfo>,
+    /// UI mirror of the breakpoints set on the interpreter (1-based line numbers).
+    #[cfg(not(target_arch = "wasm32"))]
+    debug_breakpoints: std::collections::BTreeSet<u32>,
+    /// Nul-terminated text buffer backing the "add breakpoint" input field.
+    #[cfg(not(target_arch = "wasm32"))]
+    debug_bp_input: Vec<u8>,
+    /// Source lines of the running script, refreshed on each pause for the source view.
+    #[cfg(not(target_arch = "wasm32"))]
+    debug_source_lines: Vec<String>,
+    /// Whether to include native (engine builtin) functions in the locals view.
+    #[cfg(not(target_arch = "wasm32"))]
+    debug_show_natives: bool,
 }
 
 /// How long `step` waits for the interpreter loop to finish before giving up for this
@@ -721,6 +744,23 @@ pub struct ScriptBridge {
 /// thread renders the previous frame, keeping the window responsive.
 #[cfg(not(target_arch = "wasm32"))]
 const DEBUG_FRAME_BUDGET: std::time::Duration = std::time::Duration::from_millis(16);
+
+/// A user action collected while rendering the debug panel, applied after the imgui
+/// window is closed so rendering doesn't hold a mutable borrow of the bridge.
+#[cfg(not(target_arch = "wasm32"))]
+enum DebugUiAction {
+    Send(crate::debug::DebugCommand),
+    ToggleBreakpoint(u32),
+    RemoveBreakpoint(u32),
+    AddBreakpointFromInput,
+}
+
+/// Parse a 1-based line number from a nul-terminated input buffer.
+#[cfg(not(target_arch = "wasm32"))]
+fn parse_line_buf(buf: &[u8]) -> Option<u32> {
+    let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+    std::str::from_utf8(&buf[..end]).ok()?.trim().parse::<u32>().ok()
+}
 
 fn shim_ig_begin(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
@@ -1763,13 +1803,15 @@ impl ScriptBridge {
             // are required. When enabled, attach a hook to the interpreter and spawn a
             // console debug UI on its own thread.
             let debug_enabled = !headless && std::env::var("SHIM_DEBUG").is_ok();
-            if debug_enabled {
+            let (debug_cmd_tx, debug_event_rx) = if debug_enabled {
                 let (cmd_tx, cmd_rx) = channel::<crate::debug::DebugCommand>();
                 let (event_tx, event_rx) = channel::<crate::debug::DebugEvent>();
                 interpreter
                     .set_debug_hook(Box::new(crate::debug::ChannelDebugHook::new(cmd_rx, event_tx)));
-                crate::debug::spawn_console_debug_ui(cmd_tx, event_rx);
-            }
+                (Some(cmd_tx), Some(event_rx))
+            } else {
+                (None, None)
+            };
 
             Self {
                 state: BridgeState::Paused(Box::new(interpreter), loop_fn),
@@ -1782,6 +1824,14 @@ impl ScriptBridge {
                 tx: request_tx,
                 rx: response_rx,
                 watcher_rx,
+                debug_cmd_tx,
+                debug_event_rx,
+                debug_paused: false,
+                debug_pause_info: None,
+                debug_breakpoints: std::collections::BTreeSet::new(),
+                debug_bp_input: vec![0u8; 16],
+                debug_source_lines: Vec::new(),
+                debug_show_natives: false,
             }
         }
 
@@ -1889,6 +1939,11 @@ impl ScriptBridge {
                     super::igEnd();
                 }
             }
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.debug_enabled {
+            self.render_debug_panel();
         }
 
         #[cfg(target_arch = "wasm32")]
@@ -2006,9 +2061,15 @@ impl ScriptBridge {
 
         // Wait briefly for completion. A timeout means the loop is still running
         // (typically paused at a breakpoint); keep the previous frame and try again next
-        // step.
+        // step. While already paused, don't wait at all — the response can't arrive until
+        // we resume, so polling keeps the debug panel responsive.
         let _zone = zone_scoped!("Wait for interpreter response (debug)");
-        match self.rx.recv_timeout(DEBUG_FRAME_BUDGET) {
+        let budget = if self.debug_paused {
+            std::time::Duration::ZERO
+        } else {
+            DEBUG_FRAME_BUDGET
+        };
+        match self.rx.recv_timeout(budget) {
             Ok(ScriptResponse::Error(interpreter, loop_fn, msg)) => {
                 self.state = BridgeState::Paused(Box::new(interpreter), loop_fn);
                 self.interpreter_errors.push(msg);
@@ -2024,6 +2085,243 @@ impl ScriptBridge {
             }
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                 panic!("Script thread disconnected");
+            }
+        }
+    }
+
+    /// Render the imgui debugger panel on the main thread and forward user actions to
+    /// the interpreter thread. Drains pause/resume events, shows the paused location,
+    /// source view, breakpoints, locals, and call stack, and provides step controls.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn render_debug_panel(&mut self) {
+        use crate::debug::{DebugCommand, DebugEvent};
+
+        // Drain pause/resume events coming from the interpreter thread.
+        if self.debug_event_rx.is_some() {
+            let mut newly_paused: Option<crate::debug::PauseInfo> = None;
+            let mut resumed = false;
+            while let Ok(event) = self.debug_event_rx.as_ref().unwrap().try_recv() {
+                match event {
+                    DebugEvent::Paused(info) => newly_paused = Some(info),
+                    DebugEvent::Resumed => resumed = true,
+                }
+            }
+            if let Some(info) = newly_paused {
+                // Refresh the source view from the running script file.
+                self.debug_source_lines = std::fs::read_to_string(&self.script_path)
+                    .map(|s| s.lines().map(|l| l.to_string()).collect())
+                    .unwrap_or_default();
+                self.debug_paused = true;
+                self.debug_pause_info = Some(info);
+            } else if resumed {
+                self.debug_paused = false;
+            }
+        }
+
+        // Snapshot read-only state so rendering can also collect mutating actions
+        // without holding a borrow of `self`.
+        let paused = self.debug_paused;
+        let info = self.debug_pause_info.clone();
+        let breakpoints: Vec<u32> = self.debug_breakpoints.iter().copied().collect();
+        let mut show_natives = self.debug_show_natives;
+        let mut actions: Vec<DebugUiAction> = Vec::new();
+
+        let cs = |s: &str| CString::new(s).unwrap_or_default();
+
+        let mut open = true;
+        unsafe {
+            macro_rules! ctrl_button {
+                ($label:expr, $enabled:expr, $cmd:expr) => {{
+                    let enabled = $enabled;
+                    if !enabled {
+                        super::igBeginDisabled();
+                    }
+                    if super::igButton($label.as_ptr()) {
+                        actions.push(DebugUiAction::Send($cmd));
+                    }
+                    if !enabled {
+                        super::igEndDisabled();
+                    }
+                }};
+            }
+
+            if super::igBegin(
+                c"Shimlang Debugger".as_ptr(),
+                &mut open as *mut bool,
+                IMGUI_WINDOW_FLAGS_NO_FOCUS_ON_APPEARING,
+            ) {
+                // Status line.
+                if paused {
+                    let line = info.as_ref().map(|i| i.line).unwrap_or(0);
+                    super::igTextColoredBC(
+                        0.1, 0.1, 0.1, 1.0, 1.0, 0.85, 0.2, 1.0,
+                        cs(&format!("PAUSED at line {line}")).as_ptr(),
+                    );
+                } else {
+                    super::igTextColoredBC(
+                        0.1, 0.1, 0.1, 1.0, 0.3, 0.8, 0.3, 1.0, c"RUNNING".as_ptr(),
+                    );
+                }
+
+                super::igSeparator();
+
+                // Step controls. Continue/Step* are only meaningful while paused; Pause
+                // only while running.
+                ctrl_button!(c"Continue", paused, DebugCommand::Continue);
+                super::igSameLine();
+                ctrl_button!(c"Step Into", paused, DebugCommand::StepInto);
+                super::igSameLine();
+                ctrl_button!(c"Step Over", paused, DebugCommand::StepOver);
+                super::igSameLine();
+                ctrl_button!(c"Step Out", paused, DebugCommand::StepOut);
+                super::igSameLine();
+                ctrl_button!(c"Pause", !paused, DebugCommand::Pause);
+
+                super::igSeparator();
+
+                // Breakpoints: add via the input field, remove via per-row buttons.
+                super::igText(c"Breakpoints (line):".as_ptr());
+                let entered = super::igInputText(
+                    c"##bp_input".as_ptr(),
+                    self.debug_bp_input.as_mut_ptr() as *mut core::ffi::c_char,
+                    self.debug_bp_input.len() as i32,
+                    IMGUI_INPUT_TEXT_FLAGS_CHARS_DECIMAL
+                        | IMGUI_INPUT_TEXT_FLAGS_ENTER_RETURNS_TRUE,
+                );
+                super::igSameLine();
+                let add_clicked = super::igButton(c"Add".as_ptr());
+                if entered || add_clicked {
+                    actions.push(DebugUiAction::AddBreakpointFromInput);
+                }
+                for &bp in &breakpoints {
+                    super::igText(cs(&format!("  line {bp}")).as_ptr());
+                    super::igSameLine();
+                    if super::igButton(cs(&format!("remove##bp{bp}")).as_ptr()) {
+                        actions.push(DebugUiAction::RemoveBreakpoint(bp));
+                    }
+                }
+
+                super::igSeparator();
+
+                // Source view: a window of lines around the paused line. Click the marker
+                // button to toggle a breakpoint on that line.
+                super::igText(c"Source:".as_ptr());
+                if paused {
+                    if let Some(info) = &info {
+                        let cur = info.line as usize;
+                        let total = self.debug_source_lines.len();
+                        if total > 0 {
+                            let start = cur.saturating_sub(12).max(1);
+                            let end = (cur + 12).min(total);
+                            for ln in start..=end {
+                                let text = &self.debug_source_lines[ln - 1];
+                                let marker = if breakpoints.contains(&(ln as u32)) {
+                                    "*"
+                                } else {
+                                    " "
+                                };
+                                if super::igButton(cs(&format!("{marker}##src{ln}")).as_ptr()) {
+                                    actions.push(DebugUiAction::ToggleBreakpoint(ln as u32));
+                                }
+                                super::igSameLine();
+                                if ln == cur {
+                                    super::igTextColoredBC(
+                                        0.1, 0.1, 0.1, 1.0, 1.0, 0.85, 0.2, 1.0,
+                                        cs(&format!("{ln:>4} > {text}")).as_ptr(),
+                                    );
+                                } else {
+                                    super::igText(cs(&format!("{ln:>4}   {text}")).as_ptr());
+                                }
+                            }
+                        }
+                    }
+                }
+
+                super::igSeparator();
+
+                // Locals + call stack.
+                super::igCheckbox(c"Show native fns".as_ptr(), &mut show_natives as *mut bool);
+                super::igText(c"Locals:".as_ptr());
+                if let Some(info) = &info {
+                    if super::igBeginTable(c"##locals".as_ptr(), 2) {
+                        super::igTableSetupColumn(c"Name".as_ptr());
+                        super::igTableSetupColumn(c"Value".as_ptr());
+                        super::igTableHeadersRow();
+                        for (name, value) in &info.locals {
+                            if !show_natives && value.starts_with("NativeFn") {
+                                continue;
+                            }
+                            super::igTableNextRow();
+                            super::igTableSetColumnIndex(0);
+                            super::igText(cs(name).as_ptr());
+                            super::igTableSetColumnIndex(1);
+                            super::igText(cs(value).as_ptr());
+                        }
+                        super::igEndTable();
+                    }
+
+                    super::igSeparator();
+                    super::igText(c"Call stack (innermost first):".as_ptr());
+                    for (depth, line) in info.call_stack.iter().rev().enumerate() {
+                        super::igText(cs(&format!("#{depth}  line {line}")).as_ptr());
+                    }
+                }
+
+                super::igEnd();
+            }
+        }
+
+        // Apply collected actions and forward commands to the interpreter thread.
+        self.debug_show_natives = show_natives;
+        for action in actions {
+            match action {
+                DebugUiAction::Send(cmd) => {
+                    let resumes = matches!(
+                        &cmd,
+                        DebugCommand::Continue
+                            | DebugCommand::StepInto
+                            | DebugCommand::StepOver
+                            | DebugCommand::StepOut
+                    );
+                    if let Some(tx) = &self.debug_cmd_tx {
+                        let _ = tx.send(cmd);
+                    }
+                    // Optimistically clear the paused flag so the panel and step loop
+                    // react immediately; the Resumed event confirms it.
+                    if resumes {
+                        self.debug_paused = false;
+                    }
+                }
+                DebugUiAction::ToggleBreakpoint(line) => {
+                    if self.debug_breakpoints.remove(&line) {
+                        if let Some(tx) = &self.debug_cmd_tx {
+                            let _ = tx.send(DebugCommand::ClearBreakpoint(line));
+                        }
+                    } else {
+                        self.debug_breakpoints.insert(line);
+                        if let Some(tx) = &self.debug_cmd_tx {
+                            let _ = tx.send(DebugCommand::SetBreakpoint(line));
+                        }
+                    }
+                }
+                DebugUiAction::RemoveBreakpoint(line) => {
+                    self.debug_breakpoints.remove(&line);
+                    if let Some(tx) = &self.debug_cmd_tx {
+                        let _ = tx.send(DebugCommand::ClearBreakpoint(line));
+                    }
+                }
+                DebugUiAction::AddBreakpointFromInput => {
+                    if let Some(line) = parse_line_buf(&self.debug_bp_input) {
+                        if self.debug_breakpoints.insert(line) {
+                            if let Some(tx) = &self.debug_cmd_tx {
+                                let _ = tx.send(DebugCommand::SetBreakpoint(line));
+                            }
+                        }
+                    }
+                    for b in self.debug_bp_input.iter_mut() {
+                        *b = 0;
+                    }
+                }
             }
         }
     }
