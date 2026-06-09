@@ -119,6 +119,20 @@ struct Voice {
     /// Equal-power L/R gains (ramp together on `set_pan`).
     pan_l: Ramp,
     pan_r: Ramp,
+    /// Pause gain multiplier: 1.0 = audible, 0.0 = paused. Ramps on
+    /// pause/resume so playback doesn't click. While `paused` and the ramp has
+    /// settled at 0, the voice is "frozen" — it produces no output and its
+    /// playback position stops advancing until resumed.
+    pause: Ramp,
+    paused: bool,
+}
+
+impl Voice {
+    /// True once a pause has fully faded out: the voice is silent and its
+    /// position should stop advancing until resumed.
+    fn is_frozen(&self) -> bool {
+        self.paused && self.pause.is_settled()
+    }
 }
 
 /// Equal-power pan law. `pan` in `[-1, 1]` (-1 = full left, 0 = center,
@@ -216,6 +230,11 @@ impl Effect {
 struct Bus {
     /// Ramped output gain (default 1.0).
     gain: Ramp,
+    /// Pause gain multiplier applied on top of `gain`: 1.0 = audible, 0.0 =
+    /// paused. Ramps on pause/resume so the bus doesn't click. While `paused`
+    /// and settled at 0, voices routed here are frozen.
+    pause: Ramp,
+    paused: bool,
     /// Reused interleaved stereo accumulator for this buffer.
     accum: Vec<f32>,
     effects: Vec<Effect>,
@@ -225,7 +244,22 @@ struct Bus {
 
 impl Default for Bus {
     fn default() -> Self {
-        Self { gain: Ramp::new(1.0), accum: Vec::new(), effects: Vec::new(), active: false }
+        Self {
+            gain: Ramp::new(1.0),
+            pause: Ramp::new(1.0),
+            paused: false,
+            accum: Vec::new(),
+            effects: Vec::new(),
+            active: false,
+        }
+    }
+}
+
+impl Bus {
+    /// True once a bus pause has fully faded out, meaning voices routed here
+    /// should freeze until the bus is resumed.
+    fn is_frozen(&self) -> bool {
+        self.paused && self.pause.is_settled()
     }
 }
 
@@ -243,6 +277,11 @@ struct Mixer {
     /// Reused interleaved master accumulator so `mix` never allocates per call.
     master: Vec<f32>,
     buses: Vec<Bus>,
+    /// Global pause gain multiplier applied to the master: 1.0 = audible,
+    /// 0.0 = paused. Ramps on pause/resume so the whole mix doesn't click.
+    /// While `master_paused` and settled at 0, every voice is frozen.
+    master_pause: Ramp,
+    master_paused: bool,
 }
 
 impl Default for Mixer {
@@ -252,6 +291,8 @@ impl Default for Mixer {
             bank: HashMap::new(),
             master: Vec::new(),
             buses: (0..NUM_BUSES).map(|_| Bus::default()).collect(),
+            master_pause: Ramp::new(1.0),
+            master_paused: false,
         }
     }
 }
@@ -382,6 +423,8 @@ fn apply_command(m: &mut Mixer, cmd: SoundCmd) {
                 amp: Ramp::new(amp),
                 pan_l,
                 pan_r,
+                pause: Ramp::new(1.0),
+                paused: false,
             });
         }
         SoundCmd::Square { voice_id, freq, duty, amp, duration, attack, decay, sustain, release, delay, pan, bus } => {
@@ -404,6 +447,8 @@ fn apply_command(m: &mut Mixer, cmd: SoundCmd) {
                 amp: Ramp::new(amp),
                 pan_l,
                 pan_r,
+                pause: Ramp::new(1.0),
+                paused: false,
             });
         }
         SoundCmd::PlaySample { voice_id, sample_id, amp, speed, fade_in, fade_out, delay, pan, bus } => {
@@ -432,6 +477,8 @@ fn apply_command(m: &mut Mixer, cmd: SoundCmd) {
                 amp: Ramp::new(amp),
                 pan_l,
                 pan_r,
+                pause: Ramp::new(1.0),
+                paused: false,
             });
         }
         SoundCmd::StopVoice { voice_id } => {
@@ -502,9 +549,34 @@ fn apply_command(m: &mut Mixer, cmd: SoundCmd) {
                 b.effects.clear();
             }
         }
+        SoundCmd::SetVoicePaused { voice_id, paused, fade } => {
+            if let Some(v) = m.voices.iter_mut().find(|v| v.id == voice_id) {
+                let fade = secs_to_samples(fade).max(PROC_FADE);
+                v.paused = paused;
+                v.pause.set_target(if paused { 0.0 } else { 1.0 }, fade);
+            }
+        }
+        SoundCmd::SetBusPaused { bus, paused, fade } => {
+            if let Some(b) = m.buses.get_mut(bus as usize) {
+                let fade = secs_to_samples(fade).max(PROC_FADE);
+                b.paused = paused;
+                b.pause.set_target(if paused { 0.0 } else { 1.0 }, fade);
+            }
+        }
+        SoundCmd::SetAudioPaused { paused, fade } => {
+            let fade = secs_to_samples(fade).max(PROC_FADE);
+            m.master_paused = paused;
+            m.master_pause.set_target(if paused { 0.0 } else { 1.0 }, fade);
+        }
         SoundCmd::ResetAudio { fade_secs } => {
             let fade = secs_to_samples(fade_secs).max(PROC_FADE);
+            // Clear any pause so frozen voices unfreeze and fade out normally
+            // rather than lingering silent.
+            m.master_paused = false;
+            m.master_pause.set_target(1.0, 0);
             for voice in m.voices.iter_mut() {
+                voice.paused = false;
+                voice.pause.set_target(1.0, 0);
                 if voice.delay_remaining > 0 {
                     voice.total_samples = 0;
                     voice.position = 0;
@@ -517,6 +589,8 @@ fn apply_command(m: &mut Mixer, cmd: SoundCmd) {
                 }
             }
             for bus in m.buses.iter_mut() {
+                bus.paused = false;
+                bus.pause.set_target(1.0, 0);
                 bus.gain.set_target(1.0, fade);
                 for fx in bus.effects.iter_mut() {
                     fx.fade_out(fade);
@@ -539,7 +613,7 @@ pub fn mix(stream: &mut [i16]) {
         apply_command(m, cmd);
     }
 
-    let Mixer { voices, bank, master, buses } = m;
+    let Mixer { voices, bank, master, buses, master_pause, master_paused } = m;
     let frames = stream.len() / 2;
     master.clear();
     master.resize(frames * 2, 0.0);
@@ -554,7 +628,13 @@ pub fn mix(stream: &mut [i16]) {
     }
 
     let finished = &state.finished;
+    // Once a pause (voice, bus, or global) has fully faded to silence, the
+    // voice is frozen: it produces nothing and its position holds until resume.
+    let global_frozen = *master_paused && master_pause.is_settled();
     voices.retain_mut(|voice| {
+        if global_frozen || voice.is_frozen() || buses[voice.bus as usize].is_frozen() {
+            return true;
+        }
         let skip = voice.delay_remaining.min(frames as u64) as usize;
         voice.delay_remaining -= skip as u64;
         let bus = &mut buses[voice.bus as usize];
@@ -577,6 +657,7 @@ pub fn mix(stream: &mut [i16]) {
     for bus in buses.iter_mut() {
         if !bus.active {
             bus.gain.advance(frames as u64);
+            bus.pause.advance(frames as u64);
             continue;
         }
         bus.effects.retain_mut(|fx| {
@@ -584,15 +665,19 @@ pub fn mix(stream: &mut [i16]) {
             !fx.is_faded_out()
         });
         for f in 0..frames {
-            let g = bus.gain.next();
+            let g = bus.gain.next() * bus.pause.next();
             master[f * 2] += bus.accum[f * 2] * g;
             master[f * 2 + 1] += bus.accum[f * 2 + 1] * g;
         }
     }
 
-    for (dst, &s) in stream.iter_mut().zip(master.iter()) {
-        let clipped = s / (1.0 + s.abs());
-        *dst = (clipped * i16::MAX as f32) as i16;
+    // Apply the global pause ramp as the master folds down to the output.
+    for f in 0..frames {
+        let gp = master_pause.next();
+        let l = master[f * 2] * gp;
+        let r = master[f * 2 + 1] * gp;
+        stream[f * 2] = ((l / (1.0 + l.abs())) * i16::MAX as f32) as i16;
+        stream[f * 2 + 1] = ((r / (1.0 + r.abs())) * i16::MAX as f32) as i16;
     }
 }
 
@@ -703,9 +788,10 @@ fn render_voice(
 
         let env = eval_envelope(&voice.envelope, voice.position, total);
         let amp = voice.amp.next();
+        let pause = voice.pause.next();
         let l = voice.pan_l.next();
         let r = voice.pan_r.next();
-        let s = raw * env * amp;
+        let s = raw * env * amp * pause;
         accum[f * 2] += s * l;
         accum[f * 2 + 1] += s * r;
         voice.position += 1;

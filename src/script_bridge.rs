@@ -240,6 +240,24 @@ impl ShimNative for VoiceHandle {
                 }
                 Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_set_pan))
             }
+            b"pause" => {
+                fn shim_pause(
+                    interpreter: &mut Interpreter,
+                    args: &ArgBundle,
+                ) -> Result<ShimValue, String> {
+                    set_voice_paused(interpreter, args, true)
+                }
+                Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_pause))
+            }
+            b"resume" => {
+                fn shim_resume(
+                    interpreter: &mut Interpreter,
+                    args: &ArgBundle,
+                ) -> Result<ShimValue, String> {
+                    set_voice_paused(interpreter, args, false)
+                }
+                Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_resume))
+            }
             _ => Err(format!("VoiceHandle has no attribute '{}'", debug_u8s(ident))),
         }
     }
@@ -319,6 +337,26 @@ pub enum SoundCmd {
     },
     ClearBusEffects {
         bus: u32,
+    },
+    /// Pause (`paused = true`) or resume a single voice, ramping its volume
+    /// over `fade` seconds so it doesn't click. A paused voice freezes its
+    /// playback position until resumed.
+    SetVoicePaused {
+        voice_id: u32,
+        paused: bool,
+        fade: f32,
+    },
+    /// Pause or resume an entire bus, ramping over `fade` seconds. Voices
+    /// routed to a paused bus freeze until it resumes.
+    SetBusPaused {
+        bus: u32,
+        paused: bool,
+        fade: f32,
+    },
+    /// Pause or resume all audio, ramping the master over `fade` seconds.
+    SetAudioPaused {
+        paused: bool,
+        fade: f32,
     },
     ResetAudio {
         fade_secs: f32,
@@ -1278,6 +1316,80 @@ fn shim_clear_bus_effects(interpreter: &mut Interpreter, args: &ArgBundle) -> Re
     Ok(ShimValue::None)
 }
 
+/// Shared by `VoiceHandle.pause`/`.resume`: unpacks `self`, an optional `fade`,
+/// and queues a `SetVoicePaused` command.
+fn set_voice_paused(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+    paused: bool,
+) -> Result<ShimValue, String> {
+    let voice_id = args.args[0]
+        .as_native::<VoiceHandle>(interpreter)?
+        .voice_id;
+    let mut unpacker = ArgUnpacker::new(args);
+    let _ = unpacker.required(b"self")?;
+    let fade = unpacker.optional_number(b"fade", DEFAULT_RAMP_SECS)?;
+    unpacker.end()?;
+    interpreter.fetch_mut::<SoundList>().items.push(SoundCmd::SetVoicePaused {
+        voice_id,
+        paused,
+        fade: fade.max(0.0),
+    });
+    Ok(ShimValue::None)
+}
+
+fn shim_pause_bus(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    set_bus_paused(interpreter, args, true)
+}
+
+fn shim_resume_bus(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    set_bus_paused(interpreter, args, false)
+}
+
+/// Shared by `pause_bus`/`resume_bus`: unpacks `bus`, an optional `fade`, and
+/// queues a `SetBusPaused` command.
+fn set_bus_paused(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+    paused: bool,
+) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let bus = parse_bus(Some(unpacker.required(b"bus")?))?;
+    let fade = unpacker.optional_number(b"fade", DEFAULT_RAMP_SECS)?;
+    unpacker.end()?;
+    interpreter.fetch_mut::<SoundList>().items.push(SoundCmd::SetBusPaused {
+        bus,
+        paused,
+        fade: fade.max(0.0),
+    });
+    Ok(ShimValue::None)
+}
+
+fn shim_pause_audio(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    set_audio_paused(interpreter, args, true)
+}
+
+fn shim_resume_audio(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+    set_audio_paused(interpreter, args, false)
+}
+
+/// Shared by `pause_audio`/`resume_audio`: unpacks an optional `fade` and
+/// queues a `SetAudioPaused` command affecting the whole mix.
+fn set_audio_paused(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+    paused: bool,
+) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let fade = unpacker.optional_number(b"fade", DEFAULT_RAMP_SECS)?;
+    unpacker.end()?;
+    interpreter.fetch_mut::<SoundList>().items.push(SoundCmd::SetAudioPaused {
+        paused,
+        fade: fade.max(0.0),
+    });
+    Ok(ShimValue::None)
+}
+
 fn shim_reset_audio(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let fade_secs = unpacker.optional_number(b"fade", 0.05)?.max(0.0);
@@ -1649,6 +1761,10 @@ fn load_script(bytes: &[u8]) -> Result<(Interpreter, ShimValue), String> {
     interpreter.add_native_fn(b"set_bus_gain", shim_set_bus_gain);
     interpreter.add_native_fn(b"set_bus_lowpass", shim_set_bus_lowpass);
     interpreter.add_native_fn(b"clear_bus_effects", shim_clear_bus_effects);
+    interpreter.add_native_fn(b"pause_bus", shim_pause_bus);
+    interpreter.add_native_fn(b"resume_bus", shim_resume_bus);
+    interpreter.add_native_fn(b"pause_audio", shim_pause_audio);
+    interpreter.add_native_fn(b"resume_audio", shim_resume_audio);
     interpreter.add_native_fn(b"reset_audio", shim_reset_audio);
     interpreter.add_native_fn(b"save_data", shim_save_data);
     interpreter.add_native_fn(b"load_data", shim_load_data);
