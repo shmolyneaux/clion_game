@@ -1,9 +1,10 @@
-use shimlang::{ArgBundle, Ident};
+use shimlang::{ArgBundle, DebugHook, DebugHookResponse, Ident};
 use shimlang::runtime::{ArgUnpacker, CallResult, NativeFn, StructDef, StructAttribute, ShimFn};
 use shimlang::{Environment, Interpreter, ShimNative, ShimValue, debug_u8s};
 use std::collections::HashSet;
 use std::ffi::CString;
 use std::mem;
+use std::time::Duration;
 use tinyjson::JsonValue;
 
 use crate::shimlang_imgui;
@@ -12,7 +13,7 @@ use crate::*;
 
 use std::fs;
 #[cfg(not(target_arch = "wasm32"))]
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::{Receiver, Sender, channel, RecvTimeoutError};
 
 // TODO: Probably shouldn't be cloned?
 #[derive(Debug, Clone)]
@@ -682,6 +683,8 @@ pub enum ScriptResponse {
         f32,
     ),
     Error(Interpreter, ShimValue, String),
+    DebugStart(Receiver<DebuggerToClient>, Sender<ClientToDebugger>),
+    DebugEnd,
 }
 
 /// Messages sent from the file watcher thread to the Engine
@@ -691,9 +694,29 @@ enum ScriptWatcherMessage {
     Error(String),
 }
 
+struct DebugInfo {
+    tx: Sender<ClientToDebugger>,
+    rx: Receiver<DebuggerToClient>,
+    msg: Option<String>,
+}
+
+impl DebugInfo {
+    fn new(
+        tx: Sender<ClientToDebugger>,
+        rx: Receiver<DebuggerToClient>,
+    ) -> Self {
+        Self {
+            tx,
+            rx,
+            msg: None,
+        }
+    }
+}
+
 enum BridgeState {
     #[cfg(not(target_arch = "wasm32"))]
     Running,
+    Debug(DebugInfo),
     Paused(Box<Interpreter>, ShimValue),
 }
 
@@ -710,6 +733,10 @@ pub struct ScriptBridge {
     rx: Receiver<ScriptResponse>,
     #[cfg(not(target_arch = "wasm32"))]
     watcher_rx: Receiver<ScriptWatcherMessage>,
+    debug_mode: bool,
+    // We need this handle so that when we recreate the Interpreter
+    // on reload we can register a new debug hook
+    script_response_channel: Sender<ScriptResponse>,
 }
 
 fn shim_ig_begin(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
@@ -1695,8 +1722,12 @@ fn call_loop_fn(
                 shimlang::ArgBundle::new(),
                 &mut new_env,
             ) {
-                Err(msg) => Err(msg),
+                Err(msg) => {
+                    println!("Error from calling loop fn\n{msg}");
+                    Err(msg)
+                },
                 Ok(_) => {
+                    println!("Got success value from loop fn");
                     let gc_start = std::time::Instant::now();
                     interpreter.gc();
                     Ok(gc_start.elapsed().as_secs_f32())
@@ -1725,8 +1756,9 @@ impl ScriptBridge {
             let (response_tx, response_rx) = channel();
             let (watcher_tx, watcher_rx) = channel();
 
+            let response_tx_clone = response_tx.clone();
             std::thread::spawn(move || {
-                script_thread_logic(request_rx, response_tx);
+                script_thread_logic(request_rx, response_tx_clone);
             });
 
             // In headless mode, load `game.shm` synchronously so frame output is
@@ -1757,7 +1789,9 @@ impl ScriptBridge {
                 script_path,
                 tx: request_tx,
                 rx: response_rx,
+                script_response_channel: response_tx,
                 watcher_rx,
+                debug_mode: false
             }
         }
 
@@ -1779,6 +1813,10 @@ impl ScriptBridge {
         }
     }
 
+    fn in_debug_mode(&self) -> bool {
+        self.debug_mode
+    }
+
     pub fn step(&mut self, keys: &[u8], last_keys: &[u8], delta: f32, perf: PerfTimer, finished: Vec<u32>) {
         let _zone = zone_scoped!("Run interpreter");
         #[cfg(not(target_arch = "wasm32"))]
@@ -1786,7 +1824,14 @@ impl ScriptBridge {
             // Apply any script reloads from the watcher thread
             while let Ok(msg) = self.watcher_rx.try_recv() {
                 match msg {
-                    ScriptWatcherMessage::Loaded(interpreter, loop_fn) => {
+                    // TODO: tell the script thread to stop using the old interpreter
+                    ScriptWatcherMessage::Loaded(mut interpreter, loop_fn) => {
+                        println!("Reloaded interpreter");
+                        let hook = ShimDebugHook {
+                            channel: self.script_response_channel.clone(),
+                        };
+                        interpreter.set_debug_hook(Box::new(hook));
+
                         self.state = BridgeState::Paused(Box::new(interpreter), loop_fn);
                         self.interpreter_errors = Vec::new();
                         crate::audio::submit(std::iter::once(SoundCmd::ResetAudio { fade_secs: 0.05 }));
@@ -1800,38 +1845,87 @@ impl ScriptBridge {
             if self.interpreter_errors.is_empty() {
                 let state = mem::replace(&mut self.state, BridgeState::Running);
                 match state {
-                    BridgeState::Running => panic!("Somehow the interpreter is running"),
-                    BridgeState::Paused(interpreter, loop_fn) => {
-                        self.tx
-                            .send(ScriptRequest::ExecuteLoop(
-                                *interpreter,
-                                loop_fn,
-                                keys.to_vec(),
-                                last_keys.to_vec(),
-                                delta,
-                                perf,
-                                finished,
-                            ))
-                            .unwrap();
-                    }
-                }
+                    BridgeState::Debug(mut debug_info) => {
+                        let window_title = CString::new("Script Debug").unwrap();
+                        unsafe {
+                            loop {
+                                match debug_info.rx.recv_timeout(Duration::ZERO) {
+                                    Ok(DebuggerToClient::Message(s)) => debug_info.msg = Some(s),
+                                    Err(RecvTimeoutError::Timeout) => break,
+                                    Err(RecvTimeoutError::Disconnected) => {
+                                        println!("Debug channel disconnected");
+                                        break;
+                                    },
+                                }
+                            }
+ 
+                            if igBegin(window_title.as_ptr(), std::ptr::null_mut(), 0) {
+                                igText(CString::new("Running debugger").unwrap().as_ptr());
+                                if igButton(CString::new("Continue").unwrap().as_ptr()) {
+                                    debug_info.tx.send(ClientToDebugger::Continue).unwrap();
+                                }
+                                if let Some(msg) = &debug_info.msg {
+                                    igText(CString::new(&**msg).unwrap().as_ptr());
+                                }
+                                igEnd();
+                            }
 
-                {
-                    let _zone = zone_scoped!("Wait for interpreter response");
-                    match self.rx.recv() {
-                        Ok(ScriptResponse::Error(interpreter, loop_fn, msg)) => {
-                            self.state = BridgeState::Paused(Box::new(interpreter), loop_fn);
-                            self.interpreter_errors.push(msg);
+                            self.state = BridgeState::Debug(debug_info);
+
+                            match self.rx.recv_timeout(Duration::ZERO) {
+                                Ok(ScriptResponse::DebugEnd) => {
+                                    self.state = BridgeState::Running;
+                                }
+                                Ok(ScriptResponse::DebugStart(..)) => panic!("Got ScriptResponse::DebugStart when expecting DebugEnd"),
+                                Ok(ScriptResponse::LoopComplete(..)) => panic!("Got ScriptResponse::LoopComplete when expecting DebugEnd"),
+                                Ok(ScriptResponse::Error(..)) => panic!("Got ScriptResponse::Error when expecting DebugEnd"),
+                                Err(RecvTimeoutError::Timeout) => (),
+                                Err(RecvTimeoutError::Disconnected) => panic!("Script channel disconnected during debug!"),
+                            }
                         }
-                        Ok(ScriptResponse::LoopComplete(interpreter, loop_fn, draw_list, sound_list, gc_time)) => {
-                            self.state = BridgeState::Paused(Box::new(interpreter), loop_fn);
-                            self.draw_list = draw_list;
-                            self.sound_list = sound_list;
-                            self.last_gc_time = gc_time;
+                    },
+                    // If we're in the Running state the assumption is that we're coming out of debug mode
+                    BridgeState::Running | BridgeState::Paused(..) => {
+                        if let BridgeState::Paused(interpreter, loop_fn) = state {
+                            println!("Sending interpreter");
+                            self.tx
+                                .send(ScriptRequest::ExecuteLoop(
+                                    *interpreter,
+                                    loop_fn,
+                                    keys.to_vec(),
+                                    last_keys.to_vec(),
+                                    delta,
+                                    perf,
+                                    finished,
+                                ))
+                                .unwrap();
                         }
-                        Err(e) => {
-                            dbg!(e);
-                            panic!("Received error for recv");
+
+                        println!("Waiting for response");
+                        let _zone = zone_scoped!("Wait for interpreter response");
+                        // TODO: we probably want some sort of timeout here so we can start debugging
+                        match self.rx.recv() {
+                            Ok(ScriptResponse::Error(interpreter, loop_fn, msg)) => {
+                                println!("Got ScriptResponse::Error");
+                                self.state = BridgeState::Paused(Box::new(interpreter), loop_fn);
+                                self.interpreter_errors.push(msg);
+                            }
+                            Ok(ScriptResponse::LoopComplete(interpreter, loop_fn, draw_list, sound_list, gc_time)) => {
+                                self.state = BridgeState::Paused(Box::new(interpreter), loop_fn);
+                                self.draw_list = draw_list;
+                                self.sound_list = sound_list;
+                                self.last_gc_time = gc_time;
+                            }
+                            Ok(ScriptResponse::DebugStart(debug_incoming, debug_outgoing)) => {
+                                self.state = BridgeState::Debug(DebugInfo::new(debug_outgoing, debug_incoming));
+                            }
+                            Ok(ScriptResponse::DebugEnd) => {
+                                self.state = BridgeState::Running;
+                            }
+                            Err(e) => {
+                                dbg!(e);
+                                panic!("Received error for recv");
+                            }
                         }
                     }
                 }
@@ -1917,6 +2011,7 @@ impl ScriptBridge {
         match &mut self.state {
             #[cfg(not(target_arch = "wasm32"))]
             BridgeState::Running => {}
+            BridgeState::Debug(..) => {}
             BridgeState::Paused(interpreter, _loop_fn) => {
                 let env = std::mem::take(&mut interpreter.root_env);
                 shimlang_debug_window.debug_window(interpreter, &env);
@@ -1944,7 +2039,6 @@ fn file_watcher_logic(script_path: String, tx: Sender<ScriptWatcherMessage>) {
                             mtime = time;
                             match fs::read(&script_path) {
                                 Ok(bytes) => {
-                                    println!("{}", debug_u8s(&bytes));
                                     let msg = match load_script(&bytes) {
                                         Ok((interp, loop_fn)) => {
                                             ScriptWatcherMessage::Loaded(interp, loop_fn)
@@ -1987,6 +2081,68 @@ fn file_watcher_logic(script_path: String, tx: Sender<ScriptWatcherMessage>) {
     }
 }
 
+struct ShimDebugHook {
+    channel: Sender<ScriptResponse>,
+}
+
+pub enum DebuggerToClient {
+    Message(String),
+}
+
+pub enum ClientToDebugger {
+    Continue,
+}
+
+impl DebugHook for ShimDebugHook {
+    fn on_execute_error(
+        &mut self,
+        msg: &str,
+        interpreter: &mut Interpreter,
+        pending_args: &mut ArgBundle,
+        env: &mut Environment,
+        initial_scope: u32,
+        bytes: &[u8],
+        pc: usize,
+        stack_frame: &mut Vec<(
+            usize,
+            Vec<(usize, usize, usize)>,
+            usize,
+            u32,
+            Vec<Ident>,
+            usize,
+            usize,
+        )>,
+        stack: &mut Vec<ShimValue>,
+        loop_info: &mut Vec<(usize, usize, usize)>,
+        fn_optional_param_name_idx: &mut usize,
+        fn_optional_param_names: &mut Vec<Ident>,
+    ) -> DebugHookResponse{
+
+        use std::thread;
+        use std::time::Duration;
+
+        println!("Debug started!");
+
+        let mut debug_msg = msg.to_string();
+        debug_msg.push('\n');
+        debug_msg.push_str(& interpreter.format_env(env));
+
+        let (debug_to_client_tx, debug_to_client_rx) = channel();
+        let (client_to_debug_tx, client_to_debug_rx) = channel();
+
+        self.channel.send(ScriptResponse::DebugStart(debug_to_client_rx, client_to_debug_tx)).unwrap();
+        debug_to_client_tx.send(DebuggerToClient::Message(debug_msg)).unwrap();
+        loop {
+            match client_to_debug_rx.recv().unwrap() {
+                ClientToDebugger::Continue => break,
+            }
+        }
+        self.channel.send(ScriptResponse::DebugEnd).unwrap();
+
+        DebugHookResponse::PropogateError(msg.to_string())
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn script_thread_logic(rx: Receiver<ScriptRequest>, tx: Sender<ScriptResponse>) {
     loop {
@@ -2026,9 +2182,13 @@ fn script_thread_logic(rx: Receiver<ScriptRequest>, tx: Sender<ScriptResponse>) 
                                 .items
                                 .drain(..)
                                 .collect();
+                            println!("Sending loop complete");
                             ScriptResponse::LoopComplete(interpreter, loop_fn, draw_list, sound_list, gc_time)
                         }
-                        Err(msg) => ScriptResponse::Error(interpreter, loop_fn, msg),
+                        Err(msg) => {
+                            println!("Sending response error");
+                            ScriptResponse::Error(interpreter, loop_fn, msg)
+                        }
                     })
                     .unwrap();
                 }
