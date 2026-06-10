@@ -1838,12 +1838,8 @@ fn call_loop_fn(
                 shimlang::ArgBundle::new(),
                 &mut new_env,
             ) {
-                Err(msg) => {
-                    println!("Error from calling loop fn\n{msg}");
-                    Err(msg)
-                },
+                Err(msg) => Err(msg),
                 Ok(_) => {
-                    println!("Got success value from loop fn");
                     let gc_start = std::time::Instant::now();
                     interpreter.gc();
                     Ok(gc_start.elapsed().as_secs_f32())
@@ -1942,7 +1938,6 @@ impl ScriptBridge {
                 match msg {
                     // TODO: tell the script thread to stop using the old interpreter
                     ScriptWatcherMessage::Loaded(mut interpreter, loop_fn) => {
-                        println!("Reloaded interpreter");
                         let hook = ShimDebugHook {
                             channel: self.script_response_channel.clone(),
                         };
@@ -1968,10 +1963,7 @@ impl ScriptBridge {
                                 match debug_info.rx.recv_timeout(Duration::ZERO) {
                                     Ok(DebuggerToClient::Message(s)) => debug_info.msg = Some(s),
                                     Err(RecvTimeoutError::Timeout) => break,
-                                    Err(RecvTimeoutError::Disconnected) => {
-                                        println!("Debug channel disconnected");
-                                        break;
-                                    },
+                                    Err(RecvTimeoutError::Disconnected) => break,
                                 }
                             }
  
@@ -2003,7 +1995,6 @@ impl ScriptBridge {
                     // If we're in the Running state the assumption is that we're coming out of debug mode
                     BridgeState::Running | BridgeState::Paused(..) => {
                         if let BridgeState::Paused(interpreter, loop_fn) = state {
-                            println!("Sending interpreter");
                             self.tx
                                 .send(ScriptRequest::ExecuteLoop(
                                     *interpreter,
@@ -2017,12 +2008,10 @@ impl ScriptBridge {
                                 .unwrap();
                         }
 
-                        println!("Waiting for response");
                         let _zone = zone_scoped!("Wait for interpreter response");
                         // TODO: we probably want some sort of timeout here so we can start debugging
                         match self.rx.recv() {
                             Ok(ScriptResponse::Error(interpreter, loop_fn, msg)) => {
-                                println!("Got ScriptResponse::Error");
                                 self.state = BridgeState::Paused(Box::new(interpreter), loop_fn);
                                 self.interpreter_errors.push(msg);
                             }
@@ -2237,8 +2226,6 @@ impl DebugHook for ShimDebugHook {
         use std::thread;
         use std::time::Duration;
 
-        println!("Debug started!");
-
         let mut debug_msg = msg.to_string();
         debug_msg.push('\n');
         debug_msg.push_str(& interpreter.format_env(env));
@@ -2298,13 +2285,9 @@ fn script_thread_logic(rx: Receiver<ScriptRequest>, tx: Sender<ScriptResponse>) 
                                 .items
                                 .drain(..)
                                 .collect();
-                            println!("Sending loop complete");
                             ScriptResponse::LoopComplete(interpreter, loop_fn, draw_list, sound_list, gc_time)
                         }
-                        Err(msg) => {
-                            println!("Sending response error");
-                            ScriptResponse::Error(interpreter, loop_fn, msg)
-                        }
+                        Err(msg) => ScriptResponse::Error(interpreter, loop_fn, msg),
                     })
                     .unwrap();
                 }
