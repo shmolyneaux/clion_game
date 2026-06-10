@@ -1,0 +1,10 @@
+// Dispatch-bound loop: cheap ops so interpreter dispatch dominates.
+let i = 0;
+let x = 0;
+while i < 2000000 {
+    x = x + 1;
+    x = x - 1;
+    i = i + 1;
+}
+print(i);
+print(x);
