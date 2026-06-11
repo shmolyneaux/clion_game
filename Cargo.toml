@@ -26,6 +26,12 @@ facet-reflect = { path = "facet/facet-reflect" }
 [profile.dev]
 debug = 2
 
+[profile.release]
+lto = true
+debug = false
+strip = true
+panic = "abort"
+
 [features]
 default = ["facet", "dev"]
 facet = ["dep:facet", "dep:facet-reflect"]

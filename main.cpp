@@ -330,7 +330,9 @@ int main(int argc, char** argv)
     while (glGetError() != GL_NO_ERROR) {}
 
     // Our state
+#ifndef NDEBUG
     bool show_demo_window = false;
+#endif
     ImVec4 clear_color = ImVec4(0.102f, 0.102f, 0.114f, 1.00f);
     glClearColor(clear_color.x * clear_color.w, clear_color.y * clear_color.w, clear_color.z * clear_color.w, clear_color.w);
 
@@ -476,9 +478,11 @@ int main(int argc, char** argv)
         error_window();
 
         if (!startup_error) {
+#ifndef NDEBUG
             if (show_demo_window) {
                 ImGui::ShowDemoWindow(&show_demo_window);
             }
+#endif
 
             {
                 ZoneScoped;

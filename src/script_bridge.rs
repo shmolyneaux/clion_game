@@ -721,7 +721,9 @@ pub enum ScriptResponse {
         f32,
     ),
     Error(Interpreter, ShimValue, String),
+    #[cfg(not(target_arch = "wasm32"))]
     DebugStart(Receiver<DebuggerToClient>, Sender<ClientToDebugger>),
+    #[cfg(not(target_arch = "wasm32"))]
     DebugEnd,
 }
 
@@ -732,12 +734,14 @@ enum ScriptWatcherMessage {
     Error(String),
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 struct DebugInfo {
     tx: Sender<ClientToDebugger>,
     rx: Receiver<DebuggerToClient>,
     msg: Option<String>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl DebugInfo {
     fn new(
         tx: Sender<ClientToDebugger>,
@@ -754,6 +758,7 @@ impl DebugInfo {
 enum BridgeState {
     #[cfg(not(target_arch = "wasm32"))]
     Running,
+    #[cfg(not(target_arch = "wasm32"))]
     Debug(DebugInfo),
     Paused(Box<Interpreter>, ShimValue),
 }
@@ -771,9 +776,11 @@ pub struct ScriptBridge {
     rx: Receiver<ScriptResponse>,
     #[cfg(not(target_arch = "wasm32"))]
     watcher_rx: Receiver<ScriptWatcherMessage>,
+    #[cfg(not(target_arch = "wasm32"))]
     debug_mode: bool,
     // We need this handle so that when we recreate the Interpreter
     // on reload we can register a new debug hook
+    #[cfg(not(target_arch = "wasm32"))]
     script_response_channel: Sender<ScriptResponse>,
 }
 
@@ -1760,7 +1767,11 @@ fn shim_load_data(
 fn load_script(bytes: &[u8]) -> Result<(Interpreter, ShimValue), String> {
     let ast = shimlang::ast_from_text(bytes)?;
     let program = shimlang::compile_ast(&ast)?;
-    let mut interpreter = shimlang::Interpreter::create(&shimlang::Config::default(), program);
+    #[cfg(not(target_arch = "wasm32"))]
+    let config = shimlang::Config::default();
+    #[cfg(target_arch = "wasm32")]
+    let config = shimlang::Config { memory_space_bytes: 2 << 24 /* About 16 MB */ };
+    let mut interpreter = shimlang::Interpreter::create(&config, program);
 
     interpreter.add_native_fn(b"ig_begin", shim_ig_begin);
     interpreter.add_native_fn(b"ig_end", shim_ig_end);
@@ -1925,6 +1936,7 @@ impl ScriptBridge {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn in_debug_mode(&self) -> bool {
         self.debug_mode
     }
@@ -2116,6 +2128,7 @@ impl ScriptBridge {
         match &mut self.state {
             #[cfg(not(target_arch = "wasm32"))]
             BridgeState::Running => {}
+            #[cfg(not(target_arch = "wasm32"))]
             BridgeState::Debug(..) => {}
             BridgeState::Paused(interpreter, _loop_fn) => {
                 let env = std::mem::take(&mut interpreter.root_env);
@@ -2186,18 +2199,22 @@ fn file_watcher_logic(script_path: String, tx: Sender<ScriptWatcherMessage>) {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 struct ShimDebugHook {
     channel: Sender<ScriptResponse>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub enum DebuggerToClient {
     Message(String),
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub enum ClientToDebugger {
     Continue,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl DebugHook for ShimDebugHook {
     fn on_execute_error(
         &mut self,

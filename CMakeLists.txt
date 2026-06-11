@@ -73,13 +73,16 @@ set(SOURCES
     imgui_exports.cpp
     tracy_exports.cpp
     ${IMGUI_DIR}/imgui.cpp
-    ${IMGUI_DIR}/imgui_demo.cpp
     ${IMGUI_DIR}/imgui_draw.cpp
     ${IMGUI_DIR}/imgui_tables.cpp
     ${IMGUI_DIR}/imgui_widgets.cpp
     ${IMGUI_DIR}/backends/imgui_impl_sdl3.cpp
     ${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp
 )
+
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    list(APPEND SOURCES ${IMGUI_DIR}/imgui_demo.cpp)
+endif()
 
 # Global Includes for ImGui headers
 include_directories(includes)
@@ -110,11 +113,14 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     set(WEB_DIR ${CMAKE_BINARY_DIR}/web)
     file(MAKE_DIRECTORY ${WEB_DIR})
     set(CMAKE_EXECUTABLE_SUFFIX ".html")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -sUSE_SDL=3")
+    # TODO: the pre-built wasm32-unknown-emscripten libstd ships with unwinding support,
+    # which prevents -fno-exceptions and --closure 1. To fix, switch to Rust nightly and
+    # recompile libstd with panic=abort via: cargo +nightly build -Z build-std=std,panic_abort
+    # This would also allow removing the panic="abort" workaround from Cargo.toml.
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -sUSE_SDL=3 -Oz")
     target_link_options(game PRIVATE
         "-sWASM=1" "-sUSE_SDL=3" "-sMIN_WEBGL_VERSION=2" "-sMAX_WEBGL_VERSION=2"
-        "-sALLOW_MEMORY_GROWTH=1" "-sNO_EXIT_RUNTIME=0" "-sASSERTIONS=1"
-        "-g"
+        "-sALLOW_MEMORY_GROWTH=1" "-sNO_EXIT_RUNTIME=0"
         "-sSTACK_SIZE=8388608"
         "SHELL:--shell-file ${CMAKE_SOURCE_DIR}/shell.html"
     )
