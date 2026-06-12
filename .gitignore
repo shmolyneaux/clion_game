@@ -12,3 +12,4 @@ crop_*.png
 mask_*.pbm
 trace_*.svg
 logo.svg
+.claude/
