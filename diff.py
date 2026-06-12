@@ -1,7 +1,7 @@
-import cairosvg, numpy as np, sys
+import subprocess, numpy as np, sys
 from PIL import Image
 def render(svg='logo.svg', out='render.png'):
-    cairosvg.svg2png(url=svg, write_to=out, output_width=1024, output_height=1024)
+    subprocess.run(['rsvg-convert', svg, '-w','1024','-h','1024','-o',out], check=True)
 def compose(p):
     # composite RGBA over white for fair comparison
     im=Image.open(p).convert('RGBA')

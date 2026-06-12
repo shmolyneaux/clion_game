@@ -42,8 +42,8 @@ def paths_d(fn):
     return ' '.join(transform(p) for p in parse_potrace(fn))
 
 base_d=paths_d('trace_main.svg')
-mid_d=paths_d('trace_mid.svg')
-hl_d=paths_d('trace_hl.svg')
+broad_d=paths_d('trace_broad.svg')
+strong_d=paths_d('trace_strong.svg')
 
 base_grad='''<linearGradient id="gb" gradientUnits="userSpaceOnUse" x1="512" y1="149" x2="512" y2="810">
 <stop offset="0.00" stop-color="#EC85FF"/>
@@ -53,14 +53,16 @@ base_grad='''<linearGradient id="gb" gradientUnits="userSpaceOnUse" x1="512" y1=
 <stop offset="0.76" stop-color="#A342FF"/>
 <stop offset="1.00" stop-color="#8E41FF"/>
 </linearGradient>'''
-mid_grad='''<linearGradient id="gm" gradientUnits="userSpaceOnUse" x1="512" y1="149" x2="512" y2="810">
-<stop offset="0.00" stop-color="#F5A2FF"/>
-<stop offset="0.23" stop-color="#F07EFF"/>
-<stop offset="0.46" stop-color="#CA75FF"/>
-<stop offset="0.72" stop-color="#B266FF"/>
-<stop offset="1.00" stop-color="#A25BFF"/>
+# broad (mid) highlight gradient — dimmer bevel falloff
+broad_grad='''<linearGradient id="gm" gradientUnits="userSpaceOnUse" x1="512" y1="149" x2="512" y2="810">
+<stop offset="0.00" stop-color="#F5A4FF"/>
+<stop offset="0.23" stop-color="#EE83FF"/>
+<stop offset="0.46" stop-color="#CC77FF"/>
+<stop offset="0.72" stop-color="#B468FF"/>
+<stop offset="1.00" stop-color="#A45FFF"/>
 </linearGradient>'''
-hl_grad='''<linearGradient id="gh" gradientUnits="userSpaceOnUse" x1="512" y1="149" x2="512" y2="810">
+# strong highlight gradient — bright glossy rim
+strong_grad='''<linearGradient id="gh" gradientUnits="userSpaceOnUse" x1="512" y1="149" x2="512" y2="810">
 <stop offset="0.00" stop-color="#F8D2FF"/>
 <stop offset="0.17" stop-color="#F7CDFF"/>
 <stop offset="0.35" stop-color="#F5C9FF"/>
@@ -69,11 +71,20 @@ hl_grad='''<linearGradient id="gh" gradientUnits="userSpaceOnUse" x1="512" y1="1
 <stop offset="1.00" stop-color="#C074FF"/>
 </linearGradient>'''
 
+# silhouette clip keeps the feathered highlights inside the logo (no glow / no bleed into notches)
 svg=f'''<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-<defs>{base_grad}{mid_grad}{hl_grad}</defs>
+<defs>
+{base_grad}{broad_grad}{strong_grad}
+<clipPath id="sil"><path clip-rule="evenodd" d="{base_d}"/></clipPath>
+<filter id="soft" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="3.0"/></filter>
+<filter id="soft2" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="1.6"/></filter>
+</defs>
 <path fill-rule="evenodd" fill="url(#gb)" d="{base_d}"/>
-<path fill-rule="evenodd" fill="url(#gm)" d="{mid_d}"/>
-<path fill-rule="evenodd" fill="url(#gh)" d="{hl_d}"/>
+<g clip-path="url(#sil)">
+<path fill-rule="evenodd" fill="url(#gm)" filter="url(#soft)" d="{broad_d}"/>
+<path fill-rule="evenodd" fill="url(#gh)" filter="url(#soft2)" d="{strong_d}"/>
+</g>
 </svg>'''
 open('logo.svg','w').write(svg)
 print('wrote', len(svg))
+
