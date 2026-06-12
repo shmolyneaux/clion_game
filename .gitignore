@@ -13,3 +13,6 @@ mask_*.pbm
 trace_*.svg
 logo.svg
 .claude/
+blurtest*.png
+blurtest.svg
+cmp_*.png
