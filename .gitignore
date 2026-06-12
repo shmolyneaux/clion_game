@@ -1,12 +1,14 @@
-/target
-/.idea
-/cmake-build-*
-/ignore
-build/
-imgui.ini
-node_modules/
-shimlang-vscode/shimlang-0.1.0.vsix
-shimlang/benchmark_scripts/*.py
-shimlang/benchmark_scripts/*.lua
-game.sav
-.claude/settings.local.json
+# Generated artifacts from logo vectorization
+original.png
+original_512.png
+render.png
+render_512.png
+diff.png
+darker.png
+lighter.png
+hl_mask.png
+sidebyside.png
+crop_*.png
+mask_*.pbm
+trace_*.svg
+logo.svg
