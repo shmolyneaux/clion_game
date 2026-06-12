@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="grad" x1="0" y1="150" x2="0" y2="800" gradientUnits="userSpaceOnUse">
+      <stop offset="0.00" stop-color="#EFB4FF"/>
+      <stop offset="0.24" stop-color="#D689F2"/>
+      <stop offset="0.50" stop-color="#C062E6"/>
+      <stop offset="0.74" stop-color="#9740D4"/>
+      <stop offset="1.00" stop-color="#591F96"/>
+    </linearGradient>
+    <linearGradient id="hi" x1="0" y1="150" x2="0" y2="800" gradientUnits="userSpaceOnUse">
+      <stop offset="0.00" stop-color="#FCE6FF"/>
+      <stop offset="0.50" stop-color="#EBB6FF"/>
+      <stop offset="1.00" stop-color="#C58CEE"/>
+    </linearGradient>
+  </defs>
+
+  <!-- two nested right-pointing triangles ("play button" stack) -->
+  <path d="M 310 157 L 310 770 L 760 512 Z"
+        fill="none" stroke="url(#grad)" stroke-width="54"
+        stroke-linejoin="miter" stroke-miterlimit="8"/>
+  <path d="M 404 350 L 404 558 L 678 490 Z"
+        fill="none" stroke="url(#grad)" stroke-width="42"
+        stroke-linejoin="miter" stroke-miterlimit="8"/>
+
+  <!-- subtle sheen on the upper-left edges for a beveled look -->
+  <g transform="translate(-3,-4)" opacity="0.40">
+    <path d="M 310 157 L 310 770 L 760 512 Z"
+          fill="none" stroke="url(#hi)" stroke-width="6"
+          stroke-linejoin="miter" stroke-miterlimit="8"/>
+    <path d="M 404 350 L 404 558 L 678 490 Z"
+          fill="none" stroke="url(#hi)" stroke-width="5"
+          stroke-linejoin="miter" stroke-miterlimit="8"/>
+  </g>
+</svg>
