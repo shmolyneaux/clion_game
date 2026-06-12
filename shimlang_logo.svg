@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="shimGrad" x1="0" y1="150" x2="0" y2="800" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F08CFF"/>
+      <stop offset="0.25" stop-color="#DD6BFF"/>
+      <stop offset="0.5" stop-color="#D05BFF"/>
+      <stop offset="0.75" stop-color="#A646FF"/>
+      <stop offset="1" stop-color="#9443FF"/>
+    </linearGradient>
+  </defs>
+  <g fill="none" stroke="url(#shimGrad)" stroke-linejoin="miter" stroke-miterlimit="3">
+    <polygon stroke-width="49" points="304,187 316,771 847,442"/>
+    <polygon stroke-width="44" points="301,297 311,616 631,465"/>
+  </g>
+</svg>
