@@ -1,5 +1,7 @@
 # SHIM Engine
 
+![Shimlang logo](shimlang/logo_optimized.svg)
+
 The Shim Engine is a prototype game engine focused on quickly iterating on 3D games.
 
 The interface is heavily influenced by the LÖVE game framework in terms of its
