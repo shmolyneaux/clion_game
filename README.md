@@ -1,6 +1,6 @@
 # SHIM Engine
 
-![Shimlang logo](shimlang/logo_optimized.svg)
+<img src="shimlang/logo_optimized.svg" alt="Shimlang logo" width="200"/>
 
 The Shim Engine is a prototype game engine focused on quickly iterating on 3D games.
 
