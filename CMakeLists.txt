@@ -80,12 +80,7 @@ set(SOURCES
     ${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp
 )
 
-if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-    list(APPEND SOURCES ${IMGUI_DIR}/imgui_demo.cpp)
-endif()
-
 # Global Includes for ImGui headers
-include_directories(includes)
 include_directories(${IMGUI_DIR})
 include_directories(${IMGUI_DIR}/backends)
 
