@@ -2,32 +2,20 @@
   <img src="shimlang/logo_optimized.svg" alt="Shimlang logo" width="200"/>
   <h1>Shim Engine</h1>
 </div>
-The Shim Engine is a prototype game engine focused on quickly iterating on 3D games.
+The Shim Engine is a prototype game engine focused on quickly iterating on 2D and 3D games.
 
-The interface is heavily influenced by the LÖVE game framework in terms of its
-simplicity and easy-of-use. It expands on this with powerful time-travelling debugging,
-data inspection, hot reloading, and deterministic replays.
-
-Should include mesh/texture/audio authoring within the editor.
-
-How much is done: 0%
-
-The following are goals of the project:
-- Windows and WASM support
-
-The following are explicit non-goals:
-- Advanced graphical features
-- 
+Key features on the roadmap are:
+- Time-travelling debugging
+- Hot reloading
+- Deterministic replays
 
 ## Building on Linux?
 
-SDL3 is built from source automatically via CMake's FetchContent (it isn't
-packaged in apt yet), so you only need GLEW and a Rust toolchain installed:
-
+SDL3 is built from source automatically via CMake's FetchContent. You will
+also need GLEW and a Rust toolchain installed. Mesa enables support for
+headless rendering.
 ```
-sudo apt-get install libglew-dev
-# Recommended for headless rendering (see below): EGL + Mesa software renderer
-sudo apt-get install libegl1-mesa-dev libgles2-mesa-dev libgl1-mesa-dri
+sudo apt-get install libglew-dev libegl1-mesa-dev libgles2-mesa-dev libgl1-mesa-dri
 # Rust (if not already installed): https://rustup.rs
 
 # For a release build
