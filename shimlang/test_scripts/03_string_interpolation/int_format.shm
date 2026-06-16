@@ -1,0 +1,34 @@
+// `.format` on integers supports padding and a numeric base.
+
+// Default rendering matches the standard integer representation.
+assert((42).format() == "42");
+assert((-42).format() == "-42");
+
+// force_sign always shows the sign.
+assert((42).format(force_sign=true) == "+42");
+assert((-42).format(force_sign=true) == "-42");
+
+// width pads to a total width, right-aligned by default.
+assert((42).format(width=6) == "    42");
+assert((42).format(width=6, align="left") == "42    ");
+assert((42).format(width=6, align="center") == "  42  ");
+
+// fill chooses the padding character.
+assert((42).format(width=6, fill="0") == "000042");
+// Padding wraps the whole rendered value, sign included.
+assert((-42).format(width=6, fill="0") == "000-42");
+assert((42).format(width=6, fill="*", align="left") == "42****");
+
+// base chooses the radix used for the digits (2 through 36).
+assert((255).format(base=16) == "ff");
+assert((255).format(base=2) == "11111111");
+assert((8).format(base=8) == "10");
+assert((35).format(base=36) == "z");
+assert((255).format(base=16, width=6, fill="0") == "0000ff");
+
+// base and sign interact: only the digits are re-based.
+assert((-255).format(base=16) == "-ff");
+
+// Options work through string interpolation too.
+assert("v=\(42, width=5, fill="0")" == "v=00042");
+assert("hex=\(255, base=16)" == "hex=ff");

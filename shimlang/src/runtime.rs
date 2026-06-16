@@ -1158,6 +1158,7 @@ impl ShimValue {
             }
             ShimValue::Integer(_) => {
                 let func = match ident {
+                    b"format" => shim_int_format,
                     b"bool" => shim_bool,
                     b"int" => shim_int,
                     b"float" => shim_float,

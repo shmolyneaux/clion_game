@@ -41,6 +41,7 @@ with methods, and a growing standard library of built-in types and functions.
   - [Keyword Arguments](#keyword-arguments)
   - [Anonymous Functions](#anonymous-functions)
   - [Closures](#closures)
+  - [Recursion](#recursion)
 - [Structs](#structs)
   - [Defining Structs](#defining-structs)
   - [Methods](#methods)
@@ -86,7 +87,9 @@ The answer is 42
 ```
 
 The separator between arguments and the trailing string can be customized with
-the `sep` and `end` keyword arguments (which default to a space and a newline):
+the `sep` and `end` keyword arguments (which default to a space and a newline).
+They need not be strings — any value is accepted and stringified the same way
+the printed arguments are (so `sep=0` separates with `"0"`):
 
 ```rust
 print("a", "b", "c", sep="-", end="!\n");
@@ -321,9 +324,12 @@ line two
 a "quoted" word
 ```
 
-Strings are byte-oriented and currently intended for ASCII text. `.len()`
-returns the number of bytes, indexing returns a one-byte string, and iteration
-yields each ASCII character byte as a one-character string. Like lists, strings
+Strings are byte-oriented and currently restricted to ASCII text. A string
+literal containing a non-ASCII byte is rejected at parse time with an error
+rather than being stored as raw bytes, so every string literal must be pure
+ASCII. `.len()` returns the number of bytes, indexing returns a one-byte
+string, and iteration yields each ASCII character byte as a one-character
+string. Like lists, strings
 support **negative indices**, which count back from the end (`s[-1]` is the last
 byte); an index outside the valid range is an error:
 
@@ -580,8 +586,13 @@ Output:
 ```
 (0, a)
 (1, b)
-None
+StopIteration
 ```
+
+When the iterator is exhausted, `.next()` returns the `StopIteration` sentinel
+(the same value custom iterators return — see
+[Custom Iterators](#custom-iterators)), not `None`. This keeps `None` available
+as an ordinary value an iterator can yield.
 
 A container that refers to itself (directly or indirectly) is still safe to
 print: the cycle is detected and the repeated reference is shown as `...` rather
@@ -723,6 +734,11 @@ Alice
 2
 ```
 
+Indexing a dictionary with a key that is not present (`d[missing]`) raises an
+error that propagates like any other runtime error, halting the program at that
+point. Use `.get(key)`, which returns `None` (or a supplied default) for a
+missing key, when a lookup may legitimately miss:
+
 You can also use the `.set()` and `.get()` methods:
 
 ```rust
@@ -847,6 +863,28 @@ Output:
 0.7853982
 ```
 
+On an integer base, `pow` keeps an integer result. A non-negative exponent
+saturates like the other integer operations, and a **negative** exponent —
+mathematically `1 / base^|exp|` — truncates toward zero, which is `0` for any
+base whose magnitude is greater than `1`:
+
+```rust
+print((2).pow(-1));
+print((2).pow(-3));
+print((1).pow(-5));
+```
+
+Output:
+
+```
+0
+0
+1
+```
+
+(A negative exponent on a *float* base still produces the usual fractional
+float, e.g. `(2.0).pow(-1)` is `0.5`.)
+
 `min`, `max`, `clamp`, and `in_range` take range or bound operands:
 
 ```rust
@@ -969,6 +1007,16 @@ with each other), strings, booleans, `None`, lists, tuples, and structs that
 provide comparison overload methods. Lists and tuples compare lexicographically:
 the first unequal element determines the result, and if one sequence is a
 prefix of the other, the shorter sequence sorts first.
+
+Ordering does **not** cross built-in types: integers and floats are the only
+pair that compare against each other. Any other mismatch — for example a string
+against a number, or `None` against a list — raises an error rather than
+producing a result. This differs from equality, where a mismatch between
+unrelated types simply yields `false` (so `1 == "a"` is `false`, but `1 < "a"`
+is an error). Because `<` and friends can fail on mismatched types, sorting a
+list whose elements are not all mutually comparable produces an unspecified
+order; keep the elements of a list you intend to sort to a single comparable
+type.
 
 Comparison operators can be **chained**, as in `a < b < c`. A chain
 `a OP b OP c` is equivalent to `a OP b and b OP c`, except that each operand is
@@ -1192,8 +1240,12 @@ print(count);
 Output:
 
 ```
-1
+1.0
 ```
+
+Note that `/=` follows the same rule as `/` and always produces a float, so
+after `count /= 3` the value is a float (`4.0`) and stays a float through the
+rest of the example, ending at `1.0` rather than the integer `1`.
 
 These operators also work on struct fields and list elements:
 
@@ -1313,6 +1365,30 @@ Output:
 2
 3
 4
+```
+
+Mutating a list or dictionary while looping over it is allowed: the loop reads
+the container live, so elements appended during iteration are visited and
+elements removed before they are reached are skipped. This is convenient for
+worklist-style loops but means an unconditional `append` inside the loop will
+iterate forever.
+
+```rust
+let work = [1];
+for x in work {
+    print(x);
+    if x < 3 {
+        work.append(x + 1);
+    }
+}
+```
+
+Output:
+
+```
+1
+2
+3
 ```
 
 ### Break and Continue
@@ -1529,6 +1605,15 @@ Output:
 1
 2
 ```
+
+### Recursion
+
+Functions may recurse freely, including very deeply. Call frames are tracked on
+an interpreter-managed heap rather than the native call stack, so deep recursion
+does not crash with a native stack overflow. It is not unbounded, however: a
+sufficiently deep (or non-terminating) recursion eventually exhausts the heap
+and halts with an out-of-memory error. Prefer an explicit loop for arbitrarily
+large iteration counts.
 
 ## Structs
 
@@ -1861,6 +1946,37 @@ Output:
 1.2345e3
 ```
 
+#### Formatting integers
+
+The `.format` method on integers accepts the padding and sign options that
+floats do, plus a numeric `base` (all optional, positional or keyword):
+
+- `fill`: the single character used to pad empty space (defaults to `" "`)
+- `align`: `"left"`, `"center"`, or `"right"` (defaults to `"right"`)
+- `force_sign`: always show the `+`/`-` sign (defaults to `false`)
+- `width`: the total width of the formatted string
+- `base`: the radix used to render the digits, from `2` to `36` (defaults to
+  `10`); digits above `9` use lowercase letters, so base 16 yields lowercase hex
+
+Integers do not accept the float-only `precision` or `notation` options. Padding
+wraps the whole rendered value, including the sign.
+
+```rust
+print("\(42, width=6, fill="0")");
+print("\(255, base=16)");
+print("\(255, base=16, width=6, fill="0")");
+print("\(-42, force_sign=true)");
+```
+
+Output:
+
+```
+000042
+ff
+0000ff
+-42
+```
+
 ## Block Expressions
 
 Curly braces create block expressions. The value of the last expression in a
@@ -1894,6 +2010,12 @@ Output:
 ```
 big
 ```
+
+Only blocks and `if`/`else if`/`else` are expressions. `while` and `for` are
+**statements only** — they do not produce a value and cannot appear where an
+expression is expected, so `let x = while ... {}` is a parse error. (An `if`
+used as an expression with no matching `else` evaluates to `None` when no branch
+is taken.)
 
 ## Statement Terminators
 
@@ -2056,6 +2178,13 @@ Output:
 3.14
 123
 ```
+
+When parsing a string, `int(...)` accepts an optional leading sign and
+surrounding whitespace, but **not** the `_` digit separators that are allowed in
+integer *literals*, and not a fractional or `0x`-style form. So `int("1_000")`,
+`int("3.0")`, and `int("0x10")` all fail even though `1_000` is a valid literal.
+Convert a string that contains separators by removing them first, or parse a
+fractional string with `float(...)` and then `int(...)` the result.
 
 The `try_` variants return `None` instead of panicking on invalid input:
 

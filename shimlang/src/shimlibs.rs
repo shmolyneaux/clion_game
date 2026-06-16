@@ -2471,6 +2471,127 @@ pub(crate) fn shim_float_format(
     interpreter.mem.alloc_str(num.as_bytes())
 }
 
+/// Implementation of the `.format` method for integers. It supports a subset of
+/// the float options plus a numeric `base` (all optional, passed as keyword or
+/// positional arguments after the value):
+///
+/// - `fill`: the single character used to pad empty space (defaults to `" "`)
+/// - `align`: `"left"`, `"center"`, or `"right"` (defaults to `"right"`)
+/// - `force_sign`: always show the `+`/`-` sign (defaults to `false`)
+/// - `width`: the total width of the formatted string
+/// - `base`: the radix used to render the digits, 2 through 36 (defaults to 10)
+pub(crate) fn shim_int_format(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
+    let mut unpacker = ArgUnpacker::new(args);
+    let value = match unpacker.required(b"obj")? {
+        ShimValue::Integer(i) => i,
+        other => {
+            return Err(format!(
+                "int format expects an integer, got {}",
+                other.to_string_mem(&interpreter.mem)
+            ));
+        }
+    };
+
+    let fill = match unpacker.optional(b"fill") {
+        Some(v) => {
+            let bytes = v.string(interpreter)?;
+            let s = std::str::from_utf8(bytes)
+                .map_err(|_| "`fill` must be a valid utf-8 string".to_string())?;
+            let mut chars = s.chars();
+            match (chars.next(), chars.next()) {
+                (Some(c), None) => c,
+                _ => return Err("`fill` must be a single character".to_string()),
+            }
+        }
+        None => ' ',
+    };
+
+    let align = match unpacker.optional(b"align") {
+        Some(v) => match v.string(interpreter)? {
+            b"left" => FloatAlign::Left,
+            b"center" => FloatAlign::Center,
+            b"right" => FloatAlign::Right,
+            other => {
+                return Err(format!(
+                    "`align` must be \"left\", \"center\", or \"right\", got {:?}",
+                    debug_u8s(other)
+                ));
+            }
+        },
+        None => FloatAlign::Right,
+    };
+
+    let force_sign = match unpacker.optional(b"force_sign") {
+        Some(ShimValue::Bool(b)) => b,
+        Some(_) => return Err("`force_sign` must be a bool".to_string()),
+        None => false,
+    };
+
+    let width = match unpacker.optional(b"width") {
+        Some(ShimValue::Integer(i)) if i >= 0 => Some(i as usize),
+        Some(_) => return Err("`width` must be a non-negative integer".to_string()),
+        None => None,
+    };
+
+    let base = match unpacker.optional(b"base") {
+        Some(ShimValue::Integer(b)) if (2..=36).contains(&b) => b as u32,
+        Some(_) => return Err("`base` must be an integer between 2 and 36".to_string()),
+        None => 10,
+    };
+
+    unpacker.end()?;
+
+    // Render the magnitude in the requested base, then re-attach the sign. Use a
+    // widened, unsigned magnitude so that i32::MIN does not overflow on negation.
+    let negative = value < 0;
+    let mut mag = (value as i64).unsigned_abs();
+    let mut digits: Vec<u8> = Vec::new();
+    if mag == 0 {
+        digits.push(b'0');
+    }
+    while mag > 0 {
+        let d = (mag % base as u64) as u8;
+        digits.push(if d < 10 { b'0' + d } else { b'a' + (d - 10) });
+        mag /= base as u64;
+    }
+    digits.reverse();
+
+    let mut num = String::with_capacity(digits.len() + 1);
+    if negative {
+        num.push('-');
+    } else if force_sign {
+        num.push('+');
+    }
+    num.push_str(std::str::from_utf8(&digits).unwrap());
+
+    // Pad to the requested width using the fill character and alignment.
+    if let Some(width) = width {
+        let len = num.chars().count();
+        if len < width {
+            let pad = width - len;
+            let (left, right) = match align {
+                FloatAlign::Left => (0, pad),
+                FloatAlign::Right => (pad, 0),
+                FloatAlign::Center => (pad / 2, pad - pad / 2),
+            };
+            let mut padded = String::with_capacity(num.len() + pad);
+            for _ in 0..left {
+                padded.push(fill);
+            }
+            padded.push_str(&num);
+            for _ in 0..right {
+                padded.push(fill);
+            }
+            num = padded;
+        }
+    }
+
+    interpreter.mem.alloc_str(num.as_bytes())
+}
+
 pub(crate) fn shim_str_len(
     interpreter: &mut Interpreter,
     args: &ArgBundle,
@@ -3025,7 +3146,16 @@ pub(crate) fn shim_pow(
                 // Saturate at i32::MIN/i32::MAX instead of panicking on overflow.
                 Ok(ShimValue::Integer(b.saturating_pow(e as u32)))
             } else {
-                Ok(ShimValue::Float((b as f32).powi(e)))
+                // A negative exponent on an integer base is `1 / base^|e|`, which
+                // truncates toward zero like integer division: it is 0 for any
+                // base with magnitude greater than 1, and ±1 only for a base of
+                // ±1. The result stays an integer rather than becoming a float.
+                // A base of 0 would be `1 / 0`, which the language defines as 0.
+                if b == 0 {
+                    Ok(ShimValue::Integer(0))
+                } else {
+                    Ok(ShimValue::Integer((b as f32).powi(e).trunc() as i32))
+                }
             }
         }
         (ShimValue::Integer(b), ShimValue::Float(e)) => Ok(ShimValue::Float((b as f32).powf(e))),
