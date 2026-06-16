@@ -499,13 +499,16 @@ impl MMU {
 
     // MMU methods that depend on runtime types (ShimValue, ShimDict, ShimList, ShimFn, etc.)
 
-    pub fn alloc_str(&mut self, contents: &[u8]) -> ShimValue {
-        assert!(
-            contents.len() <= u16::MAX as usize,
-            "String length exceeds u16::MAX"
-        );
+    pub fn alloc_str(&mut self, contents: &[u8]) -> Result<ShimValue, String> {
+        if contents.len() > u16::MAX as usize {
+            return Err(format!(
+                "String length {} exceeds the maximum of {} bytes",
+                contents.len(),
+                u16::MAX
+            ));
+        }
         let pos = self.alloc_str_raw(contents);
-        ShimValue::String(contents.len() as u16, 0, pos)
+        Ok(ShimValue::String(contents.len() as u16, 0, pos))
     }
 
     pub fn alloc_dict_raw(&mut self) -> u24 {

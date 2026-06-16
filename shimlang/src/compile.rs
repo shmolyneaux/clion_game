@@ -1112,7 +1112,10 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
             Ok(res)
         }
         Expression::Primary(Primary::Integer(i)) => {
-            let val = ShimValue::Integer(*i);
+            // Integer literals are carried as i64; saturate to the i32 range
+            // to match the language's saturating integer arithmetic.
+            let clamped = (*i).clamp(i32::MIN as i64, i32::MAX as i64) as i32;
+            let val = ShimValue::Integer(clamped);
             let mut res = vec![(ByteCode::LiteralShimValue as u8, expr.span)];
             for b in val.to_bytes().into_iter() {
                 res.push((b, expr.span));

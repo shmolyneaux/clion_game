@@ -48,7 +48,11 @@ pub enum Token {
     LCurly,
     RCurly,
     None,
-    Integer(i32),
+    // Integer literals are lexed as i64 so that a magnitude one past
+    // i32::MAX (2147483648) can be carried through to the parser, where a
+    // leading minus folds it into i32::MIN. Bare out-of-range literals are
+    // saturated to the i32 range at compile time.
+    Integer(i64),
     Float(f32),
     Bool(bool),
     Identifier(Vec<u8>),

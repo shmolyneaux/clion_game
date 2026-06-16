@@ -202,7 +202,7 @@ impl ShimNative for StringIterator {
                     s[itr.idx]
                 };
                 itr.idx += 1;
-                Ok(interpreter.mem.alloc_str(&[b]))
+                interpreter.mem.alloc_str(&[b])
             }
 
             Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_str_iter_next))
@@ -1383,7 +1383,7 @@ pub(crate) fn shim_dict(
     let dict = retval.dict_mut(interpreter)?;
 
     for (key, val) in args.kwargs.clone().into_iter() {
-        let key = interpreter.mem.alloc_str(&key);
+        let key = interpreter.mem.alloc_str(&key)?;
         dict.set(interpreter, key, val)?;
     }
 
@@ -1504,14 +1504,33 @@ pub(crate) fn shim_print(
     args: &ArgBundle,
 ) -> Result<ShimValue, String> {
     let _zone = zone_scoped!("shim_print");
+
+    // `sep` separates the arguments (default a single space) and `end` is
+    // printed after the last argument (default a newline). Any other keyword
+    // argument is an error.
+    let mut sep = " ".to_string();
+    let mut end = "\n".to_string();
+    for (ident, val) in args.kwargs.iter() {
+        match ident.as_slice() {
+            b"sep" => sep = val.to_string(interpreter),
+            b"end" => end = val.to_string(interpreter),
+            other => {
+                return Err(format!(
+                    "print got an unexpected keyword argument '{}'",
+                    debug_u8s(other)
+                ))
+            }
+        }
+    }
+
     for (idx, arg) in args.args.iter().enumerate() {
         if idx != 0 {
-            print!(" ");
+            print!("{}", sep);
         }
         print!("{}", arg.to_string(interpreter));
     }
 
-    println!();
+    print!("{}", end);
     Ok(ShimValue::None)
 }
 
@@ -2305,7 +2324,7 @@ pub(crate) fn shim_format(
     unpacker.end()?;
 
     let s = obj.to_string_mem(&interpreter.mem);
-    Ok(interpreter.mem.alloc_str(s.as_bytes()))
+    interpreter.mem.alloc_str(s.as_bytes())
 }
 
 enum FloatAlign {
@@ -2444,7 +2463,7 @@ pub(crate) fn shim_float_format(
         }
     }
 
-    Ok(interpreter.mem.alloc_str(num.as_bytes()))
+    interpreter.mem.alloc_str(num.as_bytes())
 }
 
 pub(crate) fn shim_str_len(
@@ -2483,7 +2502,7 @@ pub(crate) fn shim_str_split(
         while idx < len && !s[idx].is_ascii_whitespace() {
             idx += 1;
         }
-        let val = interpreter.mem.alloc_str(&s[start..idx]);
+        let val = interpreter.mem.alloc_str(&s[start..idx])?;
         out.push(&mut interpreter.mem, val);
     }
 
@@ -2530,7 +2549,7 @@ pub(crate) fn shim_str_join(
         out.extend_from_slice(item.to_string_mem(&interpreter.mem).as_bytes());
     }
 
-    Ok(interpreter.mem.alloc_str(&out))
+    interpreter.mem.alloc_str(&out)
 }
 
 pub(crate) fn shim_str_upper(
@@ -2546,7 +2565,7 @@ pub(crate) fn shim_str_upper(
     if out == s {
         Ok(binding)
     } else {
-        Ok(interpreter.mem.alloc_str(&out))
+        interpreter.mem.alloc_str(&out)
     }
 }
 
@@ -2563,7 +2582,7 @@ pub(crate) fn shim_str_lower(
     if out == s {
         Ok(binding)
     } else {
-        Ok(interpreter.mem.alloc_str(&out))
+        interpreter.mem.alloc_str(&out)
     }
 }
 
@@ -2583,7 +2602,7 @@ pub(crate) fn shim_str_strip(
     unpacker.end()?;
 
     match out {
-        Some(bytes) => Ok(interpreter.mem.alloc_str(&bytes)),
+        Some(bytes) => interpreter.mem.alloc_str(&bytes),
         None => Ok(binding),
     }
 }
@@ -2605,7 +2624,7 @@ pub(crate) fn shim_str_remove_prefix(
     unpacker.end()?;
 
     match out {
-        Some(bytes) => Ok(interpreter.mem.alloc_str(&bytes)),
+        Some(bytes) => interpreter.mem.alloc_str(&bytes),
         None => Ok(binding),
     }
 }
@@ -2627,7 +2646,7 @@ pub(crate) fn shim_str_remove_suffix(
     unpacker.end()?;
 
     match out {
-        Some(bytes) => Ok(interpreter.mem.alloc_str(&bytes)),
+        Some(bytes) => interpreter.mem.alloc_str(&bytes),
         None => Ok(binding),
     }
 }
@@ -2648,12 +2667,12 @@ pub(crate) fn shim_str_split_lines(
     while idx < s.len() {
         if s[idx] == b'\n' {
             let end = if idx > start && s[idx - 1] == b'\r' { idx - 1 } else { idx };
-            let val = interpreter.mem.alloc_str(&s[start..end]);
+            let val = interpreter.mem.alloc_str(&s[start..end])?;
             out.push(&mut interpreter.mem, val);
             idx += 1;
             start = idx;
         } else if s[idx] == b'\r' {
-            let val = interpreter.mem.alloc_str(&s[start..idx]);
+            let val = interpreter.mem.alloc_str(&s[start..idx])?;
             out.push(&mut interpreter.mem, val);
             idx += 1;
             if idx < s.len() && s[idx] == b'\n' {
@@ -2665,7 +2684,7 @@ pub(crate) fn shim_str_split_lines(
         }
     }
     if start < s.len() {
-        let val = interpreter.mem.alloc_str(&s[start..]);
+        let val = interpreter.mem.alloc_str(&s[start..])?;
         out.push(&mut interpreter.mem, val);
     }
 
@@ -2743,7 +2762,7 @@ pub(crate) fn shim_str_lstrip(
     unpacker.end()?;
 
     match out {
-        Some(bytes) => Ok(interpreter.mem.alloc_str(&bytes)),
+        Some(bytes) => interpreter.mem.alloc_str(&bytes),
         None => Ok(binding),
     }
 }
@@ -2760,7 +2779,7 @@ pub(crate) fn shim_str_rstrip(
     unpacker.end()?;
 
     match out {
-        Some(bytes) => Ok(interpreter.mem.alloc_str(&bytes)),
+        Some(bytes) => interpreter.mem.alloc_str(&bytes),
         None => Ok(binding),
     }
 }
@@ -2797,7 +2816,7 @@ pub(crate) fn shim_str_replace(
         }
     }
 
-    Ok(interpreter.mem.alloc_str(&out))
+    interpreter.mem.alloc_str(&out)
 }
 
 fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
@@ -2869,7 +2888,7 @@ pub(crate) fn shim_str(
 
     let string_repr = value.to_string(interpreter);
     let bytes = string_repr.as_bytes();
-    Ok(interpreter.mem.alloc_str(bytes))
+    interpreter.mem.alloc_str(bytes)
 }
 
 pub(crate) fn shim_bool(
@@ -3401,7 +3420,7 @@ pub(crate) fn shim_abs(
     unpacker.end()?;
     Ok(
         match value {
-            ShimValue::Integer(i) => ShimValue::Integer(i.abs()),
+            ShimValue::Integer(i) => ShimValue::Integer(i.saturating_abs()),
             ShimValue::Float(f) => ShimValue::Float(f.abs()),
             _ => return Err("abs: expected int or float".to_string()),
         }

@@ -1437,7 +1437,7 @@ impl ShimValue {
 
                 let b: u8 = val[index as usize];
 
-                Ok(interpreter.mem.alloc_str(&[b]))
+                interpreter.mem.alloc_str(&[b])
             }
             (ShimValue::List(position), ShimValue::Integer(idx)) => unsafe {
                 let lst: &ShimList = interpreter.mem.get(*position);
@@ -1654,7 +1654,7 @@ impl ShimValue {
                         unsafe { std::str::from_utf8_unchecked(b) },
                     )
                     .into_bytes(),
-                );
+                )?;
 
                 Ok(CallResult::ReturnValue(c))
             }
@@ -1895,6 +1895,12 @@ impl ShimValue {
         interpreter: &mut Interpreter,
         other: &Self,
     ) -> Result<ShimValue, String> {
+        // A struct may overload `>` directly via a `gt` method. Its return
+        // value is interpreted by truthiness.
+        if let Some(result) = self.try_struct_override(interpreter, b"gt", other) {
+            let val = result?;
+            return Ok(ShimValue::Bool(val.is_truthy(interpreter)?));
+        }
         match compare_values(interpreter, self, other) {
             Ok(std::cmp::Ordering::Greater) => Ok(ShimValue::Bool(true)),
             Ok(_) => Ok(ShimValue::Bool(false)),
@@ -1903,6 +1909,10 @@ impl ShimValue {
     }
 
     fn gte(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
+        if let Some(result) = self.try_struct_override(interpreter, b"gte", other) {
+            let val = result?;
+            return Ok(ShimValue::Bool(val.is_truthy(interpreter)?));
+        }
         match compare_values(interpreter, self, other) {
             Ok(std::cmp::Ordering::Greater) | Ok(std::cmp::Ordering::Equal) => {
                 Ok(ShimValue::Bool(true))
@@ -1917,6 +1927,10 @@ impl ShimValue {
         interpreter: &mut Interpreter,
         other: &Self,
     ) -> Result<ShimValue, String> {
+        if let Some(result) = self.try_struct_override(interpreter, b"lt", other) {
+            let val = result?;
+            return Ok(ShimValue::Bool(val.is_truthy(interpreter)?));
+        }
         match compare_values(interpreter, self, other) {
             Ok(std::cmp::Ordering::Less) => Ok(ShimValue::Bool(true)),
             Ok(_) => Ok(ShimValue::Bool(false)),
@@ -1925,6 +1939,10 @@ impl ShimValue {
     }
 
     pub fn lte(&self, interpreter: &mut Interpreter, other: &Self) -> Result<ShimValue, String> {
+        if let Some(result) = self.try_struct_override(interpreter, b"lte", other) {
+            let val = result?;
+            return Ok(ShimValue::Bool(val.is_truthy(interpreter)?));
+        }
         match compare_values(interpreter, self, other) {
             Ok(std::cmp::Ordering::Less) | Ok(std::cmp::Ordering::Equal) => {
                 Ok(ShimValue::Bool(true))
@@ -1968,7 +1986,10 @@ impl ShimValue {
             }
             ShimValue::Struct(..) => {
                 if let Some(result) = self.try_struct_override(interpreter, b"contains", some_key) {
-                    return result;
+                    // Coerce the overload's return value to a boolean by its
+                    // truthiness, so `in` always yields a bool.
+                    let val = result?;
+                    return Ok(ShimValue::Bool(val.is_truthy(interpreter)?));
                 }
                 Err(format!(
                     "Can't `in` {} and {}",
@@ -1991,7 +2012,7 @@ impl ShimValue {
     pub fn neg(&self, interpreter: &mut Interpreter) -> Result<ShimValue, String> {
         match self {
             ShimValue::Float(a) => Ok(ShimValue::Float(-a)),
-            ShimValue::Integer(a) => Ok(ShimValue::Integer(-a)),
+            ShimValue::Integer(a) => Ok(ShimValue::Integer(a.saturating_neg())),
             _ => Err(format!(
                 "Can't Negate {}",
                 self.to_string_mem(&interpreter.mem)
@@ -2014,7 +2035,7 @@ impl ShimValue {
                 unsafe {
                     let def: &StructDef = interpreter.mem.get(*def_pos);
                     let name = def.name.clone();
-                    return Ok(interpreter.mem.alloc_str(&name));
+                    return interpreter.mem.alloc_str(&name);
                 }
             }
         }
@@ -2739,7 +2760,7 @@ impl Interpreter {
                     let str_len = bytes[*pc + 1] as usize;
                     let contents = &bytes[*pc + 2..*pc + 2 + str_len];
 
-                    stack.push(self.mem.alloc_str(contents));
+                    stack.push(self.mem.alloc_str(contents)?);
                     *pc += 1 + str_len;
                 }
                 val if val == ByteCode::VariableDeclaration as u8 => {
