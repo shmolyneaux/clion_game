@@ -195,8 +195,8 @@ Output:
 1000.0005
 ```
 
-Non-finite values are written `inf`, `-inf`, and `NaN` (note the absence of a
-trailing `.0`). They arise from operations such as `sqrt` of a negative number:
+Non-finite values are written `inf`, `-inf`, and `NaN`. They arise from
+operations such as `sqrt` of a negative number:
 
 ```rust
 print((-1.0).sqrt());

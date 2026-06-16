@@ -1841,22 +1841,6 @@ impl ShimValue {
         // Division always produces a float; division by zero is defined to
         // return 0.0 rather than yielding infinity/NaN or panicking.
         match (self, other) {
-            (ShimValue::Integer(a), ShimValue::Integer(b)) => {
-                if *b == 0 { Ok(ShimValue::Float(0.0)) }
-                else { Ok(ShimValue::Float((*a as f32) / (*b as f32))) }
-            }
-            (ShimValue::Float(a), ShimValue::Float(b)) => {
-                if *b == 0.0 { Ok(ShimValue::Float(0.0)) }
-                else { Ok(ShimValue::Float(*a / *b)) }
-            }
-            (ShimValue::Integer(a), ShimValue::Float(b)) => {
-                if *b == 0.0 { Ok(ShimValue::Float(0.0)) }
-                else { Ok(ShimValue::Float((*a as f32) / *b)) }
-            }
-            (ShimValue::Float(a), ShimValue::Integer(b)) => {
-                if *b == 0 { Ok(ShimValue::Float(0.0)) }
-                else { Ok(ShimValue::Float(*a / (*b as f32))) }
-            }
             (ShimValue::Struct(..), _) => {
                 if let Some(result) = self.try_struct_override(interpreter, b"div", other) {
                     result
@@ -1867,6 +1851,11 @@ impl ShimValue {
                     ))
                 }
             },
+            (_, ShimValue::Integer(0) | ShimValue::Float(0.0)) => Ok(ShimValue::Float(0.0)),
+            (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Float((*a as f32) / (*b as f32))),
+            (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Float(*a / *b)),
+            (ShimValue::Integer(a), ShimValue::Float(b)) => Ok(ShimValue::Float((*a as f32) / *b)),
+            (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(ShimValue::Float(*a / (*b as f32))),
             (a, b) => Err(format!(
                 "Operation '/' not supported between {} and {}",
                 a.to_string_mem(&interpreter.mem), b.to_string_mem(&interpreter.mem)
@@ -1878,22 +1867,6 @@ impl ShimValue {
         // Modulo by zero is defined to return 0 (of the result's type) rather
         // than panicking (integers) or yielding NaN (floats).
         match (self, other) {
-            (ShimValue::Integer(a), ShimValue::Integer(b)) => {
-                if *b == 0 { Ok(ShimValue::Integer(0)) }
-                else { Ok(ShimValue::Integer(a.rem_euclid(*b))) }
-            }
-            (ShimValue::Float(a), ShimValue::Float(b)) => {
-                if *b == 0.0 { Ok(ShimValue::Float(0.0)) }
-                else { Ok(ShimValue::Float(a.rem_euclid(*b))) }
-            }
-            (ShimValue::Integer(a), ShimValue::Float(b)) => {
-                if *b == 0.0 { Ok(ShimValue::Float(0.0)) }
-                else { Ok(ShimValue::Float((*a as f32).rem_euclid(*b))) }
-            }
-            (ShimValue::Float(a), ShimValue::Integer(b)) => {
-                if *b == 0 { Ok(ShimValue::Float(0.0)) }
-                else { Ok(ShimValue::Float(a.rem_euclid(*b as f32))) }
-            }
             (ShimValue::Struct(..), _) => {
                 if let Some(result) = self.try_struct_override(interpreter, b"modulus", other) {
                     result
@@ -1904,6 +1877,12 @@ impl ShimValue {
                     ))
                 }
             },
+            (ShimValue::Integer(_), ShimValue::Integer(0)) => Ok(ShimValue::Integer(0)),
+            (_, ShimValue::Integer(0) | ShimValue::Float(0.0)) => Ok(ShimValue::Float(0.0)),
+            (ShimValue::Integer(a), ShimValue::Integer(b)) => Ok(ShimValue::Integer(a.rem_euclid(*b))),
+            (ShimValue::Float(a), ShimValue::Float(b)) => Ok(ShimValue::Float(a.rem_euclid(*b))),
+            (ShimValue::Integer(a), ShimValue::Float(b)) => Ok(ShimValue::Float((*a as f32).rem_euclid(*b))),
+            (ShimValue::Float(a), ShimValue::Integer(b)) => Ok(ShimValue::Float(a.rem_euclid(*b as f32))),
             (a, b) => Err(format!(
                 "Operation '%' not supported between {} and {}",
                 a.to_string_mem(&interpreter.mem), b.to_string_mem(&interpreter.mem)
