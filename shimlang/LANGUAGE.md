@@ -17,6 +17,7 @@ with methods, and a growing standard library of built-in types and functions.
   - [Booleans](#booleans)
   - [Strings](#strings)
   - [None](#none)
+  - [StopIteration](#stopiteration)
   - [Lists](#lists)
   - [Tuples](#tuples)
   - [Dictionaries](#dictionaries)
@@ -416,6 +417,23 @@ Output:
 
 ```
 None
+```
+
+### StopIteration
+
+`StopIteration` is a sentinel value used by iterator `next` methods to signal that iteration is finished. Iterators do **not** use `None` to stop, so iterables can safely contain and yield `None` values.
+
+```rust
+let iter = [None].iter();
+print(iter.next());
+print(iter.next());
+```
+
+Output:
+
+```
+None
+StopIteration
 ```
 
 ### Lists
@@ -1960,10 +1978,10 @@ Output:
 
 An iterable is any value with an `iter` method. Calling `.iter()` returns an
 iterator object, and that iterator exposes a `next` method. `for` loops call
-`.iter()` for you and repeatedly call `.next()` until it returns `None`.
+`.iter()` for you and repeatedly call `.next()` until it returns `StopIteration`.
 
 Any struct that implements an `iter` method returning an iterator object can be
-used in `for` loops. The `next` method should return `None` to signal the end
+used in `for` loops. The `next` method should return `StopIteration` to signal the end
 of iteration:
 
 ```rust
@@ -1977,7 +1995,7 @@ struct Counter {
 
     fn next(self) {
         if self.current >= self.max {
-            return None;
+            return StopIteration;
         }
         let val = self.current;
         self.current = self.current + 1;
@@ -2010,6 +2028,7 @@ Output:
 | `dict()` | Creates a new empty dictionary |
 | `dict(key=value, ...)` | Creates a dictionary with string keys from keyword names |
 | `Range(start, end)` | Creates a range from `start` (inclusive) to `end` (exclusive) |
+| `StopIteration` | Sentinel value returned by iterators when no more values are available |
 | `enumerate(iterable)` | Returns an iterable yielding `(index, value)` tuples |
 | `filter(iterable)` | Returns a list of truthy values from any iterable |
 | `filter(iterable, fn)` | Returns a list of values where `fn(value)` is truthy |

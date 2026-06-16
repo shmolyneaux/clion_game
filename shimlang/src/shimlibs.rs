@@ -28,7 +28,7 @@ impl ShimNative for ListIterator {
                 let itr: &mut ListIterator = args.args[0].as_native(interpreter)?;
                 let lst = itr.lst.list(interpreter)?;
                 if itr.idx >= lst.len() {
-                    Ok(ShimValue::None)
+                    Ok(ShimValue::StopIteration)
                 } else {
                     let result = lst.get(&interpreter.mem, itr.idx as isize)?;
                     itr.idx += 1;
@@ -53,7 +53,6 @@ impl ShimNative for ListIterator {
         vec![self.lst]
     }
 }
-
 
 pub(crate) struct Enumerator {
     pub(crate) obj: ShimValue,
@@ -131,7 +130,7 @@ impl ShimNative for EnumeratorIterator {
             ) -> Result<ShimValue, String> {
                 if args.args.len() != 1 {
                     return Err(
-                        "Can't provide positional args to EnumeratorIterator.next()".to_string(),
+                        "Can't provide positional args to EnumeratorIterator.next()".to_string()
                     );
                 }
                 let inner_iter = {
@@ -152,8 +151,8 @@ impl ShimNative for EnumeratorIterator {
                     }
                 };
 
-                if matches!(val, ShimValue::None) {
-                    return Ok(ShimValue::None);
+                if matches!(val, ShimValue::StopIteration) {
+                    return Ok(ShimValue::StopIteration);
                 }
 
                 let itr: &mut EnumeratorIterator = args.args[0].as_native(interpreter)?;
@@ -186,18 +185,28 @@ pub(crate) struct StringIterator {
 }
 
 impl ShimNative for StringIterator {
-    fn get_attr(&self, self_as_val: &ShimValue, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
+    fn get_attr(
+        &self,
+        self_as_val: &ShimValue,
+        interpreter: &mut Interpreter,
+        ident: &[u8],
+    ) -> Result<ShimValue, String> {
         if ident == b"next" {
-            fn shim_str_iter_next(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+            fn shim_str_iter_next(
+                interpreter: &mut Interpreter,
+                args: &ArgBundle,
+            ) -> Result<ShimValue, String> {
                 if args.args.len() != 1 {
-                    return Err(format!("Can't provide positional args to StringIterator.next()"));
+                    return Err(format!(
+                        "Can't provide positional args to StringIterator.next()"
+                    ));
                 }
 
                 let itr: &mut StringIterator = args.args[0].as_native(interpreter)?;
                 let b = {
                     let s = itr.str_val.string(interpreter)?;
                     if itr.idx >= s.len() {
-                        return Ok(ShimValue::None);
+                        return Ok(ShimValue::StopIteration);
                     }
                     s[itr.idx]
                 };
@@ -205,9 +214,15 @@ impl ShimNative for StringIterator {
                 interpreter.mem.alloc_str(&[b])
             }
 
-            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_str_iter_next)?)
+            Ok(interpreter
+                .mem
+                .alloc_bound_native_fn(self_as_val, shim_str_iter_next)?)
         } else {
-            Err(format!("Can't get_attr {} on {}", debug_u8s(ident), type_name::<Self>()))
+            Err(format!(
+                "Can't get_attr {} on {}",
+                debug_u8s(ident),
+                type_name::<Self>()
+            ))
         }
     }
 
@@ -233,7 +248,9 @@ impl ShimNative for DictKeysIterator {
                 args: &ArgBundle,
             ) -> Result<ShimValue, String> {
                 if args.args.len() != 1 {
-                    return Err("Can't provide positional args to DictKeysIterator.next()".to_string());
+                    return Err(
+                        "Can't provide positional args to DictKeysIterator.next()".to_string()
+                    );
                 }
 
                 let itr: &mut DictKeysIterator = args.args[0].as_native(interpreter)?;
@@ -250,7 +267,7 @@ impl ShimNative for DictKeysIterator {
                     itr.idx += 1;
                 }
 
-                Ok(ShimValue::None)
+                Ok(ShimValue::StopIteration)
             }
 
             Ok(interpreter
@@ -301,7 +318,9 @@ impl ShimNative for DictValuesIterator {
                 args: &ArgBundle,
             ) -> Result<ShimValue, String> {
                 if args.args.len() != 1 {
-                    return Err("Can't provide positional args to DictValuesIterator.next()".to_string());
+                    return Err(
+                        "Can't provide positional args to DictValuesIterator.next()".to_string()
+                    );
                 }
 
                 let itr: &mut DictValuesIterator = args.args[0].as_native(interpreter)?;
@@ -318,7 +337,7 @@ impl ShimNative for DictValuesIterator {
                     itr.idx += 1;
                 }
 
-                Ok(ShimValue::None)
+                Ok(ShimValue::StopIteration)
             }
 
             Ok(interpreter
@@ -369,7 +388,9 @@ impl ShimNative for DictItemsIterator {
                 args: &ArgBundle,
             ) -> Result<ShimValue, String> {
                 if args.args.len() != 1 {
-                    return Err("Can't provide positional args to DictItemsIterator.next()".to_string());
+                    return Err(
+                        "Can't provide positional args to DictItemsIterator.next()".to_string()
+                    );
                 }
 
                 let itr: &mut DictItemsIterator = args.args[0].as_native(interpreter)?;
@@ -387,7 +408,7 @@ impl ShimNative for DictItemsIterator {
                     itr.idx += 1;
                 }
 
-                Ok(ShimValue::None)
+                Ok(ShimValue::StopIteration)
             }
 
             Ok(interpreter
@@ -561,7 +582,7 @@ impl ShimNative for RangeIterator {
                 };
 
                 if !has_more {
-                    Ok(ShimValue::None)
+                    Ok(ShimValue::StopIteration)
                 } else {
                     let result = itr.current;
                     // current = current + step
@@ -863,7 +884,11 @@ impl ShimDict {
         Ok(())
     }
 
-    fn realloc_entries(&mut self, interpreter: &mut Interpreter, old_capacity: usize) -> Result<(), String> {
+    fn realloc_entries(
+        &mut self,
+        interpreter: &mut Interpreter,
+        old_capacity: usize,
+    ) -> Result<(), String> {
         let old_entries_word = self.entries;
         let old_entries = self.entries_array(interpreter);
 
@@ -927,7 +952,11 @@ impl ShimDict {
     /**
      * Clear the indices array with current size
      */
-    fn clear_and_alloc_indices(&mut self, interpreter: &mut Interpreter, old_size: usize) -> Result<(), String> {
+    fn clear_and_alloc_indices(
+        &mut self,
+        interpreter: &mut Interpreter,
+        old_size: usize,
+    ) -> Result<(), String> {
         let new_size = self.index_size();
         let free_word_count: u24 = if old_size == 0 {
             0.into()
@@ -1178,7 +1207,9 @@ impl ShimDict {
      */
     fn entries_mut(&self, interpreter: &mut Interpreter) -> &'static mut [DictEntry] {
         unsafe {
-            let u64_slice = interpreter.mem.mem_mut(usize::from(self.entries), 3 * self.capacity());
+            let u64_slice = interpreter
+                .mem
+                .mem_mut(usize::from(self.entries), 3 * self.capacity());
             std::slice::from_raw_parts_mut(
                 u64_slice.as_mut_ptr() as *mut DictEntry,
                 u64_slice.len() / 3,
@@ -1187,7 +1218,10 @@ impl ShimDict {
     }
 
     fn get_entry(&self, interpreter: &Interpreter, idx: usize) -> &DictEntry {
-        unsafe { &*(interpreter.mem.mem()[usize::from(self.entries) + 3 * idx..].as_ptr() as *const DictEntry) }
+        unsafe {
+            &*(interpreter.mem.mem()[usize::from(self.entries) + 3 * idx..].as_ptr()
+                as *const DictEntry)
+        }
     }
 
     #[allow(clippy::mut_from_ref)]
@@ -1419,11 +1453,7 @@ pub(crate) fn shim_average(
         CallResult::ReturnValue(v) => v,
         CallResult::PC(pc, captured_scope) => {
             let mut new_env = Environment::with_scope(captured_scope);
-            interpreter.execute_bytecode_extended(
-                &mut (pc as usize),
-                args,
-                &mut new_env,
-            )?
+            interpreter.execute_bytecode_extended(&mut (pc as usize), args, &mut new_env)?
         }
     };
 
@@ -1435,33 +1465,27 @@ pub(crate) fn shim_average(
             CallResult::ReturnValue(v) => v,
             CallResult::PC(pc, captured_scope) => {
                 let mut new_env = Environment::with_scope(captured_scope);
-                interpreter.execute_bytecode_extended(
-                    &mut (pc as usize),
-                    args,
-                    &mut new_env,
-                )?
+                interpreter.execute_bytecode_extended(&mut (pc as usize), args, &mut new_env)?
             }
         };
-        if val.is_none() {
+        if val.is_stop_iteration() {
             break;
         }
         acc = match acc {
             None => Some(val),
             Some(v) => {
                 let mut args = ArgBundle::new();
-                Some(
-                    match v.add(interpreter, &val, &mut args)? {
-                        CallResult::ReturnValue(v) => v,
-                        CallResult::PC(pc, captured_scope) => {
-                            let mut new_env = Environment::with_scope(captured_scope);
-                            interpreter.execute_bytecode_extended(
-                                &mut (pc as usize),
-                                args,
-                                &mut new_env,
-                            )?
-                        }
+                Some(match v.add(interpreter, &val, &mut args)? {
+                    CallResult::ReturnValue(v) => v,
+                    CallResult::PC(pc, captured_scope) => {
+                        let mut new_env = Environment::with_scope(captured_scope);
+                        interpreter.execute_bytecode_extended(
+                            &mut (pc as usize),
+                            args,
+                            &mut new_env,
+                        )?
                     }
-                )
+                })
             }
         };
         count += 1;
@@ -1497,10 +1521,7 @@ pub(crate) fn shim_range(
     let end = unpacker.required(b"end")?;
     unpacker.end()?;
 
-    let range = RangeNative {
-        start,
-        end,
-    };
+    let range = RangeNative { start, end };
     Ok(interpreter.mem.alloc_native(range)?)
 }
 
@@ -1523,7 +1544,7 @@ pub(crate) fn shim_print(
                 return Err(format!(
                     "print got an unexpected keyword argument '{}'",
                     debug_u8s(other)
-                ))
+                ));
             }
         }
     }
@@ -1561,7 +1582,10 @@ pub(crate) fn shim_assert(
         let msg = if args.len() > 1 {
             args.args[1].to_string(interpreter)
         } else {
-            format!("Assert Failed: {} is not truthy", condition.to_string(interpreter))
+            format!(
+                "Assert Failed: {} is not truthy",
+                condition.to_string(interpreter)
+            )
         };
         Err(msg)
     } else {
@@ -1725,8 +1749,8 @@ pub(crate) fn compare_values(
 
             let min_len = len_a.min(len_b);
             for idx in 0..min_len {
-                let item_a = unsafe { ShimValue::from_u64(interpreter.mem.mem()[pos_a+idx]) };
-                let item_b = unsafe { ShimValue::from_u64(interpreter.mem.mem()[pos_b+idx]) };
+                let item_a = unsafe { ShimValue::from_u64(interpreter.mem.mem()[pos_a + idx]) };
+                let item_b = unsafe { ShimValue::from_u64(interpreter.mem.mem()[pos_b + idx]) };
                 match compare_values(interpreter, &item_a, &item_b)? {
                     Ordering::Equal => continue,
                     other => return Ok(other),
@@ -1805,11 +1829,15 @@ fn filter_iterable(
             CallResult::ReturnValue(val) => val,
             CallResult::PC(pc, captured_scope) => {
                 let mut new_env = Environment::with_scope(captured_scope);
-                interpreter.execute_bytecode_extended(&mut (pc as usize), next_args, &mut new_env)?
+                interpreter.execute_bytecode_extended(
+                    &mut (pc as usize),
+                    next_args,
+                    &mut new_env,
+                )?
             }
         };
 
-        if input.is_none() {
+        if input.is_stop_iteration() {
             break;
         }
 
@@ -1820,12 +1848,8 @@ fn filter_iterable(
                 CallResult::ReturnValue(val) => val,
                 CallResult::PC(pc, captured_scope) => {
                     let mut new_env = Environment::with_scope(captured_scope);
-                    
-                    interpreter.execute_bytecode_extended(
-                        &mut (pc as usize),
-                        args,
-                        &mut new_env,
-                    )?
+
+                    interpreter.execute_bytecode_extended(&mut (pc as usize), args, &mut new_env)?
                 }
             }
         } else {
@@ -1861,12 +1885,8 @@ pub(crate) fn shim_list_map(
             CallResult::ReturnValue(val) => val,
             CallResult::PC(pc, captured_scope) => {
                 let mut new_env = Environment::with_scope(captured_scope);
-                
-                interpreter.execute_bytecode_extended(
-                    &mut (pc as usize),
-                    args,
-                    &mut new_env,
-                )?
+
+                interpreter.execute_bytecode_extended(&mut (pc as usize), args, &mut new_env)?
             }
         };
         new_lst.push(&mut interpreter.mem, output)?;
@@ -1932,12 +1952,18 @@ pub(crate) fn shim_list_iter(
         .alloc_native(ListIterator { lst: obj, idx: 0 })?)
 }
 
-pub(crate) fn shim_str_iter(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
+pub(crate) fn shim_str_iter(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
     let mut unpacker = ArgUnpacker::new(args);
     let obj = unpacker.required(b"obj")?;
     unpacker.end()?;
 
-    Ok(interpreter.mem.alloc_native(StringIterator { str_val: obj, idx: 0 })?)
+    Ok(interpreter.mem.alloc_native(StringIterator {
+        str_val: obj,
+        idx: 0,
+    })?)
 }
 
 pub(crate) fn shim_list_clear(
@@ -1996,7 +2022,7 @@ pub(crate) fn shim_list_extend(
         };
 
         // Break if we get None (end of iteration)
-        if result.is_none() {
+        if result.is_stop_iteration() {
             break;
         }
 
@@ -2541,10 +2567,14 @@ pub(crate) fn shim_str_join(
             CallResult::ReturnValue(val) => val,
             CallResult::PC(pc, captured_scope) => {
                 let mut new_env = Environment::with_scope(captured_scope);
-                interpreter.execute_bytecode_extended(&mut (pc as usize), next_args, &mut new_env)?
+                interpreter.execute_bytecode_extended(
+                    &mut (pc as usize),
+                    next_args,
+                    &mut new_env,
+                )?
             }
         };
-        if item.is_none() {
+        if item.is_stop_iteration() {
             break;
         }
         if !first {
@@ -2671,7 +2701,11 @@ pub(crate) fn shim_str_split_lines(
     let mut idx = 0usize;
     while idx < s.len() {
         if s[idx] == b'\n' {
-            let end = if idx > start && s[idx - 1] == b'\r' { idx - 1 } else { idx };
+            let end = if idx > start && s[idx - 1] == b'\r' {
+                idx - 1
+            } else {
+                idx
+            };
             let val = interpreter.mem.alloc_str(&s[start..end])?;
             out.push(&mut interpreter.mem, val)?;
             idx += 1;
@@ -2762,8 +2796,15 @@ pub(crate) fn shim_str_lstrip(
     let mut unpacker = ArgUnpacker::new(args);
     let binding = unpacker.required(b"obj")?;
     let s = binding.string(interpreter)?;
-    let start = s.iter().position(|b| !b.is_ascii_whitespace()).unwrap_or(s.len());
-    let out = if start == 0 { None } else { Some(s[start..].to_vec()) };
+    let start = s
+        .iter()
+        .position(|b| !b.is_ascii_whitespace())
+        .unwrap_or(s.len());
+    let out = if start == 0 {
+        None
+    } else {
+        Some(s[start..].to_vec())
+    };
     unpacker.end()?;
 
     match out {
@@ -2779,8 +2820,16 @@ pub(crate) fn shim_str_rstrip(
     let mut unpacker = ArgUnpacker::new(args);
     let binding = unpacker.required(b"obj")?;
     let s = binding.string(interpreter)?;
-    let end = s.iter().rposition(|b| !b.is_ascii_whitespace()).map(|i| i + 1).unwrap_or(0);
-    let out = if end == s.len() { None } else { Some(s[..end].to_vec()) };
+    let end = s
+        .iter()
+        .rposition(|b| !b.is_ascii_whitespace())
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    let out = if end == s.len() {
+        None
+    } else {
+        Some(s[..end].to_vec())
+    };
     unpacker.end()?;
 
     match out {
@@ -2828,7 +2877,9 @@ fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     if needle.is_empty() {
         return Some(0);
     }
-    haystack.windows(needle.len()).position(|window| window == needle)
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
 }
 
 pub(crate) fn get_type_name(value: &ShimValue) -> &'static str {
@@ -2836,6 +2887,7 @@ pub(crate) fn get_type_name(value: &ShimValue) -> &'static str {
         ShimValue::Uninitialized => "uninitialized",
         ShimValue::Unit => "unit",
         ShimValue::None => "none",
+        ShimValue::StopIteration => "stop_iteration",
         ShimValue::Integer(_) => "int",
         ShimValue::Float(_) => "float",
         ShimValue::Bool(_) => "bool",
@@ -3423,13 +3475,11 @@ pub(crate) fn shim_abs(
     let mut unpacker = ArgUnpacker::new(args);
     let value = unpacker.required(b"self")?;
     unpacker.end()?;
-    Ok(
-        match value {
-            ShimValue::Integer(i) => ShimValue::Integer(i.saturating_abs()),
-            ShimValue::Float(f) => ShimValue::Float(f.abs()),
-            _ => return Err("abs: expected int or float".to_string()),
-        }
-    )
+    Ok(match value {
+        ShimValue::Integer(i) => ShimValue::Integer(i.saturating_abs()),
+        ShimValue::Float(f) => ShimValue::Float(f.abs()),
+        _ => return Err("abs: expected int or float".to_string()),
+    })
 }
 
 pub(crate) fn shim_to_radians(
@@ -3460,10 +3510,14 @@ pub(crate) fn shim_clamp(
     unpacker.end()?;
 
     // If value is less than min, return min
-    if let Ok(std::cmp::Ordering::Less) = compare_values(interpreter, &value, &min) { return Ok(min) }
+    if let Ok(std::cmp::Ordering::Less) = compare_values(interpreter, &value, &min) {
+        return Ok(min);
+    }
 
     // If value is less than max, return max
-    if let Ok(std::cmp::Ordering::Greater) = compare_values(interpreter, &value, &max) { return Ok(max) }
+    if let Ok(std::cmp::Ordering::Greater) = compare_values(interpreter, &value, &max) {
+        return Ok(max);
+    }
 
     // Otherwise it's between the range, so we can return the value itself
     Ok(value)
@@ -3482,18 +3536,17 @@ pub(crate) fn shim_in_range(
 
     // If value is less than min, return false
     if let Ok(std::cmp::Ordering::Less) = compare_values(interpreter, &value, &min) {
-        return Ok(ShimValue::Bool(false))
+        return Ok(ShimValue::Bool(false));
     }
 
     // If value is less than max, return false
     if let Ok(std::cmp::Ordering::Greater) = compare_values(interpreter, &value, &max) {
-        return Ok(ShimValue::Bool(false))
+        return Ok(ShimValue::Bool(false));
     }
 
     // Otherwise it's between the range, so we can return the value itself
     Ok(ShimValue::Bool(true))
 }
-
 
 pub(crate) fn shim_min(
     _interpreter: &mut Interpreter,
@@ -3511,7 +3564,6 @@ pub(crate) fn shim_min(
         _ => Err("pow: expected int or float arguments".to_string()),
     }
 }
-
 
 pub(crate) fn shim_max(
     _interpreter: &mut Interpreter,

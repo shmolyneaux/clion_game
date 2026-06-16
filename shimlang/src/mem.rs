@@ -243,7 +243,10 @@ macro_rules! alloc {
 
 impl MMU {
     pub fn mem_high_point(&self) -> u32 {
-        self.free_list.last().map(|block| u32::from(block.pos)).unwrap_or(0)
+        self.free_list
+            .last()
+            .map(|block| u32::from(block.pos))
+            .unwrap_or(0)
     }
 
     fn eprint_free_list(&self) {
@@ -317,13 +320,19 @@ impl MMU {
     /// mutable reference into it must use this instead of `get_mut`.
     pub fn get_ptr_mut<T>(&mut self, word: u24) -> *mut T {
         let word_usize = usize::from(word);
-        self.mark_dirty_range(word_usize, word_usize + std::mem::size_of::<T>().div_ceil(8));
+        self.mark_dirty_range(
+            word_usize,
+            word_usize + std::mem::size_of::<T>().div_ceil(8),
+        );
         self.mem.as_mut_ptr().wrapping_add(word_usize) as *mut T
     }
 
     pub unsafe fn get_mut<T>(&mut self, word: u24) -> &mut T {
         let word_usize = usize::from(word);
-        self.mark_dirty_range(word_usize, word_usize + std::mem::size_of::<T>().div_ceil(8));
+        self.mark_dirty_range(
+            word_usize,
+            word_usize + std::mem::size_of::<T>().div_ceil(8),
+        );
         unsafe {
             let ptr: *mut T = &mut self.mem[word_usize] as *mut u64 as *mut T;
             &mut *ptr
@@ -404,7 +413,10 @@ impl MMU {
                 // There are further enhancements if we split things into buckets,
                 // but we can keep things simple for now.
 
-                self.mark_dirty_range(usize::from(returned_pos), usize::from(returned_pos) + usize::from(words));
+                self.mark_dirty_range(
+                    usize::from(returned_pos),
+                    usize::from(returned_pos) + usize::from(words),
+                );
                 return Ok(returned_pos);
             }
         }
@@ -514,7 +526,8 @@ impl MMU {
         let word_count: u24 = (std::mem::size_of::<ShimDict>() as u32).div_ceil(8).into();
         let position = alloc!(self, word_count, "Dict")?;
         unsafe {
-            let ptr: *mut ShimDict = &mut self.mem[usize::from(position)] as *mut u64 as *mut ShimDict;
+            let ptr: *mut ShimDict =
+                &mut self.mem[usize::from(position)] as *mut u64 as *mut ShimDict;
             ptr.write(ShimDict::new());
         }
         Ok(position)
@@ -528,7 +541,7 @@ impl MMU {
         let word_count: u24 = items.len().into();
         let position = alloc!(self, word_count, "tuple")?;
         for (idx, val) in items.iter().enumerate() {
-            self.mem[usize::from(position)+idx] = val.to_u64();
+            self.mem[usize::from(position) + idx] = val.to_u64();
         }
         Ok(ShimValue::Tuple(word_count, position))
     }
@@ -537,7 +550,8 @@ impl MMU {
         let word_count: u24 = (std::mem::size_of::<ShimList>() as u32).div_ceil(8).into();
         let position = alloc!(self, word_count, "List")?;
         unsafe {
-            let ptr: *mut ShimList = &mut self.mem[usize::from(position)] as *mut u64 as *mut ShimList;
+            let ptr: *mut ShimList =
+                &mut self.mem[usize::from(position)] as *mut u64 as *mut ShimList;
             ptr.write(ShimList::new());
         }
         Ok(position)
@@ -547,7 +561,12 @@ impl MMU {
         Ok(ShimValue::List(self.alloc_list_raw()?))
     }
 
-    pub fn alloc_fn(&mut self, pc: u32, name: &[u8], captured_scope: u32) -> Result<ShimValue, String> {
+    pub fn alloc_fn(
+        &mut self,
+        pc: u32,
+        name: &[u8],
+        captured_scope: u32,
+    ) -> Result<ShimValue, String> {
         let word_count: u24 = (std::mem::size_of::<ShimFn>() as u32).div_ceil(8).into();
         let position = alloc!(self, word_count, &format!("Fn `{}`", debug_u8s(name)))?;
 
@@ -600,7 +619,8 @@ impl MMU {
         let word_count: u24 = (std::mem::size_of::<T>() as u32).div_ceil(8).into();
         let position = alloc!(self, word_count, "Native")?;
         if val.needs_drop() {
-            self.droppable_native_pos.push((u32::from(position), type_idx));
+            self.droppable_native_pos
+                .push((u32::from(position), type_idx));
         }
         unsafe {
             let ptr: *mut T = &mut self.mem[usize::from(position)] as *mut u64 as *mut T;
@@ -609,7 +629,11 @@ impl MMU {
         Ok(ShimValue::Native(type_idx, position))
     }
 
-    pub fn alloc_bound_method(&mut self, obj: &ShimValue, func_pos: u24) -> Result<ShimValue, String> {
+    pub fn alloc_bound_method(
+        &mut self,
+        obj: &ShimValue,
+        func_pos: u24,
+    ) -> Result<ShimValue, String> {
         let position = alloc!(self, u24::from(2), "Bound Method")?;
         self.mem[usize::from(position)] = obj.to_u64();
         self.mem[usize::from(position) + 1] = u64::from(func_pos);
@@ -617,7 +641,11 @@ impl MMU {
         Ok(ShimValue::BoundMethod(position))
     }
 
-    pub fn alloc_bound_native_fn(&mut self, obj: &ShimValue, func: NativeFn) -> Result<ShimValue, String> {
+    pub fn alloc_bound_native_fn(
+        &mut self,
+        obj: &ShimValue,
+        func: NativeFn,
+    ) -> Result<ShimValue, String> {
         let position = alloc!(self, 2u32.into(), "Bound Native Fn")?;
         unsafe {
             let obj_ptr: *mut ShimValue =
@@ -836,6 +864,7 @@ impl<'a> GC<'a> {
                     | ShimValue::Bool(_)
                     | ShimValue::Unit
                     | ShimValue::None
+                    | ShimValue::StopIteration
                     | ShimValue::Uninitialized => (),
                     ShimValue::Fn(fn_pos) => {
                         let pos: usize = fn_pos.into();
@@ -1131,8 +1160,11 @@ impl<'a> GC<'a> {
                         let start = usize::from(scope.data);
                         let end = start + scope.capacity as usize;
                         #[cfg(feature = "gc_debug")]
-                        let scope_description =
-                            MemDescriptor::env_data(start, end, &scope.to_string(&self.interpreter.mem));
+                        let scope_description = MemDescriptor::env_data(
+                            start,
+                            end,
+                            &scope.to_string(&self.interpreter.mem),
+                        );
                         for bit in start..end {
                             mark_bit!(self.mask, bit, scope_description);
                         }
@@ -1166,7 +1198,10 @@ impl<'a> GC<'a> {
     }
 
     pub fn drop_orphaned_native_types(&mut self) {
-        let (to_keep, to_drop): (Vec<_>, Vec<_>) = self.interpreter.mem.droppable_native_pos
+        let (to_keep, to_drop): (Vec<_>, Vec<_>) = self
+            .interpreter
+            .mem
+            .droppable_native_pos
             .drain(..)
             .partition(|(pos, _)| self.mask.is_set(*pos as usize));
 

@@ -132,6 +132,10 @@
                 {
                     "name": "constant.language.none.shim",
                     "match": "\\bNone\\b"
+                },
+                {
+                    "name": "constant.language.stop-iteration.shim",
+                    "match": "\\bStopIteration\\b"
                 }
             ]
         },

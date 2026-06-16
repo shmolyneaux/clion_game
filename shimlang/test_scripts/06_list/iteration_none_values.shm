@@ -1,0 +1,41 @@
+let values = ["a", None, "b", None];
+let iter = values.iter();
+assert(iter.next() == "a");
+assert(iter.next() == None);
+assert(iter.next() == "b");
+assert(iter.next() == None);
+assert(iter.next() == StopIteration);
+
+let seen_none = 0;
+let seen_b = false;
+for value in values {
+    if value == None {
+        seen_none += 1;
+    }
+    if value == "b" {
+        seen_b = true;
+    }
+}
+assert(seen_none == 2);
+assert(seen_b);
+
+let joined = ",".join(values);
+assert(joined == "a,None,b,None");
+assert(values.join("|") == "a|None|b|None");
+
+let enumerated = values.enumerate();
+let enum_iter = enumerated.iter();
+assert(enum_iter.next() == (0, "a"));
+assert(enum_iter.next() == (1, None));
+assert(enum_iter.next() == (2, "b"));
+assert(enum_iter.next() == (3, None));
+assert(enum_iter.next() == StopIteration);
+
+let only_none = values.filter(fn(x) { x == None });
+assert(only_none == [None, None]);
+assert(filter(values, fn(x) { x == None }) == [None, None]);
+assert(filter(values) == ["a", "b"]);
+
+let extended = [];
+extended.extend(values);
+assert(extended == values);

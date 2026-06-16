@@ -45,6 +45,7 @@ pub(crate) enum ByteCode {
     LiteralShimValue,
     LiteralString,
     LiteralNone,
+    LiteralStopIteration,
     CreateFn,
     CreateList,
     CreateStruct,
@@ -113,7 +114,11 @@ fn validate_stmt_loop_control(
     match &stmt.data {
         Statement::Break => {
             if !in_loop {
-                return Err(format_script_err(stmt.span, script, "`break` outside of a loop"));
+                return Err(format_script_err(
+                    stmt.span,
+                    script,
+                    "`break` outside of a loop",
+                ));
             }
         }
         Statement::Continue => {
@@ -139,8 +144,7 @@ fn validate_stmt_loop_control(
             validate_expr_loop_control(a, in_loop, script)?;
             validate_expr_loop_control(b, in_loop, script)?;
         }
-        Statement::IndexAssignment(a, b, c)
-        | Statement::CompoundIndexAssignment(a, b, _, c) => {
+        Statement::IndexAssignment(a, b, c) | Statement::CompoundIndexAssignment(a, b, _, c) => {
             validate_expr_loop_control(a, in_loop, script)?;
             validate_expr_loop_control(b, in_loop, script)?;
             validate_expr_loop_control(c, in_loop, script)?;
@@ -171,11 +175,7 @@ fn validate_stmt_loop_control(
     Ok(())
 }
 
-fn validate_expr_loop_control(
-    expr: &ExprNode,
-    in_loop: bool,
-    script: &[u8],
-) -> Result<(), String> {
+fn validate_expr_loop_control(expr: &ExprNode, in_loop: bool, script: &[u8]) -> Result<(), String> {
     match &expr.data {
         Expression::Primary(p) => match p {
             Primary::List(items) | Primary::Tuple(items) => {
@@ -260,7 +260,10 @@ pub fn compile_fn_body_inner(
     body: &Block,
     fn_span: Span,
 ) -> Result<Vec<(u8, Span)>, String> {
-    let captures = block_captures_env(body) || pos_args_optional.iter().any(|(_ident, default_expr)| expression_captures_env(&default_expr.data));
+    let captures = block_captures_env(body)
+        || pos_args_optional
+            .iter()
+            .any(|(_ident, default_expr)| expression_captures_env(&default_expr.data));
     let mut asm = if captures {
         vec![(ByteCode::StartCapturedScope as u8, fn_span)]
     } else {
@@ -720,7 +723,7 @@ pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, S
 
             // Copy the result of .next() so we can check if it's None
             asm.push((ByteCode::Copy as u8, expr.span));
-            asm.push((ByteCode::LiteralNone as u8, expr.span));
+            asm.push((ByteCode::LiteralStopIteration as u8, expr.span));
             asm.push((ByteCode::Equal as u8, expr.span));
 
             // Jump to `LoopEnd` if calling .next() returns None
@@ -1644,6 +1647,7 @@ pub fn format_asm(bytes: &[u8]) -> String {
                 ShimValue::Bool(true) => "true".to_string(),
                 ShimValue::Bool(false) => "false".to_string(),
                 ShimValue::None => "None".to_string(),
+                ShimValue::StopIteration => "StopIteration".to_string(),
                 ShimValue::Unit => "Unit".to_string(),
                 _ => format!("{:?}", val),
             };
@@ -1656,6 +1660,8 @@ pub fn format_asm(bytes: &[u8]) -> String {
             idx += len + 1;
         } else if *b == ByteCode::LiteralNone as u8 {
             out.push_str("None");
+        } else if *b == ByteCode::LiteralStopIteration as u8 {
+            out.push_str("StopIteration");
         } else if *b == ByteCode::CreateList as u8 {
             let list_size = ((bytes[idx + 1] as usize) << 8) + bytes[idx + 2] as usize;
             out.push_str(&format!("CreateList size={}", list_size));
