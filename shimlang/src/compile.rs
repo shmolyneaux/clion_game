@@ -114,11 +114,7 @@ fn validate_stmt_loop_control(
     match &stmt.data {
         Statement::Break => {
             if !in_loop {
-                return Err(format_script_err(
-                    stmt.span,
-                    script,
-                    "`break` outside of a loop",
-                ));
+                return Err(format_script_err(stmt.span, script, "`break` outside of a loop"));
             }
         }
         Statement::Continue => {
@@ -144,7 +140,8 @@ fn validate_stmt_loop_control(
             validate_expr_loop_control(a, in_loop, script)?;
             validate_expr_loop_control(b, in_loop, script)?;
         }
-        Statement::IndexAssignment(a, b, c) | Statement::CompoundIndexAssignment(a, b, _, c) => {
+        Statement::IndexAssignment(a, b, c)
+        | Statement::CompoundIndexAssignment(a, b, _, c) => {
             validate_expr_loop_control(a, in_loop, script)?;
             validate_expr_loop_control(b, in_loop, script)?;
             validate_expr_loop_control(c, in_loop, script)?;
@@ -175,7 +172,11 @@ fn validate_stmt_loop_control(
     Ok(())
 }
 
-fn validate_expr_loop_control(expr: &ExprNode, in_loop: bool, script: &[u8]) -> Result<(), String> {
+fn validate_expr_loop_control(
+    expr: &ExprNode,
+    in_loop: bool,
+    script: &[u8],
+) -> Result<(), String> {
     match &expr.data {
         Expression::Primary(p) => match p {
             Primary::List(items) | Primary::Tuple(items) => {
@@ -260,10 +261,7 @@ pub fn compile_fn_body_inner(
     body: &Block,
     fn_span: Span,
 ) -> Result<Vec<(u8, Span)>, String> {
-    let captures = block_captures_env(body)
-        || pos_args_optional
-            .iter()
-            .any(|(_ident, default_expr)| expression_captures_env(&default_expr.data));
+    let captures = block_captures_env(body) || pos_args_optional.iter().any(|(_ident, default_expr)| expression_captures_env(&default_expr.data));
     let mut asm = if captures {
         vec![(ByteCode::StartCapturedScope as u8, fn_span)]
     } else {

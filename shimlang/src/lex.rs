@@ -420,9 +420,9 @@ fn parse_number_token(digits: &[u8], is_float: bool) -> Result<Token, String> {
             format!("Could not tokenize number '{}' {:?}", string_slice, e)
         })?))
     } else {
-        let value: i64 = string_slice
-            .parse()
-            .map_err(|e| format!("Could not tokenize number '{}' {:?}", string_slice, e))?;
+        let value: i64 = string_slice.parse().map_err(|e| {
+            format!("Could not tokenize number '{}' {:?}", string_slice, e)
+        })?;
         // The largest-magnitude valid integer literal is 2147483648, which is
         // only valid as i32::MIN and only when preceded by a unary minus. Any
         // larger magnitude cannot name an i32 regardless of sign, so reject it
@@ -715,9 +715,7 @@ pub fn lex(text: &[u8]) -> Result<TokenStream, String> {
                         if text.is_empty() {
                             break;
                         }
-                        if text[0] == b'\n' {
-                            break;
-                        }
+                        if text[0] == b'\n' { break }
                     }
                     // NOTE: no token to push since this is a comment
                 }

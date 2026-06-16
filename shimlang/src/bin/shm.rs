@@ -8,7 +8,8 @@ use std::io::Write;
 
 use shimlang::*;
 
-#[derive(Debug, PartialEq, Default)]
+#[derive(Debug, PartialEq)]
+#[derive(Default)]
 enum Command {
     Parse,
     #[default]
@@ -16,6 +17,7 @@ enum Command {
     Spans,
     Compile,
 }
+
 
 #[derive(Debug, Default)]
 struct Args {

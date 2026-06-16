@@ -322,7 +322,8 @@ pub fn parse_primary(tokens: &mut TokenStream) -> Result<ExprNode, String> {
                                     }
                                     Token::Comma => {
                                         tokens.advance()?;
-                                        if !tokens.is_empty() && *tokens.peek()? == Token::RBracket
+                                        if !tokens.is_empty()
+                                            && *tokens.peek()? == Token::RBracket
                                         {
                                             tokens.advance()?;
                                             break;
@@ -373,7 +374,10 @@ pub fn parse_primary(tokens: &mut TokenStream) -> Result<ExprNode, String> {
             )));
         }
     };
-    Ok(Node { data: expr, span })
+    Ok(Node {
+        data: expr,
+        span,
+    })
 }
 
 pub fn parse_arguments(
@@ -433,12 +437,13 @@ pub fn parse_fn_arguments(
                 tokens.advance()?;
                 kwargs.push((ident, parse_expression(tokens)?));
             } else {
-                return Err(tokens.format_peek_err("Expected ident before `=` in fn args"));
+                return Err(
+                    tokens.format_peek_err("Expected ident before `=` in fn args")
+                );
             }
         } else {
             if !kwargs.is_empty() {
-                return Err(tokens
-                    .format_peek_err("Positional arguments can't appear after keyword arguments"));
+                return Err(tokens.format_peek_err("Positional arguments can't appear after keyword arguments"));
             }
             args.push(expr);
         }
@@ -886,7 +891,9 @@ pub fn parse_function(tokens: &mut TokenStream) -> Result<Fn, String> {
             Some(parse_expression(tokens)?)
         } else {
             if !optional_params.is_empty() {
-                return Err(tokens.format_peek_err("No required arguments after optional"));
+                return Err(
+                    tokens.format_peek_err("No required arguments after optional")
+                );
             }
             None
         };
@@ -1007,10 +1014,8 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
                     Token::Identifier(ident) => ident,
                     token => {
                         tokens.unadvance()?;
-                        return Err(tokens.format_peek_err(&format!(
-                            "Expected ident after comma, found {:?}",
-                            token
-                        )));
+                        return Err(tokens
+                            .format_peek_err(&format!("Expected ident after comma, found {:?}", token)));
                     }
                 });
             }
@@ -1074,9 +1079,7 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
                             optional_members.push((ident.clone(), expr));
                         } else {
                             if !optional_members.is_empty() {
-                                return Err(tokens.format_peek_err(
-                                    "Required members not allowed after optional members",
-                                ));
+                                return Err(tokens.format_peek_err("Required members not allowed after optional members"));
                             }
                             members.push(ident.clone());
                         }
