@@ -368,7 +368,7 @@ Lists have a rich set of methods:
 | `.map(fn)` | Returns a new list with `fn` applied to each element |
 | `.filter()` | Returns a new list of truthy elements |
 | `.filter(fn)` | Returns a new list of elements where `fn` returns truthy |
-| `.enumerate()` | Returns an iterator yielding `(index, element)` tuples |
+| `.enumerate()` | Returns an iterable yielding `(index, element)` tuples |
 | `.average()` | Returns the arithmetic average of the elements, or `0` for an empty list |
 
 Examples:
@@ -433,8 +433,9 @@ Output:
 [9, 8, 5, 3, 2, 1]
 ```
 
-The `enumerate()` method pairs each element with its index. It is typically
-consumed by a `for` loop using tuple unpacking (see [Tuples](#tuples)):
+The `enumerate()` method pairs each element with its index. It returns an
+iterable value, so it is typically consumed by a `for` loop using tuple
+unpacking (see [Tuples](#tuples)):
 
 ```rust
 let names = ["a", "b", "c"];
@@ -449,6 +450,25 @@ Output:
 0 a
 1 b
 2 c
+```
+
+To advance it manually, call `.iter()` first and then call `.next()` on the
+returned iterator:
+
+```rust
+let enumerated = ["a", "b"].enumerate();
+let iter = enumerated.iter();
+print(iter.next());
+print(iter.next());
+print(iter.next());
+```
+
+Output:
+
+```
+(0, a)
+(1, b)
+None
 ```
 
 ### Tuples
@@ -601,9 +621,9 @@ Dictionary methods:
 | `.has(key)` | Returns `true` if `key` exists |
 | `.pop(key)` | Removes `key` and returns its value |
 | `.pop(key, default)` | Removes `key` or returns `default` |
-| `.keys()` | Returns an iterator over keys |
-| `.values()` | Returns an iterator over values |
-| `.items()` | Returns a tuple iterator of (key, value) pairs |
+| `.keys()` | Returns an iterable over keys |
+| `.values()` | Returns an iterable over values |
+| `.items()` | Returns an iterable of `(key, value)` pairs |
 | `.shrink_to_fit()` | Rebuilds internal storage to fit the current entries |
 
 Iterating over a dictionary yields its keys. Use `.items()` for key-value pairs:
@@ -1663,9 +1683,13 @@ Output:
 
 ## Custom Iterators
 
-Any struct that implements an `iter` method returning an object with a `next`
-method can be used in `for` loops. The `next` method should return `None` to
-signal the end of iteration:
+An iterable is any value with an `iter` method. Calling `.iter()` returns an
+iterator object, and that iterator exposes a `next` method. `for` loops call
+`.iter()` for you and repeatedly call `.next()` until it returns `None`.
+
+Any struct that implements an `iter` method returning an iterator object can be
+used in `for` loops. The `next` method should return `None` to signal the end
+of iteration:
 
 ```rust
 struct Counter {
@@ -1709,7 +1733,7 @@ Output:
 | `dict()` | Creates a new empty dictionary |
 | `dict(key=value, ...)` | Creates a dictionary with string keys from keyword names |
 | `Range(start, end)` | Creates a range from `start` (inclusive) to `end` (exclusive) |
-| `enumerate(iterable)` | Returns an iterator yielding `(index, value)` tuples |
+| `enumerate(iterable)` | Returns an iterable yielding `(index, value)` tuples |
 | `filter(iterable)` | Returns a list of truthy values from any iterable |
 | `filter(iterable, fn)` | Returns a list of values where `fn(value)` is truthy |
 | `average(iterable)` | Returns the arithmetic average, or `0` for an empty iterable |
