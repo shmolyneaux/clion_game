@@ -1,0 +1,70 @@
+// doc_edge_cases.shm
+//
+// An exploration of LANGUAGE.md for completeness/correctness.
+// Each section prints "EXPECT ..." (what the docs imply) next to the
+// actual result, so discrepancies are visible at a glance.
+//
+// Run: cargo run --bin shm -- test_scripts/doc_edge_cases.shm
+//
+// NOTE: cases that *panic* (and therefore halt the whole script) are
+// listed as comments at the bottom rather than executed inline.
+
+print("== 1. Compound assignment leaves a FLOAT (doc says int 1) ==");
+let count = 0;
+count += 5; count -= 2; count *= 4; count /= 3; count %= 3;
+print("  doc output: 1   actual:", count);   // actual: 1.0
+
+print("== 2. Built-in iterator end sentinel is StopIteration, not None ==");
+let it = ["a", "b"].enumerate().iter();
+it.next(); it.next();
+let last = it.next();
+print("  doc output: None   actual:", last, " (== None:", last == None, ")");
+
+print("== 3. int .format ignores width/fill that floats accept (errors if used) ==");
+print("  float:", "\(42.0, width=6, fill="0")");
+// "\(42, width=6, fill=\"0\")" would PANIC: "Got 3 arguments, but only used 1"
+
+print("== 4. int(string) rejects the '_' separator that int literals allow ==");
+print("  literal 1_000 =", 1_000);
+print("  try_int(\"1_000\") =", try_int("1_000"));   // None
+
+print("== 5. Mixed-type == is false, but mixed-type < PANICS (asymmetry) ==");
+print("  1 == \"a\":", 1 == "a");
+// print(1 < "a")  would PANIC: "Cannot compare 1 and a"
+
+print("== 6. d[missing] panics, but d.get(missing) returns None ==");
+let d = dict();
+print("  d.get(\"x\"):", d.get("x"));
+// print(d["x"])  would PANIC: "Key x not in dict"
+
+print("== 7. int pow with negative exponent returns a FLOAT (undocumented) ==");
+print("  (2).pow(-1):", (2).pow(-1));      // 0.5
+print("  (2).pow(-2):", (2).pow(-2));      // 0.25
+
+print("== 8. print() sep/end accept non-string values (formatted) ==");
+print(1, 2, 3, sep=0);                      // 10203
+
+print("== 9. `if` without `else` is an expression yielding None ==");
+print("  if false {1} =>", if false { 1 });
+print("  empty block {} =>", {});
+
+print("== 10. list.insert beyond len clamps to end; pop(oob) panics ==");
+let l = [1, 2];
+l.insert(99, 9);
+print("  insert(99,9):", l);                // [1, 2, 9]
+print("  pop() on empty []:", [].pop());    // None  (pop(5) would PANIC)
+
+print("== 11. Sorting with interspersed incomparable types is unpredictable ==");
+print("  [3,1,2,\"a\"].sorted():", [3, 1, 2, "a"].sorted());   // [1,2,3,a]
+print("  [3,\"a\",1,\"b\",2].sorted():", [3, "a", 1, "b", 2].sorted()); // unchanged!
+
+print("== 12. Division/modulus by zero are 0 -> can't make inf via x/0 ==");
+print("  1.0/0.0:", 1.0 / 0.0);             // 0.0, not inf
+let inf = (1.0).ln() - (0.0).ln();          // this is how you actually get inf
+print("  ln-based inf:", inf, " int(inf):", int(inf));
+
+print("== 13. mutation during iteration: appended elements ARE visited ==");
+let m = [1];
+for x in m { if x < 3 { m.append(x + 1); } print("  visited", x); }
+
+print("== DONE ==");
