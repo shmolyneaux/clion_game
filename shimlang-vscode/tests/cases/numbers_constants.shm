@@ -26,3 +26,6 @@ false;
 
 None;
 // <- constant.language.none.shim
+
+StopIteration;
+// <- constant.language.stop-iteration.shim
