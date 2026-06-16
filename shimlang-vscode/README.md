@@ -7,7 +7,7 @@ Syntax highlighting for the [Shimlang](../shimlang/) programming language (`.shm
 - Line comments (`//`) and nested block comments (`/* */`)
 - String literals with escape sequences (`\n`, `\t`, `\\`, `\"`, `\'`)
 - Nested string interpolation — code inside `\(expr)` blocks is highlighted as code, not as a string
-- Keywords, constants (`true`, `false`, `None`), and operators
+- Keywords, constants (`true`, `false`, `None`, `StopIteration`), and operators
 - Numeric literals (integers and floats)
 - Tuples and tuple unpacking in `for` loops (`for x, y in pairs`)
 - `in` membership operator (`key in dict`, `value in list`, `substr in string`)
