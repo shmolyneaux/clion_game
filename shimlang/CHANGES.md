@@ -47,41 +47,41 @@ exploration. Checkboxes track progress.
 
 ## B. Things intentionally left as-is (confirm + document)
 
-- [ ] **B1. Tuples have no `.len()` and no negative indexing.** They are
+- [x] **B1. Tuples have no `.len()` and no negative indexing.** They are
   fixed-size, heterogeneous (pair/triple/…), Rust-like rather than Python-like.
   Keep current behavior; document it.
-- [ ] **B2. NaN dict key is not findable.** Acceptable; document under
+- [x] **B2. NaN dict key is not findable.** Acceptable; document under
   dictionaries.
-- [ ] **B3. Non-symmetric operator overloading is fine.** Overloading is meant
+- [x] **B3. Non-symmetric operator overloading is fine.** Overloading is meant
   to operate on the same types. Keep; document the expectation.
 
 ## C. Documentation updates (LANGUAGE.md)
 
-- [ ] **C1. Bools are not numbers.** State explicitly that `true`/`false` are not
+- [x] **C1. Bools are not numbers.** State explicitly that `true`/`false` are not
   numeric: no arithmetic, and `1 != true`. (`int(true)`/`float(true)` still
   convert.)
-- [ ] **C2. Document the second `assert` argument.** `assert(condition, message)`
+- [x] **C2. Document the second `assert` argument.** `assert(condition, message)`
   — message shown on failure.
-- [ ] **C3. Range endpoints can be any (ordered) value.** Clarify that `..` /
+- [x] **C3. Range endpoints can be any (ordered) value.** Clarify that `..` /
   `Range()` endpoints aren't limited to ints (floats work; step semantics).
-- [ ] **C4. Closures capture a fresh per-iteration binding.** Document loop-var
+- [x] **C4. Closures capture a fresh per-iteration binding.** Document loop-var
   capture semantics with an example.
-- [ ] **C5. Mutable default args are re-evaluated each call.** Document that
+- [x] **C5. Mutable default args are re-evaluated each call.** Document that
   default expressions run on every call where the arg is omitted (no shared
   mutable default).
-- [ ] **C6. Comparison overloads coerce the result by truthiness.** Document that
+- [x] **C6. Comparison overloads coerce the result by truthiness.** Document that
   the value returned from a comparison overload is interpreted via truthiness.
-- [ ] **C7. Chained comparisons.** Document the new chaining semantics (A8),
+- [x] **C7. Chained comparisons.** Document the new chaining semantics (A8),
   including single-evaluation and short-circuit behavior.
-- [ ] **C8. Numeric literal syntax.** Document `e`/`E` exponents, `_` separators,
+- [x] **C8. Numeric literal syntax.** Document `e`/`E` exponents, `_` separators,
   and leading-dot floats (A9, A10, A12).
-- [ ] **C9. Dict keys `1` vs `1.0` are distinct** (A11); NaN key note (B2).
-- [ ] **C10. `bool` built-in.** Already listed; ensure it's accurate after A7.
-- [ ] **C11. Division/modulo by zero return 0; integer overflow saturates.**
+- [x] **C9. Dict keys `1` vs `1.0` are distinct** (A11); NaN key note (B2).
+- [x] **C10. `bool` built-in.** Already listed; ensure it's accurate after A7.
+- [x] **C11. Division/modulo by zero return 0; integer overflow saturates.**
   Document these as defined behaviors (A1–A3).
-- [ ] **C12. Tuples are heterogeneous fixed-size values** (B1): no `.len()`, no
+- [x] **C12. Tuples are heterogeneous fixed-size values** (B1): no `.len()`, no
   negative indexing, not iterable; primarily for grouping/unpacking.
-- [ ] **C13. Non-finite floats render as `inf`/`-inf`/`NaN`** (A13).
+- [x] **C13. Non-finite floats render as `inf`/`-inf`/`NaN`** (A13).
 
 ## Working order
 
