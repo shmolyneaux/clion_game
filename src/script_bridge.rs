@@ -139,9 +139,9 @@ impl ShimNative for SoundSampleHandle {
                     pan: pan.clamp(-1.0, 1.0),
                     bus,
                 });
-                Ok(interpreter.mem.alloc_native(VoiceHandle { voice_id }))
+                Ok(interpreter.mem.alloc_native(VoiceHandle { voice_id })?)
             }
-            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_sample_play))
+            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_sample_play)?)
         } else {
             Err(format!(
                 "SoundSampleHandle has no attribute '{}'",
@@ -195,7 +195,7 @@ impl ShimNative for VoiceHandle {
                         .push(SoundCmd::StopVoice { voice_id });
                     Ok(ShimValue::None)
                 }
-                Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_stop))
+                Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_stop)?)
             }
             b"set_gain" => {
                 fn shim_set_gain(
@@ -217,7 +217,7 @@ impl ShimNative for VoiceHandle {
                     });
                     Ok(ShimValue::None)
                 }
-                Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_set_gain))
+                Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_set_gain)?)
             }
             b"set_pan" => {
                 fn shim_set_pan(
@@ -239,7 +239,7 @@ impl ShimNative for VoiceHandle {
                     });
                     Ok(ShimValue::None)
                 }
-                Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_set_pan))
+                Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_set_pan)?)
             }
             b"pause" => {
                 fn shim_pause(
@@ -248,7 +248,7 @@ impl ShimNative for VoiceHandle {
                 ) -> Result<ShimValue, String> {
                     set_voice_paused(interpreter, args, true)
                 }
-                Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_pause))
+                Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_pause)?)
             }
             b"resume" => {
                 fn shim_resume(
@@ -257,7 +257,7 @@ impl ShimNative for VoiceHandle {
                 ) -> Result<ShimValue, String> {
                     set_voice_paused(interpreter, args, false)
                 }
-                Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_resume))
+                Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_resume)?)
             }
             _ => Err(format!("VoiceHandle has no attribute '{}'", debug_u8s(ident))),
         }
@@ -567,7 +567,7 @@ impl ShimNative for KeyMap {
         ident: &[u8],
     ) -> Result<ShimValue, String> {
         match scancode_from_name(ident) {
-            Some(scancode) => Ok(interpreter.mem.alloc_native(KeyValue { scancode })),
+            Some(scancode) => Ok(interpreter.mem.alloc_native(KeyValue { scancode })?),
             None => Err(format!("Unknown key: {}", debug_u8s(ident))),
         }
     }
@@ -875,7 +875,7 @@ fn shim_rect(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValu
     unpacker.end()?;
 
     fn clamp01(v: f32) -> f32 { v.clamp(0.0, 1.0) }
-    Ok(interpreter.mem.alloc_native(Rect { x1: clamp01(x1), y1: clamp01(y1), x2: clamp01(x2), y2: clamp01(y2) }))
+    Ok(interpreter.mem.alloc_native(Rect { x1: clamp01(x1), y1: clamp01(y1), x2: clamp01(x2), y2: clamp01(y2) })?)
 }
 
 fn text_size(text: &[u8], font_size: f32) -> (f32, f32) {
@@ -910,7 +910,7 @@ fn shim_text_size(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shi
 
     let size = text_size(text.as_bytes(), size*8.0);
 
-    Ok(interpreter.mem.alloc_tuple(&[ShimValue::Float(size.0), ShimValue::Float(size.1)]))
+    Ok(interpreter.mem.alloc_tuple(&[ShimValue::Float(size.0), ShimValue::Float(size.1)])?)
 }
 
 fn shim_draw_text(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
@@ -1006,7 +1006,7 @@ fn shim_create_texture(
 
     let handle = interpreter.fetch_mut::<DrawList>().push_texture(w, h, rgba_bytes, nearest);
 
-    Ok(interpreter.mem.alloc_native(handle))
+    Ok(interpreter.mem.alloc_native(handle)?)
 }
 
 fn shim_mouse_pos(
@@ -1021,10 +1021,10 @@ fn shim_mouse_pos(
         SHM_GetMouseState(&mut x as *mut i32, &mut y as *mut i32);
     }
 
-    let new_lst_val = interpreter.mem.alloc_list();
+    let new_lst_val = interpreter.mem.alloc_list()?;
     let new_lst = new_lst_val.list_mut(interpreter)?;
-    new_lst.push(&mut interpreter.mem, ShimValue::Integer(x));
-    new_lst.push(&mut interpreter.mem, ShimValue::Integer(y));
+    new_lst.push(&mut interpreter.mem, ShimValue::Integer(x))?;
+    new_lst.push(&mut interpreter.mem, ShimValue::Integer(y))?;
     Ok(new_lst_val)
 }
 
@@ -1238,7 +1238,7 @@ fn shim_play_square(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<S
         pan: pan.clamp(-1.0, 1.0),
         bus,
     });
-    Ok(interpreter.mem.alloc_native(VoiceHandle { voice_id }))
+    Ok(interpreter.mem.alloc_native(VoiceHandle { voice_id })?)
 }
 
 fn shim_play_sine(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
@@ -1269,7 +1269,7 @@ fn shim_play_sine(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shi
         pan: pan.clamp(-1.0, 1.0),
         bus,
     });
-    Ok(interpreter.mem.alloc_native(VoiceHandle { voice_id }))
+    Ok(interpreter.mem.alloc_native(VoiceHandle { voice_id })?)
 }
 
 fn shim_create_sample(
@@ -1306,7 +1306,7 @@ fn shim_create_sample(
     let handle = interpreter
         .fetch_mut::<SoundList>()
         .push_create_sample(sample_rate as u32, samples);
-    Ok(interpreter.mem.alloc_native(handle))
+    Ok(interpreter.mem.alloc_native(handle)?)
 }
 
 fn shim_set_bus_gain(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
@@ -1447,11 +1447,11 @@ fn shim_window_size(
         SHM_GetDrawableSize(&mut display_w as *mut i32, &mut display_h as *mut i32);
     }
 
-    let new_lst_val = interpreter.mem.alloc_list();
+    let new_lst_val = interpreter.mem.alloc_list()?;
     let new_lst = new_lst_val.list_mut(interpreter)?;
 
-    new_lst.push(&mut interpreter.mem, ShimValue::Integer(display_w));
-    new_lst.push(&mut interpreter.mem, ShimValue::Integer(display_h));
+    new_lst.push(&mut interpreter.mem, ShimValue::Integer(display_w))?;
+    new_lst.push(&mut interpreter.mem, ShimValue::Integer(display_h))?;
 
     Ok(new_lst_val)
 }
@@ -1622,7 +1622,7 @@ fn value_from_json(
         "str" => {
             let val: &String = data.get().ok_or(format!("JSON data not a str"))?;
             Ok(
-                interpreter.mem.alloc_str(val.as_bytes())
+                interpreter.mem.alloc_str(val.as_bytes())?
             )
         },
         "None" => {
@@ -1633,10 +1633,10 @@ fn value_from_json(
             let items: Vec<ShimValue> = val.iter()
                 .map(|item| value_from_json(interpreter, env, item))
                 .collect::<Result<_, _>>()?;
-            let lst = interpreter.mem.alloc_list();
+            let lst = interpreter.mem.alloc_list()?;
             let lst_inner = lst.list_mut(interpreter)?;
             for item in items {
-                lst_inner.push(&mut interpreter.mem, item);
+                lst_inner.push(&mut interpreter.mem, item)?;
             }
             Ok(lst)
         },
@@ -1653,7 +1653,7 @@ fn value_from_json(
                     Ok((shim_key, shim_value))
                 })
                 .collect::<Result<_, String>>()?;
-            let dict = interpreter.mem.alloc_dict();
+            let dict = interpreter.mem.alloc_dict()?;
             let dict_inner = dict.dict_mut(interpreter)?;
             for (shim_key, shim_value) in pairs {
                 dict_inner.set(interpreter, shim_key, shim_value)?;
@@ -1669,7 +1669,7 @@ fn value_from_json(
                     value_from_json(interpreter, env, item)?
                 );
             }
-            Ok(interpreter.mem.alloc_tuple(&vec_of_shimvals))
+            Ok(interpreter.mem.alloc_tuple(&vec_of_shimvals)?)
         },
         _ => {
             let val: &HashMap<_, _> = data.get().ok_or(format!("JSON data not an object"))?;
@@ -1807,11 +1807,11 @@ fn load_script(bytes: &[u8]) -> Result<(Interpreter, ShimValue), String> {
     interpreter.add_native_fn(b"save_data", shim_save_data);
     interpreter.add_native_fn(b"load_data", shim_load_data);
 
-    let key_val = interpreter.mem.alloc_native(KeyMap);
+    let key_val = interpreter.mem.alloc_native(KeyMap)?;
     interpreter.insert_in_root_env(b"key", key_val);
     interpreter.insert_in_root_env(b"delta", ShimValue::Float(0.0));
 
-    let perf_module = interpreter.mem.alloc_native(PerfModule);
+    let perf_module = interpreter.mem.alloc_native(PerfModule)?;
     interpreter.insert_in_root_env(b"perf", perf_module);
 
     interpreter.insert_in_root_env(b"MOUSE_LEFT", ShimValue::Integer(1));

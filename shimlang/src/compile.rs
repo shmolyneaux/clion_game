@@ -1112,10 +1112,17 @@ pub fn compile_expression(expr: &ExprNode) -> Result<Vec<(u8, Span)>, String> {
             Ok(res)
         }
         Expression::Primary(Primary::Integer(i)) => {
-            // Integer literals are carried as i64; saturate to the i32 range
-            // to match the language's saturating integer arithmetic.
-            let clamped = (*i).clamp(i32::MIN as i64, i32::MAX as i64) as i32;
-            let val = ShimValue::Integer(clamped);
+            // Integer literals are carried as i64 so that a leading unary minus
+            // can fold `2147483648` into i32::MIN. A literal that does not fit
+            // the i32 range (e.g. a bare `2147483648`) is a parse error rather
+            // than being silently saturated.
+            if *i < i32::MIN as i64 || *i > i32::MAX as i64 {
+                return Err(format!(
+                    "Integer literal {} is out of range for a 32-bit integer",
+                    i
+                ));
+            }
+            let val = ShimValue::Integer(*i as i32);
             let mut res = vec![(ByteCode::LiteralShimValue as u8, expr.span)];
             for b in val.to_bytes().into_iter() {
                 res.push((b, expr.span));

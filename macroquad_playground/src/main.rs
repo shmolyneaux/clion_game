@@ -92,7 +92,7 @@ impl ShimNative for SoundHandle {
                 Ok(ShimValue::None)
             }
 
-            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_sound_handle_play))
+            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_sound_handle_play)?)
         } else {
             Err("Can only play on a SoundHandle".to_string())
         }
@@ -110,7 +110,7 @@ fn shim_new_bloop(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<Shi
             unpacker.required_number(b"start_freq")?,
             unpacker.required_number(b"end_freq")?,
         )
-    ))
+    )?)
 }
 
 fn shim_draw_circle(_interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
@@ -312,7 +312,7 @@ struct KeyMap;
 impl ShimNative for KeyMap {
     fn get_attr(&self, _self_as_val: &ShimValue, interpreter: &mut Interpreter, ident: &[u8]) -> Result<ShimValue, String> {
         match key_code_from_name(ident) {
-            Some(code) => Ok(interpreter.mem.alloc_native(KeyValue { code })),
+            Some(code) => Ok(interpreter.mem.alloc_native(KeyValue { code })?),
             None => Err(format!("Unknown key: {}", debug_u8s(ident))),
         }
     }
@@ -396,7 +396,7 @@ fn load_script(text: &[u8]) -> Result<(Interpreter, ShimValue), String> {
     interpreter.add_native_fn(b"clear_background", shim_clear_background);
     interpreter.add_native_fn(b"new_bloop", shim_new_bloop);
 
-    let key_val = interpreter.mem.alloc_native(KeyMap);
+    let key_val = interpreter.mem.alloc_native(KeyMap)?;
     interpreter.insert_in_root_env(b"key", key_val);
 
     interpreter.execute()?;

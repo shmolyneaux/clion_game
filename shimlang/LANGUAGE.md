@@ -154,6 +154,11 @@ Output:
 1000000
 ```
 
+An integer literal must name a value within the 32-bit signed range,
+`-2147483648` to `2147483647`. A literal outside that range (for example a bare
+`2147483648`, which is only valid as the negative `-2147483648`) is rejected at
+parse time rather than being silently saturated or wrapped.
+
 Integer arithmetic **saturates** rather than overflowing: a `+`, `-`, `*`, or
 `pow` result that would exceed the 32-bit range is clamped to the maximum or
 minimum value instead of wrapping around or halting:

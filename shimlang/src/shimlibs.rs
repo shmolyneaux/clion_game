@@ -39,7 +39,7 @@ impl ShimNative for ListIterator {
 
             Ok(interpreter
                 .mem
-                .alloc_bound_native_fn(self_as_val, shim_list_iter_next))
+                .alloc_bound_native_fn(self_as_val, shim_list_iter_next)?)
         } else {
             Err(format!(
                 "Can't get_attr {} on {}",
@@ -93,12 +93,12 @@ impl ShimNative for Enumerator {
 
                 Ok(interpreter
                     .mem
-                    .alloc_native(EnumeratorIterator { inner_iter, idx: 0 }))
+                    .alloc_native(EnumeratorIterator { inner_iter, idx: 0 })?)
             }
 
             Ok(interpreter
                 .mem
-                .alloc_bound_native_fn(self_as_val, shim_enumerator_iter))
+                .alloc_bound_native_fn(self_as_val, shim_enumerator_iter)?)
         } else {
             Err(format!(
                 "Can't get_attr {} on {}",
@@ -160,12 +160,12 @@ impl ShimNative for EnumeratorIterator {
                 let idx = ShimValue::Integer(itr.idx);
                 itr.idx += 1;
 
-                Ok(interpreter.mem.alloc_tuple(&[idx, val]))
+                Ok(interpreter.mem.alloc_tuple(&[idx, val])?)
             }
 
             Ok(interpreter
                 .mem
-                .alloc_bound_native_fn(self_as_val, shim_enumerator_iter_next))
+                .alloc_bound_native_fn(self_as_val, shim_enumerator_iter_next)?)
         } else {
             Err(format!(
                 "Can't get_attr {} on {}",
@@ -205,7 +205,7 @@ impl ShimNative for StringIterator {
                 interpreter.mem.alloc_str(&[b])
             }
 
-            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_str_iter_next))
+            Ok(interpreter.mem.alloc_bound_native_fn(self_as_val, shim_str_iter_next)?)
         } else {
             Err(format!("Can't get_attr {} on {}", debug_u8s(ident), type_name::<Self>()))
         }
@@ -255,7 +255,7 @@ impl ShimNative for DictKeysIterator {
 
             Ok(interpreter
                 .mem
-                .alloc_bound_native_fn(self_as_val, shim_dict_keys_iter_next))
+                .alloc_bound_native_fn(self_as_val, shim_dict_keys_iter_next)?)
         } else if ident == b"iter" {
             fn shim_dict_keys_iter_iter(
                 _interpreter: &mut Interpreter,
@@ -269,7 +269,7 @@ impl ShimNative for DictKeysIterator {
 
             Ok(interpreter
                 .mem
-                .alloc_bound_native_fn(self_as_val, shim_dict_keys_iter_iter))
+                .alloc_bound_native_fn(self_as_val, shim_dict_keys_iter_iter)?)
         } else {
             Err(format!(
                 "Can't get_attr {} on {}",
@@ -323,7 +323,7 @@ impl ShimNative for DictValuesIterator {
 
             Ok(interpreter
                 .mem
-                .alloc_bound_native_fn(self_as_val, shim_dict_values_iter_next))
+                .alloc_bound_native_fn(self_as_val, shim_dict_values_iter_next)?)
         } else if ident == b"iter" {
             fn shim_dict_values_iter_iter(
                 _interpreter: &mut Interpreter,
@@ -337,7 +337,7 @@ impl ShimNative for DictValuesIterator {
 
             Ok(interpreter
                 .mem
-                .alloc_bound_native_fn(self_as_val, shim_dict_values_iter_iter))
+                .alloc_bound_native_fn(self_as_val, shim_dict_values_iter_iter)?)
         } else {
             Err(format!(
                 "Can't get_attr {} on {}",
@@ -380,7 +380,7 @@ impl ShimNative for DictItemsIterator {
                 while itr.idx < entries.len() {
                     if entries[itr.idx].is_valid() {
                         let entry = &entries[itr.idx];
-                        let result = interpreter.mem.alloc_tuple(&[entry.key, entry.value]);
+                        let result = interpreter.mem.alloc_tuple(&[entry.key, entry.value])?;
                         itr.idx += 1;
                         return Ok(result);
                     }
@@ -392,7 +392,7 @@ impl ShimNative for DictItemsIterator {
 
             Ok(interpreter
                 .mem
-                .alloc_bound_native_fn(self_as_val, shim_dict_items_iter_next))
+                .alloc_bound_native_fn(self_as_val, shim_dict_items_iter_next)?)
         } else if ident == b"iter" {
             fn shim_dict_items_iter_iter(
                 _interpreter: &mut Interpreter,
@@ -406,7 +406,7 @@ impl ShimNative for DictItemsIterator {
 
             Ok(interpreter
                 .mem
-                .alloc_bound_native_fn(self_as_val, shim_dict_items_iter_iter))
+                .alloc_bound_native_fn(self_as_val, shim_dict_items_iter_iter)?)
         } else {
             Err(format!(
                 "Can't get_attr {} on {}",
@@ -473,12 +473,12 @@ impl ShimNative for RangeNative {
                     end: range.end,
                     step,
                 };
-                Ok(interpreter.mem.alloc_native(iterator))
+                Ok(interpreter.mem.alloc_native(iterator)?)
             }
 
             Ok(interpreter
                 .mem
-                .alloc_bound_native_fn(self_as_val, shim_range_step))
+                .alloc_bound_native_fn(self_as_val, shim_range_step)?)
         } else if ident == b"iter" {
             fn shim_range_iter(
                 interpreter: &mut Interpreter,
@@ -494,12 +494,12 @@ impl ShimNative for RangeNative {
                     end: range.end,
                     step: ShimValue::Integer(1),
                 };
-                Ok(interpreter.mem.alloc_native(iterator))
+                Ok(interpreter.mem.alloc_native(iterator)?)
             }
 
             Ok(interpreter
                 .mem
-                .alloc_bound_native_fn(self_as_val, shim_range_iter))
+                .alloc_bound_native_fn(self_as_val, shim_range_iter)?)
         } else {
             Err(format!(
                 "Can't get_attr {} on {}",
@@ -587,7 +587,7 @@ impl ShimNative for RangeIterator {
 
             Ok(interpreter
                 .mem
-                .alloc_bound_native_fn(self_as_val, shim_range_iter_next))
+                .alloc_bound_native_fn(self_as_val, shim_range_iter_next)?)
         } else if ident == b"iter" {
             fn shim_range_iterator_iter(
                 _interpreter: &mut Interpreter,
@@ -601,7 +601,7 @@ impl ShimNative for RangeIterator {
 
             Ok(interpreter
                 .mem
-                .alloc_bound_native_fn(self_as_val, shim_range_iterator_iter))
+                .alloc_bound_native_fn(self_as_val, shim_range_iterator_iter)?)
         } else {
             Err(format!(
                 "Can't get_attr {} on {}",
@@ -848,7 +848,7 @@ impl ShimDict {
         };
     }
 
-    fn expand_capacity(&mut self, interpreter: &mut Interpreter) {
+    fn expand_capacity(&mut self, interpreter: &mut Interpreter) -> Result<(), String> {
         let _zone = zone_scoped!("ShimDict::expand_capacity");
         let old_size = self.index_size();
         let old_capacity = self.capacity();
@@ -858,17 +858,18 @@ impl ShimDict {
             self.size_pow + 1
         };
 
-        self.clear_and_alloc_indices(interpreter, old_size);
-        self.realloc_entries(interpreter, old_capacity);
+        self.clear_and_alloc_indices(interpreter, old_size)?;
+        self.realloc_entries(interpreter, old_capacity)?;
+        Ok(())
     }
 
-    fn realloc_entries(&mut self, interpreter: &mut Interpreter, old_capacity: usize) {
+    fn realloc_entries(&mut self, interpreter: &mut Interpreter, old_capacity: usize) -> Result<(), String> {
         let old_entries_word = self.entries;
         let old_entries = self.entries_array(interpreter);
 
         let free_word_count: u24 = (old_capacity * 3).into();
         let alloc_word_count: u24 = (self.capacity() * 3).into();
-        self.entries = alloc!(interpreter.mem, alloc_word_count, "Dict entry array");
+        self.entries = alloc!(interpreter.mem, alloc_word_count, "Dict entry array")?;
 
         let new_entries = self.entries_mut(interpreter);
 
@@ -892,6 +893,7 @@ impl ShimDict {
         }
 
         interpreter.mem.free(old_entries_word, free_word_count);
+        Ok(())
     }
 
     pub fn indices_stride_bytes(&self, size: usize) -> usize {
@@ -925,7 +927,7 @@ impl ShimDict {
     /**
      * Clear the indices array with current size
      */
-    fn clear_and_alloc_indices(&mut self, interpreter: &mut Interpreter, old_size: usize) {
+    fn clear_and_alloc_indices(&mut self, interpreter: &mut Interpreter, old_size: usize) -> Result<(), String> {
         let new_size = self.index_size();
         let free_word_count: u24 = if old_size == 0 {
             0.into()
@@ -943,7 +945,7 @@ impl ShimDict {
         };
 
         interpreter.mem.free(self.indices, free_word_count);
-        self.indices = alloc!(interpreter.mem, alloc_word_count, "Dict index array");
+        self.indices = alloc!(interpreter.mem, alloc_word_count, "Dict index array")?;
 
         match self.typed_indices(interpreter) {
             TypedIndices::Zero => (),
@@ -963,6 +965,7 @@ impl ShimDict {
                 }
             }
         }
+        Ok(())
     }
 
     pub fn capacity(&self) -> usize {
@@ -1086,7 +1089,7 @@ impl ShimDict {
         val: ShimValue,
     ) -> Result<(), String> {
         if self.entry_count as usize == self.capacity() {
-            self.expand_capacity(interpreter);
+            self.expand_capacity(interpreter)?;
         }
 
         match self.probe(interpreter, key)? {
@@ -1212,25 +1215,25 @@ impl ShimDict {
         entry_idx as usize
     }
 
-    pub(crate) fn shrink_to_fit(&mut self, interpreter: &mut Interpreter) {
+    pub(crate) fn shrink_to_fit(&mut self, interpreter: &mut Interpreter) -> Result<(), String> {
         if self.used == 0 {
             // Empty dict - reset to minimal size
             let old_size = self.index_size();
             let old_capacity = self.capacity();
 
             if old_size == 0 {
-                return; // Already minimal
+                return Ok(()); // Already minimal
             }
 
             self.size_pow = 0;
-            self.clear_and_alloc_indices(interpreter, old_size);
+            self.clear_and_alloc_indices(interpreter, old_size)?;
 
             // Free the old entries
             let free_word_count: u24 = (old_capacity * 3).into();
             interpreter.mem.free(self.entries, free_word_count);
             self.entries = 0.into();
             self.entry_count = 0;
-            return;
+            return Ok(());
         }
 
         // Calculate the optimal size_pow for the current number of used entries
@@ -1254,15 +1257,16 @@ impl ShimDict {
 
         // If the optimal size is the same or larger than current, no need to shrink
         if optimal_size_pow >= self.size_pow {
-            return;
+            return Ok(());
         }
 
         let old_size = self.index_size();
         let old_capacity = self.capacity();
         self.size_pow = optimal_size_pow;
 
-        self.clear_and_alloc_indices(interpreter, old_size);
-        self.realloc_entries(interpreter, old_capacity);
+        self.clear_and_alloc_indices(interpreter, old_size)?;
+        self.realloc_entries(interpreter, old_capacity)?;
+        Ok(())
     }
 }
 
@@ -1343,7 +1347,7 @@ impl ShimList {
         Ok(())
     }
 
-    pub fn push(&mut self, mem: &mut MMU, val: ShimValue) {
+    pub fn push(&mut self, mem: &mut MMU, val: ShimValue) -> Result<(), String> {
         if self.len() == self.capacity() {
             let old_capacity = self.capacity();
             self.capacity_lut += 1;
@@ -1351,7 +1355,7 @@ impl ShimList {
 
             let old_data = usize::from(self.data);
             let word_count: u24 = new_capacity.into();
-            self.data = alloc!(mem, word_count, "List data");
+            self.data = alloc!(mem, word_count, "List data")?;
 
             let new_data = usize::from(self.data);
 
@@ -1365,6 +1369,7 @@ impl ShimList {
 
         mem.mem_mut(usize::from(self.data) + self.len(), 1)[0] = val.to_u64();
         self.len = (usize::from(self.len) + 1).into();
+        Ok(())
     }
 }
 const _: () = {
@@ -1379,7 +1384,7 @@ pub(crate) fn shim_dict(
         return Err("Can't provide positional args to dict()".to_string());
     }
 
-    let retval = interpreter.mem.alloc_dict();
+    let retval = interpreter.mem.alloc_dict()?;
     let dict = retval.dict_mut(interpreter)?;
 
     for (key, val) in args.kwargs.clone().into_iter() {
@@ -1398,7 +1403,7 @@ pub(crate) fn shim_enumerate(
     let obj = unpacker.required(b"obj")?;
     unpacker.end()?;
 
-    Ok(interpreter.mem.alloc_native(Enumerator { obj }))
+    Ok(interpreter.mem.alloc_native(Enumerator { obj })?)
 }
 
 pub(crate) fn shim_average(
@@ -1496,7 +1501,7 @@ pub(crate) fn shim_range(
         start,
         end,
     };
-    Ok(interpreter.mem.alloc_native(range))
+    Ok(interpreter.mem.alloc_native(range)?)
 }
 
 pub(crate) fn shim_print(
@@ -1783,7 +1788,7 @@ fn filter_iterable(
     obj: ShimValue,
     predicate: Option<ShimValue>,
 ) -> Result<ShimValue, String> {
-    let new_lst_val = interpreter.mem.alloc_list();
+    let new_lst_val = interpreter.mem.alloc_list()?;
 
     let mut iter_args = ArgBundle::new();
     let iterator = match obj.attr_call(b"iter", interpreter, &mut iter_args)? {
@@ -1828,7 +1833,7 @@ fn filter_iterable(
         };
         if result.is_truthy(interpreter)? {
             let new_lst = new_lst_val.list_mut(interpreter)?;
-            new_lst.push(&mut interpreter.mem, input);
+            new_lst.push(&mut interpreter.mem, input)?;
         }
     }
 
@@ -1845,7 +1850,7 @@ pub(crate) fn shim_list_map(
     let key = unpacker.required(b"key")?;
     unpacker.end()?;
 
-    let new_lst_val = interpreter.mem.alloc_list();
+    let new_lst_val = interpreter.mem.alloc_list()?;
     let new_lst = new_lst_val.list_mut(interpreter)?;
 
     for idx in 0..lst.len() {
@@ -1864,7 +1869,7 @@ pub(crate) fn shim_list_map(
                 )?
             }
         };
-        new_lst.push(&mut interpreter.mem, output);
+        new_lst.push(&mut interpreter.mem, output)?;
     }
 
     Ok(new_lst_val)
@@ -1909,7 +1914,7 @@ pub(crate) fn shim_list_append(
     let item = unpacker.required(b"item")?;
     unpacker.end()?;
 
-    lst.push(&mut interpreter.mem, item);
+    lst.push(&mut interpreter.mem, item)?;
 
     Ok(ShimValue::None)
 }
@@ -1924,7 +1929,7 @@ pub(crate) fn shim_list_iter(
 
     Ok(interpreter
         .mem
-        .alloc_native(ListIterator { lst: obj, idx: 0 }))
+        .alloc_native(ListIterator { lst: obj, idx: 0 })?)
 }
 
 pub(crate) fn shim_str_iter(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
@@ -1932,7 +1937,7 @@ pub(crate) fn shim_str_iter(interpreter: &mut Interpreter, args: &ArgBundle) -> 
     let obj = unpacker.required(b"obj")?;
     unpacker.end()?;
 
-    Ok(interpreter.mem.alloc_native(StringIterator { str_val: obj, idx: 0 }))
+    Ok(interpreter.mem.alloc_native(StringIterator { str_val: obj, idx: 0 })?)
 }
 
 pub(crate) fn shim_list_clear(
@@ -1997,7 +2002,7 @@ pub(crate) fn shim_list_extend(
 
         // Append the item to the list
         let lst = obj.list_mut(interpreter)?;
-        lst.push(&mut interpreter.mem, result);
+        lst.push(&mut interpreter.mem, result)?;
     }
 
     Ok(ShimValue::None)
@@ -2051,7 +2056,7 @@ pub(crate) fn shim_list_insert(
     };
 
     // Add a new element at the end (this will resize if needed)
-    lst.push(&mut interpreter.mem, ShimValue::None);
+    lst.push(&mut interpreter.mem, ShimValue::None)?;
 
     // Shift elements to make room
     for i in (insert_idx..len).rev() {
@@ -2116,12 +2121,12 @@ pub(crate) fn shim_list_sorted(
     unpacker.end()?;
 
     // Create a new list with the same elements
-    let new_lst_val = interpreter.mem.alloc_list();
+    let new_lst_val = interpreter.mem.alloc_list()?;
     let new_lst = new_lst_val.list_mut(interpreter)?;
 
     for idx in 0..lst.len() {
         let item = lst.get(&interpreter.mem, idx as isize)?;
-        new_lst.push(&mut interpreter.mem, item);
+        new_lst.push(&mut interpreter.mem, item)?;
     }
 
     // Sort the new list using the existing sort logic
@@ -2165,12 +2170,12 @@ pub(crate) fn shim_list_reversed(
     unpacker.end()?;
 
     // Create a new list with reversed elements
-    let new_lst_val = interpreter.mem.alloc_list();
+    let new_lst_val = interpreter.mem.alloc_list()?;
     let new_lst = new_lst_val.list_mut(interpreter)?;
 
     for idx in (0..lst.len()).rev() {
         let item = lst.get(&interpreter.mem, idx as isize)?;
-        new_lst.push(&mut interpreter.mem, item);
+        new_lst.push(&mut interpreter.mem, item)?;
     }
 
     Ok(new_lst_val)
@@ -2186,7 +2191,7 @@ pub(crate) fn shim_dict_keys(
 
     Ok(interpreter
         .mem
-        .alloc_native(DictKeysIterator { dict: obj, idx: 0 }))
+        .alloc_native(DictKeysIterator { dict: obj, idx: 0 })?)
 }
 
 pub(crate) fn shim_dict_values(
@@ -2199,7 +2204,7 @@ pub(crate) fn shim_dict_values(
 
     Ok(interpreter
         .mem
-        .alloc_native(DictValuesIterator { dict: obj, idx: 0 }))
+        .alloc_native(DictValuesIterator { dict: obj, idx: 0 })?)
 }
 
 pub(crate) fn shim_dict_items(
@@ -2212,7 +2217,7 @@ pub(crate) fn shim_dict_items(
 
     Ok(interpreter
         .mem
-        .alloc_native(DictItemsIterator { dict: obj, idx: 0 }))
+        .alloc_native(DictItemsIterator { dict: obj, idx: 0 })?)
 }
 
 pub(crate) fn shim_dict_pop(
@@ -2306,7 +2311,7 @@ pub(crate) fn shim_dict_shrink_to_fit(
     let dict = binding.dict_mut(interpreter)?;
     unpacker.end()?;
 
-    dict.shrink_to_fit(interpreter);
+    dict.shrink_to_fit(interpreter)?;
     Ok(ShimValue::None)
 }
 
@@ -2488,7 +2493,7 @@ pub(crate) fn shim_str_split(
     unpacker.end()?;
 
     let len = s.len();
-    let out_val = interpreter.mem.alloc_list();
+    let out_val = interpreter.mem.alloc_list()?;
     let out = out_val.list_mut(interpreter)?;
     let mut idx: usize = 0;
     while idx < len {
@@ -2503,7 +2508,7 @@ pub(crate) fn shim_str_split(
             idx += 1;
         }
         let val = interpreter.mem.alloc_str(&s[start..idx])?;
-        out.push(&mut interpreter.mem, val);
+        out.push(&mut interpreter.mem, val)?;
     }
 
     Ok(out_val)
@@ -2660,7 +2665,7 @@ pub(crate) fn shim_str_split_lines(
     let s = binding.string(interpreter)?.to_vec();
     unpacker.end()?;
 
-    let out_val = interpreter.mem.alloc_list();
+    let out_val = interpreter.mem.alloc_list()?;
     let out = out_val.list_mut(interpreter)?;
     let mut start = 0usize;
     let mut idx = 0usize;
@@ -2668,12 +2673,12 @@ pub(crate) fn shim_str_split_lines(
         if s[idx] == b'\n' {
             let end = if idx > start && s[idx - 1] == b'\r' { idx - 1 } else { idx };
             let val = interpreter.mem.alloc_str(&s[start..end])?;
-            out.push(&mut interpreter.mem, val);
+            out.push(&mut interpreter.mem, val)?;
             idx += 1;
             start = idx;
         } else if s[idx] == b'\r' {
             let val = interpreter.mem.alloc_str(&s[start..idx])?;
-            out.push(&mut interpreter.mem, val);
+            out.push(&mut interpreter.mem, val)?;
             idx += 1;
             if idx < s.len() && s[idx] == b'\n' {
                 idx += 1;
@@ -2685,7 +2690,7 @@ pub(crate) fn shim_str_split_lines(
     }
     if start < s.len() {
         let val = interpreter.mem.alloc_str(&s[start..])?;
-        out.push(&mut interpreter.mem, val);
+        out.push(&mut interpreter.mem, val)?;
     }
 
     Ok(out_val)
