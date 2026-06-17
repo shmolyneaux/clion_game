@@ -52,7 +52,7 @@ fn render() {
                 // On the sphere: compute the surface normal and light it.
                 let pz = (1.0 - r2).sqrt();
                 let bright = (px * lx + py * ly + pz * lz).max(0.0);
-                let idx = int(bright * float(last)).clamp(0, last);
+                let idx = int(bright * float(last) + 0.5).clamp(0, last);
                 RAMP[idx]
             } else if is_star(col, row) {
                 "."
