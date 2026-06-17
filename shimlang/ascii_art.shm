@@ -1,62 +1,63 @@
 // ascii_art.shm
 //
-// Renders the Mandelbrot set as ASCII art, then a little 3D spinning-cube-style
-// banner. Run with:
+// Renders a shaded 3D sphere lit by a light source, floating in a starfield.
+// The output is 60 characters wide and 20 lines tall.
 //
 //     cargo run --bin shm -- ascii_art.shm
 //
-// It shows off Shimlang's floats, math methods, loops, closures, and string
-// building.
+// Shows off Shimlang's floats, math methods, loops, and string building.
 
-// ---------------------------------------------------------------------------
-// Mandelbrot set
-// ---------------------------------------------------------------------------
+let WIDTH = 60;
+let HEIGHT = 20;
 
-// Characters from "empty" to "dense", used to shade how quickly a point
-// escapes to infinity.
-let shades = " .:-=+*#%@";
+// Shade ramp from dim to bright.
+let RAMP = ".:-=+*#%@";
 
-fn mandel_pixel(cx, cy, max_iter) {
-    let zx = 0.0;
-    let zy = 0.0;
-    let i = 0;
-    while i < max_iter {
-        // z = z^2 + c
-        let x2 = zx * zx;
-        let y2 = zy * zy;
-        if x2 + y2 > 4.0 {
-            break;
-        }
-        let new_zx = x2 - y2 + cx;
-        zy = 2.0 * zx * zy + cy;
-        zx = new_zx;
-        i = i + 1;
-    }
-    i
+// Light direction (points from the surface toward the light). Normalized below.
+let LX = -0.55;
+let LY = 0.55;
+let LZ = 0.62;
+
+fn normalize3(x, y, z) {
+    let m = (x * x + y * y + z * z).sqrt();
+    [x / m, y / m, z / m]
 }
 
-fn render_mandelbrot(width, height, max_iter) {
-    // The interesting region of the complex plane.
-    let x_min = -2.5;
-    let x_max = 1.0;
-    let y_min = -1.25;
-    let y_max = 1.25;
+// A cheap deterministic "is there a star here?" test for the background.
+fn is_star(col, row) {
+    let h = (col * 928371 + row * 1234577 + col * row * 31) % 37;
+    h == 0
+}
 
-    let last = shades.len() - 1;
+fn render() {
+    let light = normalize3(LX, LY, LZ);
+    let lx = light[0];
+    let ly = light[1];
+    let lz = light[2];
 
-    for row in 0..height {
-        let cy = y_min + (y_max - y_min) * (float(row) / float(height));
+    let last = RAMP.len() - 1;
+
+    // One sphere-space unit per row; characters are ~twice as tall as wide,
+    // so the per-column unit is halved to keep the sphere round.
+    let unit = 2.0 / float(HEIGHT - 1);
+
+    for row in 0..HEIGHT {
+        let py = 0.0 - (float(row) - float(HEIGHT - 1) / 2.0) * unit;
         let line = "";
-        for col in 0..width {
-            let cx = x_min + (x_max - x_min) * (float(col) / float(width));
-            let iters = mandel_pixel(cx, cy, max_iter);
-            let ch = if iters >= max_iter {
-                // Inside the set: draw it solid.
-                shades[last]
+        for col in 0..WIDTH {
+            let px = (float(col) - float(WIDTH - 1) / 2.0) * unit / 2.0;
+            let r2 = px * px + py * py;
+
+            let ch = if r2 <= 1.0 {
+                // On the sphere: compute the surface normal and light it.
+                let pz = (1.0 - r2).sqrt();
+                let bright = (px * lx + py * ly + pz * lz).max(0.0);
+                let idx = int(bright * float(last)).clamp(0, last);
+                RAMP[idx]
+            } else if is_star(col, row) {
+                "."
             } else {
-                // Outside: shade by how long it took to escape.
-                let idx = (iters * last) / max_iter;
-                shades[int(idx).clamp(0, last)]
+                " "
             };
             line = line + ch;
         }
@@ -64,78 +65,4 @@ fn render_mandelbrot(width, height, max_iter) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// A decorative boxed banner
-// ---------------------------------------------------------------------------
-
-fn banner(text) {
-    let width = text.len() + 4;
-    let top = "+" + repeat("-", width - 2) + "+";
-    print(top);
-    print("| " + text + " |");
-    print(top);
-}
-
-fn repeat(s, n) {
-    let out = "";
-    for _ in 0..n {
-        out = out + s;
-    }
-    out
-}
-
-// ---------------------------------------------------------------------------
-// A simple sine wave, plotted as ASCII
-// ---------------------------------------------------------------------------
-
-fn sine_wave(width, height, cycles) {
-    let mid = int(height / 2);
-    // Build a blank grid of rows.
-    let rows = [];
-    for _ in 0..height {
-        rows.append(repeat(" ", width));
-    }
-
-    for col in 0..width {
-        let t = (float(col) / float(width)) * cycles * 2.0 * 3.14159265;
-        let y = mid + int((float(mid) - 0.5) * t.sin());
-        let r = y.clamp(0, height - 1);
-        let line = rows[r];
-        // Replace one character at column `col`.
-        rows[r] = line_set(line, col, "*");
-    }
-
-    for line in rows {
-        print(line);
-    }
-}
-
-// Return a copy of `line` with the character at `idx` replaced by `ch`.
-fn line_set(line, idx, ch) {
-    let out = "";
-    for i in 0..line.len() {
-        if i == idx {
-            out = out + ch;
-        } else {
-            out = out + line[i];
-        }
-    }
-    out
-}
-
-// ---------------------------------------------------------------------------
-// Main
-// ---------------------------------------------------------------------------
-
-banner("Shimlang ASCII Art Gallery");
-print("");
-
-banner("The Mandelbrot Set");
-render_mandelbrot(78, 28, 50);
-print("");
-
-banner("A Sine Wave");
-sine_wave(70, 15, 3.0);
-print("");
-
-print("Done. Generated entirely in Shimlang.");
+render();
