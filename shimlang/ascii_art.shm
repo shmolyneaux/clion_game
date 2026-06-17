@@ -1,0 +1,141 @@
+// ascii_art.shm
+//
+// Renders the Mandelbrot set as ASCII art, then a little 3D spinning-cube-style
+// banner. Run with:
+//
+//     cargo run --bin shm -- ascii_art.shm
+//
+// It shows off Shimlang's floats, math methods, loops, closures, and string
+// building.
+
+// ---------------------------------------------------------------------------
+// Mandelbrot set
+// ---------------------------------------------------------------------------
+
+// Characters from "empty" to "dense", used to shade how quickly a point
+// escapes to infinity.
+let shades = " .:-=+*#%@";
+
+fn mandel_pixel(cx, cy, max_iter) {
+    let zx = 0.0;
+    let zy = 0.0;
+    let i = 0;
+    while i < max_iter {
+        // z = z^2 + c
+        let x2 = zx * zx;
+        let y2 = zy * zy;
+        if x2 + y2 > 4.0 {
+            break;
+        }
+        let new_zx = x2 - y2 + cx;
+        zy = 2.0 * zx * zy + cy;
+        zx = new_zx;
+        i = i + 1;
+    }
+    i
+}
+
+fn render_mandelbrot(width, height, max_iter) {
+    // The interesting region of the complex plane.
+    let x_min = -2.5;
+    let x_max = 1.0;
+    let y_min = -1.25;
+    let y_max = 1.25;
+
+    let last = shades.len() - 1;
+
+    for row in 0..height {
+        let cy = y_min + (y_max - y_min) * (float(row) / float(height));
+        let line = "";
+        for col in 0..width {
+            let cx = x_min + (x_max - x_min) * (float(col) / float(width));
+            let iters = mandel_pixel(cx, cy, max_iter);
+            let ch = if iters >= max_iter {
+                // Inside the set: draw it solid.
+                shades[last]
+            } else {
+                // Outside: shade by how long it took to escape.
+                let idx = (iters * last) / max_iter;
+                shades[int(idx).clamp(0, last)]
+            };
+            line = line + ch;
+        }
+        print(line);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A decorative boxed banner
+// ---------------------------------------------------------------------------
+
+fn banner(text) {
+    let width = text.len() + 4;
+    let top = "+" + repeat("-", width - 2) + "+";
+    print(top);
+    print("| " + text + " |");
+    print(top);
+}
+
+fn repeat(s, n) {
+    let out = "";
+    for _ in 0..n {
+        out = out + s;
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
+// A simple sine wave, plotted as ASCII
+// ---------------------------------------------------------------------------
+
+fn sine_wave(width, height, cycles) {
+    let mid = int(height / 2);
+    // Build a blank grid of rows.
+    let rows = [];
+    for _ in 0..height {
+        rows.append(repeat(" ", width));
+    }
+
+    for col in 0..width {
+        let t = (float(col) / float(width)) * cycles * 2.0 * 3.14159265;
+        let y = mid + int((float(mid) - 0.5) * t.sin());
+        let r = y.clamp(0, height - 1);
+        let line = rows[r];
+        // Replace one character at column `col`.
+        rows[r] = line_set(line, col, "*");
+    }
+
+    for line in rows {
+        print(line);
+    }
+}
+
+// Return a copy of `line` with the character at `idx` replaced by `ch`.
+fn line_set(line, idx, ch) {
+    let out = "";
+    for i in 0..line.len() {
+        if i == idx {
+            out = out + ch;
+        } else {
+            out = out + line[i];
+        }
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+
+banner("Shimlang ASCII Art Gallery");
+print("");
+
+banner("The Mandelbrot Set");
+render_mandelbrot(78, 28, 50);
+print("");
+
+banner("A Sine Wave");
+sine_wave(70, 15, 3.0);
+print("");
+
+print("Done. Generated entirely in Shimlang.");
