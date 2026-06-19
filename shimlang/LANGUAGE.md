@@ -170,9 +170,22 @@ Output:
 65280
 ```
 
-A hexadecimal literal names the same 32-bit signed integer type as a decimal
-literal, so it must fall within the range below (for example `0xFFFFFFFF` is out
-of range and is rejected at parse time).
+A hexadecimal literal describes a 32-bit pattern, and the high bit is taken as
+the sign. Any value that fits in 32 bits is accepted, so `0x7FFFFFFF` is
+`2147483647`, `0x80000000` is `-2147483648`, and `0xFFFFFFFF` is `-1`. A literal
+wider than 32 bits (for example `0x100000000`) is rejected at parse time:
+
+```rust
+print(0xFFFFFFFF);
+print(0x80000000);
+```
+
+Output:
+
+```
+-1
+-2147483648
+```
 
 An integer literal must name a value within the 32-bit signed range,
 `-2147483648` to `2147483647`. A literal outside that range (for example a bare

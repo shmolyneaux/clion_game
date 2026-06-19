@@ -12,6 +12,11 @@ assert(0xDE_AD == 0xDEAD);
 assert(0xff + 1 == 256);
 assert(0x10 * 2 == 32);
 
+// A hex literal describes a 32-bit pattern; the high bit is the sign.
+assert(0x7FFFFFFF == 2147483647);
+assert(0x80000000 == -2147483648);
+assert(0xFFFFFFFF == -1);
+
 // Underscore digit separators work in decimal and float literals too.
 assert(1_000_000 == 1000000);
 assert(1_000.000_5 == 1000.0005);

@@ -1,0 +1,3 @@
+Parse Error:
+Hex literal '0x100000000' is out of range for a 32-bit integer
+Failed to parse script

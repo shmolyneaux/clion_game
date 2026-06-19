@@ -451,18 +451,17 @@ fn parse_hex_token(digits: &[u8]) -> Result<Token, String> {
         Ok(s) => s,
         Err(e) => return Err(format!("Not utf-8 {:?}", e)),
     };
-    let value = i64::from_str_radix(string_slice, 16).map_err(|e| {
-        format!("Could not tokenize hex number '0x{}' {:?}", string_slice, e)
-    })?;
-    // Hex literals name the same 32-bit integer type as decimal literals, so
-    // apply the same range check (see `parse_number_token`).
-    if value > -(i32::MIN as i64) {
-        return Err(format!(
+    // Hex literals describe a 32-bit bit pattern: any value that fits in 32
+    // bits is accepted, and the high bit is taken as the sign, so `0xFFFFFFFF`
+    // is `-1` and `0x80000000` is `i32::MIN`. `u32::from_str_radix` rejects
+    // anything wider than 32 bits.
+    let value = u32::from_str_radix(string_slice, 16).map_err(|_| {
+        format!(
             "Hex literal '0x{}' is out of range for a 32-bit integer",
             string_slice
-        ));
-    }
-    Ok(Token::Integer(value))
+        )
+    })?;
+    Ok(Token::Integer(value as i32 as i64))
 }
 
 pub fn lex_number(text: &mut &[u8]) -> Result<Token, String> {
