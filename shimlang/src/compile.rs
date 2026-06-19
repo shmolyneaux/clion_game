@@ -307,9 +307,10 @@ pub fn compile_fn_body_inner(
         asm[jmp_idx + 2].0 = expr_offset[1];
     }
 
-    for stmt in body.stmts.iter() {
-        asm.extend(compile_statement(stmt)?);
-    }
+    // `captures` already accounts for closures in the body or default args.
+    // Any shadow scopes opened here are closed by `Return`, which pops scopes
+    // by depth, so they don't need explicit `EndScope` instructions.
+    compile_statements_with_shadows(&body.stmts, captures, &mut asm)?;
 
     if let Some(expr) = &body.last_expr {
         let val: Option<&ExprNode> = Some(expr);
@@ -844,20 +845,89 @@ pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, S
     }
 }
 
+/// Compile a list of statements, opening a fresh scope whenever a `let`
+/// shadows a variable with the same name declared earlier in the same scope.
+///
+/// Closures created before a shadowing `let` must continue to see the original
+/// binding, not the new one. Because closures capture the enclosing scope by
+/// reference and resolve variables by name at call time, an in-place
+/// re-declaration would be visible to those earlier closures. Opening a fresh
+/// nested scope for the new binding keeps earlier closures pointing at the
+/// parent scope (and the original value), mirroring how `for` loops give each
+/// iteration a fresh binding.
+///
+/// Returns the number of scopes that were opened and remain open; the caller is
+/// responsible for closing them (via `EndScope`, or implicitly via `Return`,
+/// which pops scopes by depth).
+fn compile_statements_with_shadows(
+    stmts: &[StatementNode],
+    captures: bool,
+    asm: &mut Vec<(u8, Span)>,
+) -> Result<usize, String> {
+    // Shadow scopes are only needed when the surrounding block captures its
+    // environment (i.e. contains a function/struct/closure). Without closures,
+    // an in-place re-declaration is observationally identical and cheaper.
+    let mut declared_in_scope: Vec<&[u8]> = Vec::new();
+    let mut shadow_scopes = 0usize;
+
+    for stmt in stmts.iter() {
+        if captures {
+            if let Statement::Let(ident, _) = &stmt.data {
+                if declared_in_scope.iter().any(|name| *name == ident.as_slice()) {
+                    // Shadowing an existing binding in this scope: open a fresh
+                    // scope so earlier closures keep the previous binding. The
+                    // new binding's initializer is compiled after this, so its
+                    // right-hand side still resolves the old value through the
+                    // parent scope.
+                    asm.push((ByteCode::StartCapturedScope as u8, stmt.span));
+                    shadow_scopes += 1;
+                    // The new scope starts empty; names from the parent scope
+                    // are still reachable through the scope chain, but a further
+                    // re-declaration only shadows within this new scope.
+                    declared_in_scope.clear();
+                }
+                declared_in_scope.push(ident.as_slice());
+            } else if let Some(name) = declared_name(&stmt.data) {
+                declared_in_scope.push(name);
+            }
+        }
+        asm.extend(compile_statement(stmt)?);
+    }
+
+    Ok(shadow_scopes)
+}
+
+/// Name bound into the current scope by a non-`let` declaration statement
+/// (`fn` or `struct`), used to detect when a later `let` shadows it.
+fn declared_name(stmt: &Statement) -> Option<&[u8]> {
+    match stmt {
+        Statement::Fn(func) => func.ident.as_deref(),
+        Statement::Struct(s) => Some(s.ident.as_slice()),
+        _ => None,
+    }
+}
+
 pub fn compile_block_inner(
     block: &Block,
     is_expr: bool,
     block_span: Span,
     asm: &mut Vec<(u8, Span)>,
 ) -> Result<(), String> {
-    for stmt in block.stmts.iter() {
-        asm.extend(compile_statement(stmt)?);
-    }
+    let shadow_scopes =
+        compile_statements_with_shadows(&block.stmts, block_captures_env(block), asm)?;
+
     if let Some(last_expr) = &block.last_expr {
         asm.extend(compile_expression(last_expr)?);
     } else {
         asm.push((ByteCode::LiteralNone as u8, block_span));
     }
+
+    // Close any scopes opened for shadowing. EndScope only pops the environment
+    // scope and leaves the block's value on the stack untouched.
+    for _ in 0..shadow_scopes {
+        asm.push((ByteCode::EndScope as u8, block_span));
+    }
+
     if !is_expr {
         asm.push((ByteCode::Pop as u8, block_span));
     }

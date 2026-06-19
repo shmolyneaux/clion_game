@@ -120,6 +120,26 @@ Hello 2024
 20
 ```
 
+A `let` may also shadow a variable with the same name declared earlier in the
+same scope. This introduces a brand new binding rather than overwriting the old
+one, so closures created before the shadowing continue to see the original
+value:
+
+```rust
+let x = 1;
+let read_first = fn() { x };
+let x = 2;
+print(read_first());
+print(x);
+```
+
+Output:
+
+```
+1
+2
+```
+
 ## Data Types
 
 ### Integers

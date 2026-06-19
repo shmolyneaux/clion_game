@@ -1,0 +1,37 @@
+// A `let` may shadow a variable declared earlier in the same scope.
+// Closures created before the shadowing only see the original binding,
+// while closures created after see the new one.
+
+let x = 1;
+let read_first = fn() { x };
+let x = 2;
+let read_second = fn() { x };
+print(read_first());
+print(read_second());
+print(x);
+
+// The shadowing initializer sees the previous binding.
+let y = 10;
+let cap = fn() { y };
+let y = y + 5;
+print(cap());
+print(y);
+
+// Shadowing also works inside function bodies.
+fn make() {
+    let a = 100;
+    let old = fn() { a };
+    let a = 200;
+    [old, fn() { a }]
+}
+let fns = make();
+print(fns[0]());
+print(fns[1]());
+
+// Reassignment to the new binding doesn't affect closures over the old one.
+let z = 1;
+let before = fn() { z };
+let z = 2;
+z = 3;
+print(before());
+print(z);
