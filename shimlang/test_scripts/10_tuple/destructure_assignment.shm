@@ -1,0 +1,20 @@
+// `(a, b) = tuple;` assigns to existing variables by unpacking a tuple.
+let r = 0;
+let g = 0;
+let b = 0;
+(r, g, b) = (255, 128, 64);
+assert(r == 255);
+assert(g == 128);
+assert(b == 64);
+
+// Tuple swap works because the right-hand side is fully evaluated first.
+let a = 1;
+let z = 2;
+(a, z) = (z, a);
+assert(a == 2);
+assert(z == 1);
+
+// `(x) = expr` is ordinary parenthesized assignment, not destructuring.
+let single = 0;
+(single) = 7;
+assert(single == 7);

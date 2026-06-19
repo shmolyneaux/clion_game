@@ -154,6 +154,26 @@ Output:
 1000000
 ```
 
+Integers may also be written in hexadecimal using a `0x` (or `0X`) prefix. Hex
+literals accept upper- or lower-case digits and may use `_` separators, which
+makes them convenient for things like packed colour values:
+
+```rust
+print(0xFF);
+print(0x00_FF_00);
+```
+
+Output:
+
+```
+255
+65280
+```
+
+A hexadecimal literal names the same 32-bit signed integer type as a decimal
+literal, so it must fall within the range below (for example `0xFFFFFFFF` is out
+of range and is rejected at parse time).
+
 An integer literal must name a value within the 32-bit signed range,
 `-2147483648` to `2147483647`. A literal outside that range (for example a bare
 `2147483648`, which is only valid as the negative `-2147483648`) is rejected at
@@ -642,9 +662,7 @@ Output:
 ()
 ```
 
-Tuples can be unpacked in `for` loops by listing multiple variables before `in`.
-This is the primary way to destructure tuples — there is no `let (x, y) = ...`
-form:
+Tuples can be unpacked in `for` loops by listing multiple variables before `in`:
 
 ```rust
 let points = [(1, 2), (3, 4), (5, 6)];
@@ -660,6 +678,43 @@ Output:
 3 + 4 = 7
 5 + 6 = 11
 ```
+
+Tuples can also be destructured when declaring or assigning variables. The
+target names are wrapped in parentheses and the right-hand side must be a tuple
+with a matching number of elements:
+
+```rust
+// Declare new variables with `let`:
+let (x, y) = (3, 4);
+print(x, y);
+
+// Assign to existing variables (the names must already be declared):
+let r = 0;
+let g = 0;
+let b = 0;
+(r, g, b) = (255, 128, 64);
+print(r, g, b);
+
+// Because the right-hand side is evaluated before any assignment, this swaps
+// two variables:
+let a = 1;
+let c = 2;
+(a, c) = (c, a);
+print(a, c);
+```
+
+Output:
+
+```
+3 4
+255 128 64
+2 1
+```
+
+Destructuring is only for tuples. As with tuple literals, a single-name pattern
+needs a trailing comma — `let (only,) = (99,);` — since `(x)` on its own is just
+a parenthesized name. Unpacking a tuple whose length does not match the number
+of targets is an error.
 
 Tuples are hashable and may be used as dictionary keys:
 
@@ -2149,9 +2204,6 @@ The following changes would improve the Shimlang experience for users:
   set of `try_` variants for operations that can fail with user-supplied data.
 - **Module / import system:** All code lives in a single file. An import
   system would allow organizing projects into reusable modules.
-- **Let-binding destructuring:** Tuples currently destructure only in `for`
-  loops. A `let (x, y) = point;` form would make working with multiple return
-  values more ergonomic.
 - **Variadic arguments (`*args`, `**kwargs`):** Functions cannot currently
   accept a variable number of positional or keyword arguments.
 - **Standard library expansion:** Built-in support for file I/O and additional

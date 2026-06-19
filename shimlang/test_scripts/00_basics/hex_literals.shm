@@ -1,0 +1,17 @@
+// Hexadecimal integer literals.
+assert(0xFF == 255);
+assert(0x10 == 16);
+assert(0x0 == 0);
+
+// Upper and lower case digits and prefix are both accepted.
+assert(0xff == 255);
+assert(0XfF == 255);
+assert(0xDE_AD == 0xDEAD);
+
+// Hex literals are ordinary integers and participate in arithmetic.
+assert(0xff + 1 == 256);
+assert(0x10 * 2 == 32);
+
+// Underscore digit separators work in decimal and float literals too.
+assert(1_000_000 == 1000000);
+assert(1_000.000_5 == 1000.0005);

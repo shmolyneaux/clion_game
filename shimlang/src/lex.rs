@@ -437,7 +437,49 @@ fn parse_number_token(digits: &[u8], is_float: bool) -> Result<Token, String> {
     }
 }
 
+/// Build an integer token from the digits of a `0x`/`0X` hexadecimal literal.
+///
+/// `digits` is the portion *after* the `0x` prefix and may contain `_` digit
+/// separators (e.g. `0xFF_FF`).
+fn parse_hex_token(digits: &[u8]) -> Result<Token, String> {
+    // Strip `_` separators before handing the literal to Rust's parser.
+    let cleaned: Vec<u8> = digits.iter().copied().filter(|c| *c != b'_').collect();
+    if cleaned.is_empty() {
+        return Err("Hex literal must contain at least one hex digit after `0x`".to_string());
+    }
+    let string_slice = match std::str::from_utf8(&cleaned) {
+        Ok(s) => s,
+        Err(e) => return Err(format!("Not utf-8 {:?}", e)),
+    };
+    let value = i64::from_str_radix(string_slice, 16).map_err(|e| {
+        format!("Could not tokenize hex number '0x{}' {:?}", string_slice, e)
+    })?;
+    // Hex literals name the same 32-bit integer type as decimal literals, so
+    // apply the same range check (see `parse_number_token`).
+    if value > -(i32::MIN as i64) {
+        return Err(format!(
+            "Hex literal '0x{}' is out of range for a 32-bit integer",
+            string_slice
+        ));
+    }
+    Ok(Token::Integer(value))
+}
+
 pub fn lex_number(text: &mut &[u8]) -> Result<Token, String> {
+    // Hexadecimal integer literals: a `0x`/`0X` prefix followed by hex digits
+    // and optional `_` digit separators (e.g. `0xFF`, `0xDE_AD_BE`).
+    if text.len() >= 2 && text[0] == b'0' && (text[1] == b'x' || text[1] == b'X') {
+        let mut idx = 2;
+        while idx < text.len() && (text[idx].is_ascii_hexdigit() || text[idx] == b'_') {
+            idx += 1;
+        }
+        let token = parse_hex_token(&text[2..idx])?;
+        // Leave `text` one byte before the end so the caller's `+1` advance
+        // lands just past the consumed number.
+        *text = &text[(idx - 1)..];
+        return Ok(token);
+    }
+
     let mut found_decimal = false;
     let mut found_exp = false;
     let mut idx = 0;

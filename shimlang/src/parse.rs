@@ -167,7 +167,11 @@ pub enum CompoundOp {
 #[derive(Debug)]
 pub enum Statement {
     Let(Vec<u8>, ExprNode),
+    /// `let (a, b) = expr;` — declare new variables by unpacking a tuple.
+    LetDestructure(Vec<Vec<u8>>, ExprNode),
     Assignment(Vec<u8>, ExprNode),
+    /// `(a, b) = expr;` — assign to existing variables by unpacking a tuple.
+    DestructureAssignment(Vec<Vec<u8>>, ExprNode),
     AttributeAssignment(ExprNode, Vec<u8>, ExprNode),
     IndexAssignment(ExprNode, ExprNode, ExprNode),
     CompoundAssignment(Vec<u8>, CompoundOp, ExprNode),
@@ -378,6 +382,68 @@ pub fn parse_primary(tokens: &mut TokenStream) -> Result<ExprNode, String> {
         data: expr,
         span,
     })
+}
+
+/// Parse a parenthesized tuple-destructuring pattern such as `(a, b)` or
+/// `(x,)`, returning the target identifiers. Assumes the next token is the
+/// opening `(` and consumes through the closing `)`.
+///
+/// To be unambiguously a tuple pattern (rather than a parenthesized name) the
+/// pattern must contain at least two names, or a single name with a trailing
+/// comma — mirroring tuple-literal syntax.
+fn parse_destructure_targets(tokens: &mut TokenStream) -> Result<Vec<Vec<u8>>, String> {
+    tokens.consume(Token::LBracket)?;
+
+    let mut idents = Vec::new();
+    let mut had_trailing_comma = false;
+
+    // Empty `()` is not a valid destructuring target.
+    if *tokens.peek()? == Token::RBracket {
+        return Err(tokens.format_peek_err("Expected an identifier in destructuring pattern"));
+    }
+
+    loop {
+        match tokens.pop()? {
+            Token::Identifier(ident) => idents.push(ident),
+            token => {
+                tokens.unadvance()?;
+                return Err(tokens.format_peek_err(&format!(
+                    "Expected identifier in destructuring pattern, found {:?}",
+                    token
+                )));
+            }
+        }
+
+        match tokens.peek()? {
+            Token::RBracket => {
+                tokens.advance()?;
+                break;
+            }
+            Token::Comma => {
+                tokens.advance()?;
+                // Allow a trailing comma, e.g. `(x,)`.
+                if !tokens.is_empty() && *tokens.peek()? == Token::RBracket {
+                    tokens.advance()?;
+                    had_trailing_comma = true;
+                    break;
+                }
+            }
+            token => {
+                return Err(tokens.format_peek_err(&format!(
+                    "Expected `,` or `)` in destructuring pattern, found {:?}",
+                    token
+                )));
+            }
+        }
+    }
+
+    if idents.len() == 1 && !had_trailing_comma {
+        return Err(tokens.format_peek_err(
+            "A parenthesized single name is not a tuple pattern; use `(x,)` to destructure a 1-tuple",
+        ));
+    }
+
+    Ok(idents)
 }
 
 pub fn parse_arguments(
@@ -936,6 +1002,42 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
                     "No token found after let",
                 ));
             }
+
+            // `let (a, b) = expr;` destructures a tuple into new variables.
+            if *tokens.peek()? == Token::LBracket {
+                let idents = parse_destructure_targets(tokens)?;
+
+                match tokens.pop()? {
+                    Token::Equal => (),
+                    token => {
+                        tokens.unadvance()?;
+                        return Err(tokens.format_peek_err(&format!(
+                            "Expected = after `let (<idents>)`, found {:?}",
+                            token
+                        )));
+                    }
+                }
+
+                let expr = parse_expression(tokens)?;
+                let end_span = tokens.peek_span()?;
+                match tokens.pop()? {
+                    Token::Semicolon => (),
+                    token => {
+                        tokens.unadvance()?;
+                        return Err(tokens.format_peek_err(&format!(
+                            "Expected semicolon after `let (<idents>) = <expr>`, found {:?}",
+                            token
+                        )));
+                    }
+                }
+
+                stmts.push(StatementNode {
+                    data: Statement::LetDestructure(idents, expr),
+                    span: start_span + end_span,
+                });
+                continue;
+            }
+
             let ident = match tokens.pop()? {
                 Token::Identifier(ident) => ident.clone(),
                 token => {
@@ -1223,6 +1325,36 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
                                     *index_expr,
                                     expr_to_assign,
                                 ),
+                                span: start_span + end_span,
+                            }
+                        }
+                        Expression::Primary(Primary::Tuple(items)) => {
+                            // `(a, b) = expr;` — destructuring assignment to
+                            // existing variables. Every target must be a bare
+                            // identifier.
+                            let mut idents = Vec::with_capacity(items.len());
+                            for item in items {
+                                match item.data {
+                                    Expression::Primary(Primary::Identifier(ident)) => {
+                                        idents.push(ident)
+                                    }
+                                    other => {
+                                        return Err(format_script_err(
+                                            item.span,
+                                            &tokens.script,
+                                            &format!(
+                                                "Destructuring assignment target must be an identifier, found {:?}",
+                                                other
+                                            ),
+                                        ));
+                                    }
+                                }
+                            }
+                            let expr_to_assign = parse_expression(tokens)?;
+                            let end_span = tokens.peek_span()?;
+                            tokens.consume(Token::Semicolon)?;
+                            StatementNode {
+                                data: Statement::DestructureAssignment(idents, expr_to_assign),
                                 span: start_span + end_span,
                             }
                         }

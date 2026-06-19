@@ -1,0 +1,22 @@
+// `let (a, b) = tuple;` declares new variables by unpacking a tuple.
+let (x, y) = (3, 4);
+assert(x == 3);
+assert(y == 4);
+
+// More than two targets.
+let (r, g, b) = (255, 128, 64);
+assert(r == 255);
+assert(g == 128);
+assert(b == 64);
+
+// A single-element tuple needs a trailing comma, matching tuple literals.
+let (only,) = (99,);
+assert(only == 99);
+
+// The right-hand side can be any expression that evaluates to a tuple.
+fn pair() {
+    (1, 2)
+}
+let (a, c) = pair();
+assert(a == 1);
+assert(c == 2);

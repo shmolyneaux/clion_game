@@ -4,7 +4,6 @@
 
 # MINOR
 - Tuple
-- Tuple unpacking
 - String methods
   - join
   - upper
@@ -21,8 +20,6 @@
   - rstrip
   - replace
 - `*args`, and `**kwargs`
-- Numeric literals with underscores
-- Hex literals (for colors)
 - Type annotations
 - Runtime type checking
 - Static type checking

@@ -127,7 +127,9 @@ fn validate_stmt_loop_control(
             }
         }
         Statement::Let(_, e)
+        | Statement::LetDestructure(_, e)
         | Statement::Assignment(_, e)
+        | Statement::DestructureAssignment(_, e)
         | Statement::CompoundAssignment(_, _, e)
         | Statement::Expression(e) => validate_expr_loop_control(e, in_loop, script)?,
         Statement::Return(opt) => {
@@ -452,6 +454,48 @@ pub fn compile_statement(stmt_node: &StatementNode) -> Result<Vec<(u8, Span)>, S
             ));
             for b in ident.iter() {
                 expr_asm.push((*b, expr.span));
+            }
+
+            Ok(expr_asm)
+        }
+        Statement::LetDestructure(idents, expr) => {
+            // Evaluate the tuple, unpack its elements onto the stack, then
+            // declare each target variable. `UnpackTuple` pushes elements so
+            // that the first element ends up on top, matching declaration order.
+            let mut expr_asm = compile_expression(expr)?;
+            let size_u8s = u16_to_u8s(idents.len() as u16);
+            expr_asm.push((ByteCode::UnpackTuple as u8, expr.span));
+            expr_asm.push((size_u8s[0], expr.span));
+            expr_asm.push((size_u8s[1], expr.span));
+            for ident in idents {
+                expr_asm.push((ByteCode::VariableDeclaration as u8, expr.span));
+                expr_asm.push((
+                    ident.len().try_into().expect("Ident len should into u8"),
+                    expr.span,
+                ));
+                for b in ident.iter() {
+                    expr_asm.push((*b, expr.span));
+                }
+            }
+
+            Ok(expr_asm)
+        }
+        Statement::DestructureAssignment(idents, expr) => {
+            // Like `LetDestructure`, but assigns to existing variables.
+            let mut expr_asm = compile_expression(expr)?;
+            let size_u8s = u16_to_u8s(idents.len() as u16);
+            expr_asm.push((ByteCode::UnpackTuple as u8, expr.span));
+            expr_asm.push((size_u8s[0], expr.span));
+            expr_asm.push((size_u8s[1], expr.span));
+            for ident in idents {
+                expr_asm.push((ByteCode::Assignment as u8, expr.span));
+                expr_asm.push((
+                    ident.len().try_into().expect("Ident len should into u8"),
+                    expr.span,
+                ));
+                for b in ident.iter() {
+                    expr_asm.push((*b, expr.span));
+                }
             }
 
             Ok(expr_asm)
@@ -870,7 +914,9 @@ pub fn statement_captures_env(stmt: &Statement) -> bool {
         Statement::Fn(..) => true,
         Statement::Struct(..) => true,
         Statement::Let(_ident, expr) => expression_captures_env(&expr.data),
+        Statement::LetDestructure(_idents, expr) => expression_captures_env(&expr.data),
         Statement::Assignment(_ident, expr) => expression_captures_env(&expr.data),
+        Statement::DestructureAssignment(_idents, expr) => expression_captures_env(&expr.data),
         Statement::AttributeAssignment(obj, _ident, expr) => {
             expression_captures_env(&obj.data) || expression_captures_env(&expr.data)
         }
@@ -1025,7 +1071,11 @@ pub fn compile_block(
     for stmt in &block.stmts {
         let stmt = &stmt.data;
         match stmt {
-            Statement::Let(..) | Statement::For(..) | Statement::Fn(..) | Statement::Struct(..) => {
+            Statement::Let(..)
+            | Statement::LetDestructure(..)
+            | Statement::For(..)
+            | Statement::Fn(..)
+            | Statement::Struct(..) => {
                 needs_new_scope = true;
                 break;
             }
