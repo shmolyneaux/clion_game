@@ -35,3 +35,29 @@ let z = 2;
 z = 3;
 print(before());
 print(z);
+
+// Forward references and mutual recursion still work across a shadowing `let`:
+// shadowing must not hide later declarations from earlier-defined functions.
+fn is_even(n) { if n == 0 { true } else { is_odd(n - 1) } }
+let depth = 1;
+let depth = 2;
+fn is_odd(n) { if n == 0 { false } else { is_even(n - 1) } }
+print(is_even(4));
+print(is_odd(4));
+
+// A function declared before a shadow can still call one declared after it.
+fn caller() { callee() }
+let tag = "a";
+let tag = "b";
+fn callee() { 7 }
+print(caller());
+
+// A `let` can shadow a function parameter.
+fn shadow_param(p) {
+    let see_param = fn() { p };
+    let p = p + 1;
+    [see_param(), p]
+}
+let sp = shadow_param(41);
+print(sp[0]);
+print(sp[1]);

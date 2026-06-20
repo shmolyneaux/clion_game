@@ -87,6 +87,24 @@ impl BinaryOp {
             BinaryOp::Range(a, b) => (a, b),
         }
     }
+
+    pub(crate) fn exprs_mut(&mut self) -> (&mut ExprNode, &mut ExprNode) {
+        match self {
+            BinaryOp::Add(a, b) => (a, b),
+            BinaryOp::Subtract(a, b) => (a, b),
+            BinaryOp::Multiply(a, b) => (a, b),
+            BinaryOp::Divide(a, b) => (a, b),
+            BinaryOp::Equal(a, b) => (a, b),
+            BinaryOp::NotEqual(a, b) => (a, b),
+            BinaryOp::GT(a, b) => (a, b),
+            BinaryOp::Gte(a, b) => (a, b),
+            BinaryOp::LT(a, b) => (a, b),
+            BinaryOp::Lte(a, b) => (a, b),
+            BinaryOp::Modulus(a, b) => (a, b),
+            BinaryOp::In(a, b) => (a, b),
+            BinaryOp::Range(a, b) => (a, b),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -97,6 +115,13 @@ pub enum BooleanOp {
 
 impl BooleanOp {
     pub(crate) fn exprs(&self) -> (&ExprNode, &ExprNode) {
+        match self {
+            BooleanOp::And(a, b) => (a, b),
+            BooleanOp::Or(a, b) => (a, b),
+        }
+    }
+
+    pub(crate) fn exprs_mut(&mut self) -> (&mut ExprNode, &mut ExprNode) {
         match self {
             BooleanOp::And(a, b) => (a, b),
             BooleanOp::Or(a, b) => (a, b),
@@ -850,10 +875,12 @@ pub fn parse_expression(tokens: &mut TokenStream) -> Result<ExprNode, String> {
 
 pub fn parse_ast(tokens: &mut TokenStream) -> Result<Ast, String> {
     let block = parse_block_inner(tokens)?;
-    Ok(Ast {
+    let mut ast = Ast {
         block,
         script: tokens.script.clone(),
-    })
+    };
+    crate::resolve::resolve_shadowing(&mut ast);
+    Ok(ast)
 }
 
 pub fn parse_function(tokens: &mut TokenStream) -> Result<Fn, String> {

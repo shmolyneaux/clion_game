@@ -6,6 +6,7 @@ use facet::Facet;
 pub mod compile;
 pub mod lex;
 pub mod parse;
+pub mod resolve;
 #[macro_use]
 pub mod mem;
 pub mod runtime;
@@ -15,4 +16,5 @@ pub use compile::*;
 pub use lex::*;
 pub use mem::*;
 pub use parse::*;
+pub use resolve::*;
 pub use runtime::*;
