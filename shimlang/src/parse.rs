@@ -942,12 +942,51 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
                     "No token found after let",
                 ));
             }
-            let ident = match tokens.pop()? {
-                Token::Identifier(ident) => ident.clone(),
-                token => {
-                    tokens.unadvance()?;
-                    return Err(tokens
-                        .format_peek_err(&format!("Expected ident after let, found {:?}", token)));
+            let target = match tokens.peek()? {
+                Token::LBracket => {
+                    tokens.advance()?;
+                    let mut idents: Vec<Vec<u8>> = Vec::new();
+                    loop {
+                        match tokens.pop()? {
+                            Token::Identifier(ident) => idents.push(ident.clone()),
+                            token => {
+                                tokens.unadvance()?;
+                                return Err(tokens.format_peek_err(&format!(
+                                    "Expected identifier in tuple pattern, found {:?}",
+                                    token
+                                )));
+                            }
+                        }
+                        match tokens.pop()? {
+                            Token::RBracket => break,
+                            Token::Comma => {
+                                if !tokens.is_empty() && *tokens.peek()? == Token::RBracket {
+                                    tokens.advance()?;
+                                    break;
+                                }
+                            }
+                            token => {
+                                tokens.unadvance()?;
+                                return Err(tokens.format_peek_err(&format!(
+                                    "Expected `,` or `)` in tuple pattern, found {:?}",
+                                    token
+                                )));
+                            }
+                        }
+                    }
+                    Target::Tuple(idents)
+                }
+                _ => {
+                    match tokens.pop()? {
+                        Token::Identifier(ident) => Target::Ident(ident.clone()),
+                        token => {
+                            tokens.unadvance()?;
+                            return Err(tokens.format_peek_err(&format!(
+                                "Expected ident after let, found {:?}",
+                                token
+                            )));
+                        }
+                    }
                 }
             };
 
@@ -976,7 +1015,7 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
             }
 
             StatementNode {
-                data: Statement::Let(Target::Ident(ident), expr),
+                data: Statement::Let(target, expr),
                 span: start_span + end_span,
             }
         } else if *tokens.peek()? == Token::Fn {
@@ -1203,6 +1242,30 @@ pub fn parse_block_inner(tokens: &mut TokenStream) -> Result<Block, String> {
                             tokens.consume(Token::Semicolon)?;
                             StatementNode {
                                 data: Statement::Assignment(Target::Ident(ident.clone()), expr_to_assign),
+                                span: start_span + end_span,
+                            }
+                        }
+                        Expression::Primary(Primary::Tuple(items)) => {
+                            let mut idents = Vec::with_capacity(items.len());
+                            for item in &items {
+                                match &item.data {
+                                    Expression::Primary(Primary::Identifier(ident)) => {
+                                        idents.push(ident.clone());
+                                    }
+                                    _ => {
+                                        return Err(format_script_err(
+                                            item.span,
+                                            &tokens.script,
+                                            "Expected identifier in tuple assignment pattern",
+                                        ));
+                                    }
+                                }
+                            }
+                            let expr_to_assign = parse_expression(tokens)?;
+                            let end_span = tokens.peek_span()?;
+                            tokens.consume(Token::Semicolon)?;
+                            StatementNode {
+                                data: Statement::Assignment(Target::Tuple(idents), expr_to_assign),
                                 span: start_span + end_span,
                             }
                         }
