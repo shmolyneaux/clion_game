@@ -110,7 +110,7 @@ impl Navigation {
             igText(
                 CString::new(format!(
                     "Mask size is {}",
-                    usize::from(interpreter.mem.free_list[interpreter.mem.free_list.len() - 1].pos)
+                    interpreter.mem.mem_high_point() as usize
                 ))
                 .unwrap()
                 .as_ptr(),
@@ -153,11 +153,7 @@ impl Navigation {
 
             let page_size: usize = 128;
 
-            let mem_end: usize = if let Some(block) = interpreter.mem.free_list.last() {
-                block.pos.into()
-            } else {
-                interpreter.mem.mem().len()
-            };
+            let mem_end: usize = interpreter.mem.mem_high_point() as usize;
 
             if (self.memory_page + 1) * (page_size as u32) < mem_end as u32 {
                 if igButton(CString::new("Next".to_string()).unwrap().as_ptr()) {
@@ -171,11 +167,11 @@ impl Navigation {
 
             igSameLine();
 
-            // TODO: disable "Next" button if it goes past the free_list last position
+            // TODO: disable "Next" button if it goes past the high water mark
             igText(
                 CString::new(format!(
-                    "Last block: {:?}",
-                    interpreter.mem.free_list.last()
+                    "High water: {:?}",
+                    interpreter.mem.mem_high_point()
                 ))
                 .unwrap()
                 .as_ptr(),

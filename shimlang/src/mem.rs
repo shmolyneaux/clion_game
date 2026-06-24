@@ -3,6 +3,7 @@ use crate::shimlibs::*;
 use shm_tracy::zone_scoped;
 use shm_tracy::*;
 use std::any::TypeId;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::ops::Range;
 use std::ops::{Add, AddAssign, Sub, SubAssign};
@@ -199,12 +200,20 @@ pub struct MMU {
     // Dirty bitmask: each bit represents a PAGE_SIZE-word page.
     dirty: Vec<u64>,
 
-    // This is a list of chunks of free memory
-    // The first value is the position in words
-    // The second value is the number of words
-    // Sorted for sanity's sake, though I'm not
-    // sure if necessary?
-    pub free_list: Vec<FreeBlock>,
+    // Index of free memory blocks keyed by their size (in words). Each entry
+    // maps a block size to the list of positions (in words) of free blocks of
+    // exactly that size. This lets allocation find a best-fitting block via a
+    // BTreeMap range query rather than scanning a linear list.
+    //
+    // We deliberately do NOT coalesce adjacent free blocks here: the whole
+    // index is rebuilt (and effectively coalesced) by `find_zeros` whenever the
+    // GC sweeps, so paying for coalescing on every `free` would be wasted work.
+    pub free_list: BTreeMap<u24, Vec<u24>>,
+    // Start (in words) of the unbounded trailing free region. Everything in
+    // `[high_water, mem.len())` is free and not tracked in `free_list`; we carve
+    // new allocations from here when no indexed block fits. This is the boundary
+    // between memory that has been touched and the never-used tail.
+    high_water: u24,
     // We don't store metadata about any allocations
     // It's up to the caller to know how much memory
     // should be freed.
@@ -243,27 +252,33 @@ macro_rules! alloc {
 
 impl MMU {
     pub fn mem_high_point(&self) -> u32 {
-        self.free_list.last().map(|block| u32::from(block.pos)).unwrap_or(0)
+        u32::from(self.high_water)
     }
 
+    #[allow(dead_code)]
     fn eprint_free_list(&self) {
-        eprintln!("Free list:");
-        for block in self.free_list.iter() {
-            eprintln!("    {block:?}");
+        eprintln!("Free list (high_water: {}):", u32::from(self.high_water));
+        for (size, positions) in self.free_list.iter() {
+            for pos in positions {
+                eprintln!("    FreeBlock {{ pos: {:?}, size: {:?} }}", pos, size);
+            }
         }
     }
 
     pub(crate) fn with_capacity(word_count: u24) -> Self {
         let mem = vec![0; usize::from(word_count)];
-        // Start the free list at word 1, reserving word 0 as a sentinel.
-        // This ensures no allocation ever returns position 0, which is used
-        // as a "null" / "no scope" sentinel by consumers.
-        let free_list = vec![FreeBlock::new(1u32.into(), word_count - u24::from(1u32))];
+        // Reserve word 0 as a sentinel so no allocation ever returns position 0,
+        // which is used as a "null" / "no scope" sentinel by consumers. All free
+        // memory starts as the trailing region `[1, word_count)`, so the size
+        // index begins empty and `high_water` starts at word 1.
+        let free_list = BTreeMap::new();
+        let high_water = u24::from(1u32);
         let dirty = vec![0u64; usize::from(word_count).div_ceil(PAGE_SIZE * 64)];
         Self {
             mem,
             dirty,
             free_list,
+            high_water,
             native_type_ids: HashMap::new(),
             native_type_registry: Vec::new(),
             droppable_native_pos: Vec::new(),
@@ -378,40 +393,52 @@ impl MMU {
         if u32::from(words) == 0u32 {
             return Ok(0.into());
         }
-        for idx in 0..self.free_list.len() {
-            if self.free_list[idx].size >= words {
-                let returned_pos: u24 = self.free_list[idx].pos;
 
-                if self.free_list[idx].size == words {
-                    self.free_list.remove(idx);
-                } else {
-                    self.free_list[idx].pos += words;
-                    self.free_list[idx].size -= words;
-                }
-
-                // Compaction is handled when it's convenient.
-                // Some people might tend towards using a linked list to have
-                // constant time insert/deletion without needing a separate
-                // compaction step, but I'm guessing that iterating through
-                // linear memory is going to be pretty fast.
-                //
-                // Another option is to allocate from the end of the Vec so
-                // that we can at least pop off chunks as they're depleted.
-                //
-                // Or we could keep track of how many empty elements there are
-                // in `free_list` so that we can skip them until the next compaction.
-                //
-                // There are further enhancements if we split things into buckets,
-                // but we can keep things simple for now.
-
-                self.mark_dirty_range(usize::from(returned_pos), usize::from(returned_pos) + usize::from(words));
-                return Ok(returned_pos);
+        // Best-fit: find the smallest indexed block whose size is at least the
+        // requested word count. The BTreeMap keeps sizes sorted, so a range
+        // query gives us the candidate without a linear scan.
+        if let Some((&block_size, _)) = self.free_list.range(words..).next() {
+            // Pop a position out of that size bucket, removing the bucket
+            // entirely once it's empty so range queries stay tidy.
+            let positions = self.free_list.get_mut(&block_size).unwrap();
+            let returned_pos = positions.pop().unwrap();
+            if positions.is_empty() {
+                self.free_list.remove(&block_size);
             }
+
+            // If the block was larger than needed, return the remainder to the
+            // index as its own (uncoalesced) block.
+            if block_size > words {
+                let remainder_pos = returned_pos + words;
+                let remainder_size = block_size - words;
+                self.insert_free_block(remainder_pos, remainder_size);
+            }
+
+            self.mark_dirty_range(usize::from(returned_pos), usize::from(returned_pos) + usize::from(words));
+            return Ok(returned_pos);
         }
-        Err(format!(
-            "Out of memory: could not allocate {} words (heap exhausted)",
-            u32::from(words)
-        ))
+
+        // Nothing in the index fits; carve from the trailing free region.
+        // Compute the new boundary in usize to avoid wrapping the u24 at the
+        // very top of the address space.
+        let returned_pos = self.high_water;
+        let new_high_water = usize::from(returned_pos) + usize::from(words);
+        if new_high_water > self.mem.len() {
+            return Err(format!(
+                "Out of memory: could not allocate {} words (heap exhausted)",
+                u32::from(words)
+            ));
+        }
+        self.high_water = u24::from(new_high_water);
+
+        self.mark_dirty_range(usize::from(returned_pos), usize::from(returned_pos) + usize::from(words));
+        Ok(returned_pos)
+    }
+
+    /// Insert a free block of `size` words at `pos` into the size index. No
+    /// coalescing is performed; the index is rebuilt by the GC sweep.
+    fn insert_free_block(&mut self, pos: u24, size: u24) {
+        self.free_list.entry(size).or_default().push(pos);
     }
 
     /**
@@ -431,63 +458,11 @@ impl MMU {
 
         // eprintln!("Free {}: {}", usize::from(size.0), usize::from(pos));
 
-        // This is the idx of the first free block containing addresses greater than the
-        // position we need to free
-        let idx = {
-            let mut ret = None;
-            for idx in 0..self.free_list.len() {
-                if pos < self.free_list[idx].end() {
-                    ret = Some(idx);
-                    break;
-                }
-            }
-            // Technically we could get here if there was no free block at the end
-            // of the memory, but we basically don't expect that to happen, so it's
-            // not worth addressing.
-            ret.expect("Could not find free list position to insert free mem")
-        };
-
-        // The data we're freeing is in one of the four categories:
-        //   1. needs to be joined to the end of the previous idx
-        //   2. joins the previous idx and this idx
-        //   3. sits between the previous idx and this idx
-        //   4. needs to be joined to the start of this idx
-        if idx != 0 && pos == self.free_list[idx - 1].end() {
-            // Case 1 or 2
-            // Since the position matches the end of the previous
-            // block we need to join with it
-            match (pos + size).cmp(&self.free_list[idx].pos) {
-                std::cmp::Ordering::Less => {
-                    // Case 1: not long enough to reach the idx block, just add the sizes
-                    self.free_list[idx - 1].size += size;
-                    return;
-                }
-                std::cmp::Ordering::Equal => {
-                    // Case 2
-                    self.free_list[idx - 1].size =
-                        self.free_list[idx].end() - self.free_list[idx - 1].pos;
-                    self.free_list.remove(idx);
-                    return;
-                }
-                std::cmp::Ordering::Greater => {
-                    panic!("Mis-sized free does not fit in gap!");
-                }
-            }
-        }
-        match (pos + size).cmp(&self.free_list[idx].pos) {
-            std::cmp::Ordering::Less => {
-                // Case 3
-                self.free_list.insert(idx, FreeBlock::new(pos, size));
-            }
-            std::cmp::Ordering::Equal => {
-                // Case 4
-                self.free_list[idx].pos = pos;
-                self.free_list[idx].size += size;
-            }
-            std::cmp::Ordering::Greater => {
-                panic!("Mis-sized free overlaps with idx block!");
-            }
-        }
+        // Simply record the freed block in the size index. We don't coalesce
+        // with neighbouring free blocks: the index is fully rebuilt (and
+        // implicitly coalesced) by the GC sweep, so doing it here would be
+        // wasted work.
+        self.insert_free_block(pos, size);
     }
 
     /** DOES NOT DROP T, but nothing in the MMU should need to drop **/
@@ -819,7 +794,9 @@ pub(crate) struct GC<'a> {
 
 impl<'a> GC<'a> {
     pub(crate) fn new(interpreter: &'a mut Interpreter) -> Self {
-        let last_block_start = interpreter.mem.free_list[interpreter.mem.free_list.len() - 1].pos;
+        // The trailing free region above `high_water` is never allocated and so
+        // doesn't need bits in the mask; we only track everything below it.
+        let last_block_start = interpreter.mem.high_water;
         let mut mask = Bitmask::new(last_block_start.into());
         // Mark word 0 so the GC never frees the sentinel reserved by MMU::with_capacity
         mark_bit!(mask, 0, MemDescriptor::other(0, 1, "null"));
@@ -1190,29 +1167,113 @@ impl<'a> GC<'a> {
     pub(crate) fn sweep(&mut self) {
         let _zone = zone_scoped!("GC sweep");
 
-        // TODO: need to add the original last block from the free list
-        let last_block = self.interpreter.mem.free_list[self.interpreter.mem.free_list.len() - 1];
-        let mut free_list: Vec<FreeBlock> = self
-            .mask
-            .find_zeros()
-            .iter()
-            .map(|block| FreeBlock {
-                pos: block.start.into(),
-                size: (block.end - block.start).into(),
-            })
-            .collect();
+        // `find_zeros` returns the maximal runs of free words below the old
+        // high water mark, so this rebuild also coalesces everything that
+        // accumulated in the (uncoalesced) size index since the last sweep.
+        let zeros = self.mask.find_zeros();
+        let mut high_water = self.interpreter.mem.high_water;
 
-        let new_last_block = free_list[free_list.len() - 1];
-
-        if new_last_block.end() >= last_block.pos {
-            // Merge with the new last block
-            let len = free_list.len();
-            free_list[len - 1].size = last_block.end() - free_list[len - 1].pos;
-        } else {
-            // Append the previous last free block (which was not included in the bitmask)
-            free_list.push(last_block);
+        let mut free_list: BTreeMap<u24, Vec<u24>> = BTreeMap::new();
+        let zero_count = zeros.len();
+        for (idx, block) in zeros.iter().enumerate() {
+            // The final free run, if it reaches the old high water mark, is
+            // contiguous with the trailing free region. Fold it back into the
+            // trailing region (by lowering `high_water`) instead of indexing it.
+            if idx == zero_count - 1 && block.end == usize::from(high_water) {
+                high_water = block.start.into();
+            } else {
+                let pos = u24::from(block.start);
+                let size = u24::from(block.end - block.start);
+                free_list.entry(size).or_default().push(pos);
+            }
         }
 
         self.interpreter.mem.free_list = free_list;
+        self.interpreter.mem.high_water = high_water;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn u(v: u32) -> u24 {
+        u24::from(v)
+    }
+
+    #[test]
+    fn fresh_allocs_come_from_trailing_region() {
+        let mut mmu = MMU::with_capacity(u(64));
+        // Word 0 is reserved, so the first allocation starts at word 1.
+        assert_eq!(mmu.alloc_no_debug(u(4)).unwrap(), u(1));
+        assert_eq!(mmu.alloc_no_debug(u(2)).unwrap(), u(5));
+        assert_eq!(mmu.mem_high_point(), 7);
+        // Nothing has been freed, so the size index is empty.
+        assert!(mmu.free_list.is_empty());
+    }
+
+    #[test]
+    fn freed_block_is_reused_without_growing_high_water() {
+        let mut mmu = MMU::with_capacity(u(64));
+        let a = mmu.alloc_no_debug(u(4)).unwrap();
+        let _b = mmu.alloc_no_debug(u(2)).unwrap();
+        let high_before = mmu.mem_high_point();
+
+        mmu.free(a, u(4));
+        assert_eq!(mmu.free_list.get(&u(4)).map(|v| v.len()), Some(1));
+
+        // Re-allocating the same size pulls the freed block back out of the
+        // index rather than carving fresh memory.
+        let reused = mmu.alloc_no_debug(u(4)).unwrap();
+        assert_eq!(reused, a);
+        assert_eq!(mmu.mem_high_point(), high_before);
+        // The bucket is emptied (and removed) once consumed.
+        assert!(!mmu.free_list.contains_key(&u(4)));
+    }
+
+    #[test]
+    fn allocation_uses_best_fitting_block() {
+        let mut mmu = MMU::with_capacity(u(64));
+        let small = mmu.alloc_no_debug(u(4)).unwrap();
+        let _gap = mmu.alloc_no_debug(u(1)).unwrap();
+        let large = mmu.alloc_no_debug(u(8)).unwrap();
+
+        mmu.free(small, u(4));
+        mmu.free(large, u(8));
+
+        // Requesting 4 words should take the exact-fit size-4 block, leaving the
+        // size-8 block untouched.
+        let got = mmu.alloc_no_debug(u(4)).unwrap();
+        assert_eq!(got, small);
+        assert!(!mmu.free_list.contains_key(&u(4)));
+        assert_eq!(mmu.free_list.get(&u(8)).map(|v| v.len()), Some(1));
+    }
+
+    #[test]
+    fn oversized_block_is_split_and_remainder_reindexed() {
+        let mut mmu = MMU::with_capacity(u(64));
+        let block = mmu.alloc_no_debug(u(10)).unwrap();
+        let _other = mmu.alloc_no_debug(u(1)).unwrap();
+        mmu.free(block, u(10));
+
+        // Allocating 4 words from the size-10 block returns its start and pushes
+        // the 6-word remainder back into the index.
+        let got = mmu.alloc_no_debug(u(4)).unwrap();
+        assert_eq!(got, block);
+        assert!(!mmu.free_list.contains_key(&u(10)));
+        assert_eq!(mmu.free_list.get(&u(6)).map(|v| v.as_slice()), Some([block + 4u32].as_slice()));
+
+        // And the remainder is itself allocatable.
+        let remainder = mmu.alloc_no_debug(u(6)).unwrap();
+        assert_eq!(remainder, block + 4u32);
+    }
+
+    #[test]
+    fn out_of_memory_when_trailing_region_exhausted() {
+        let mut mmu = MMU::with_capacity(u(8));
+        // Words 1..8 are available (word 0 reserved); a 7-word alloc fits exactly.
+        assert!(mmu.alloc_no_debug(u(7)).is_ok());
+        // No room for even one more word.
+        assert!(mmu.alloc_no_debug(u(1)).is_err());
     }
 }

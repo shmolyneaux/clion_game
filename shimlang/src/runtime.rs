@@ -2218,18 +2218,12 @@ impl Interpreter {
 
     pub fn print_mem(&self) {
         let _zone = zone_scoped!("print_mem");
-        let mut count = 0;
-        let mut idx = 0;
-        for block in self.mem.free_list.iter() {
-            while idx < block.pos.into() {
-                println!("{:06}: {:016x}", idx, self.mem.mem()[idx]);
-                idx += 1;
-                count += 1
-            }
-
-            if count > 100 {
+        let high_water: usize = self.mem.mem_high_point() as usize;
+        for idx in 0..high_water {
+            if idx > 100 {
                 break;
             }
+            println!("{:06}: {:016x}", idx, self.mem.mem()[idx]);
         }
     }
 
@@ -3411,6 +3405,43 @@ mod tests {
 
         assert_eq!(interpreter.fetch_mut::<A>().0, 7);
         assert_eq!(interpreter.fetch_mut::<B>().0, "hello");
+    }
+
+    #[test]
+    fn gc_reclaims_garbage_and_preserves_reachable() {
+        let mut interpreter = test_interpreter();
+
+        // A reachable string anchored in the root environment.
+        let keep = interpreter.mem.alloc_str(b"keep this alive").unwrap();
+        interpreter.insert_in_root_env(b"keep", keep);
+
+        // A pile of unreachable strings: pure garbage for the collector.
+        for _ in 0..200 {
+            let _ = interpreter
+                .mem
+                .alloc_str(b"garbage garbage garbage garbage")
+                .unwrap();
+        }
+        let high_before = interpreter.mem.mem_high_point();
+
+        interpreter.gc();
+
+        // The collector should have recovered the garbage, either by folding it
+        // back into the trailing region (lower high water) or by indexing freed
+        // blocks below it.
+        let high_after = interpreter.mem.mem_high_point();
+        assert!(high_after <= high_before);
+        assert!(high_after < high_before || !interpreter.mem.free_list.is_empty());
+
+        // The reachable string survived untouched and is still readable.
+        assert_eq!(
+            keep.string_from_mem(&interpreter.mem).unwrap(),
+            b"keep this alive"
+        );
+
+        // Allocation continues to work against the rebuilt free index.
+        let again = interpreter.mem.alloc_str(b"after gc").unwrap();
+        assert_eq!(again.string_from_mem(&interpreter.mem).unwrap(), b"after gc");
     }
 }
 
