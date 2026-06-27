@@ -1,0 +1,24 @@
+// SYNTAX TEST "source.shim"
+
+let d = { "name": "Alice", "age": 30 };
+//      ^ punctuation.section.braces.begin.shim
+//        ^^^^^^ string.quoted.double.shim
+//              ^ punctuation.separator.colon.shim
+//                ^^^^^^^ string.quoted.double.shim
+//                       ^ punctuation.separator.comma.shim
+//                              ^ punctuation.separator.colon.shim
+//                                ^^ constant.numeric.integer.shim
+//                                   ^ punctuation.section.braces.end.shim
+
+let empty = {:};
+//          ^ punctuation.section.braces.begin.shim
+//           ^ punctuation.separator.colon.shim
+//            ^ punctuation.section.braces.end.shim
+
+let s = { 1, 2, };
+//      ^ punctuation.section.braces.begin.shim
+//        ^ constant.numeric.integer.shim
+//         ^ punctuation.separator.comma.shim
+//           ^ constant.numeric.integer.shim
+//            ^ punctuation.separator.comma.shim
+//              ^ punctuation.section.braces.end.shim
