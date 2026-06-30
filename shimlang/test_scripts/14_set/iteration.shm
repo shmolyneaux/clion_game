@@ -1,21 +1,22 @@
-// Iteration order is unspecified, so reduce to order-independent results.
-let s = {10, 20, 30, 40}
-
-let total = 0
-let count = 0
+// Iteration yields elements in insertion order, including elements added
+// later. The values below are chosen so insertion order differs from both
+// sorted and hash order.
+let s = {30, 10, 20}
+s.add(5)
+s.add(40)
+s.add(10) // duplicate, does not change order
 for x in s {
-    total = total + x
-    count = count + 1
+    print(x)
 }
-print(total)
-print(count)
 
-// .iter() can be called explicitly and reused
-let seen = 0
+print("---")
+
+// .iter() can be called explicitly and yields the same order.
 for x in s.iter() {
-    seen = seen + 1
+    print(x)
 }
-print(seen)
+
+print("---")
 
 // Iterating an empty set yields nothing
 let empty = set()

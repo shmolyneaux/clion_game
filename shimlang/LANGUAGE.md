@@ -873,8 +873,8 @@ let t = set([1, 1, 2]) // {1, 2}
 
 Like tuples, sets print their empty and single-element forms with a trailing
 comma (`{,}`, `{1,}`). Membership is tested with `in`, and iterating a set
-yields its elements in an unspecified order. Two sets are equal when they
-contain the same elements.
+yields its elements in insertion order. Two sets are equal when they contain
+the same elements, regardless of order.
 
 Set methods:
 
