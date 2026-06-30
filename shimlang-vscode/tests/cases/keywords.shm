@@ -31,6 +31,9 @@ x and y;
 x or y;
 //^^ keyword.operator.logical.shim
 
+not x;
+// <- invalid.illegal.not.shim
+
 fn foo() { }
 // <- storage.type.function.shim
 

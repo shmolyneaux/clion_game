@@ -110,6 +110,11 @@
                     "match": "\\b(and|or|in)\\b"
                 },
                 {
+                    "comment": "Shimlang spells boolean negation `!`, not `not`; flag the word as illegal.",
+                    "name": "invalid.illegal.not.shim",
+                    "match": "\\bnot\\b"
+                },
+                {
                     "name": "storage.type.function.shim",
                     "match": "\\bfn\\b"
                 },
