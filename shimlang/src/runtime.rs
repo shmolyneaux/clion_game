@@ -225,6 +225,7 @@ impl Environment {
             (b"print", shim_print),
             (b"panic", shim_panic),
             (b"dict", shim_dict),
+            (b"set", shim_set),
             (b"Range", shim_range),
             (b"enumerate", shim_enumerate),
             (b"filter", shim_filter),
@@ -1162,6 +1163,23 @@ impl ShimValue {
                 };
                 Ok(ResolvedAttr::NativeMethod(*self, func))
             }
+            ShimValue::Set(_) => {
+                let func = match ident {
+                    b"add" => shim_set_add,
+                    b"remove" => shim_set_remove,
+                    b"discard" => shim_set_discard,
+                    b"has" => shim_set_has,
+                    b"contains" => shim_set_has,
+                    b"len" => shim_set_len,
+                    b"iter" => shim_set_iter,
+                    b"clear" => shim_set_clear,
+                    b"union" => shim_set_union,
+                    b"intersection" => shim_set_intersection,
+                    b"difference" => shim_set_difference,
+                    _ => return Err(format!("No ident {:?} on set", debug_u8s(ident))),
+                };
+                Ok(ResolvedAttr::NativeMethod(*self, func))
+            }
             ShimValue::Native(type_idx, position) => {
                 // SAFETY: The native object's memory location is stable during this call
                 // (MMU Vec has fixed capacity; GC is not triggered here). We use a raw
@@ -1378,8 +1396,11 @@ impl ShimValue {
         self.set_from_mem(&interpreter.mem)
     }
 
-    pub fn set_mut(&self, interpreter: &Interpreter) -> Result<&ShimSet, String> {
-        self.set_from_mem(&interpreter.mem)
+    pub fn set_mut(&self, interpreter: &mut Interpreter) -> Result<&mut ShimSet, String> {
+        match self {
+            ShimValue::Set(position) => Ok(unsafe { &mut *interpreter.mem.get_ptr_mut(*position) }),
+            _ => Err("Not a set".to_string()),
+        }
     }
 
     pub fn set_from_mem(&self, mem: &MMU) -> Result<&ShimSet, String> {
@@ -1697,17 +1718,22 @@ impl ShimValue {
                 let mut out = "{".to_string();
 
                 unsafe {
-                    let dict: &ShimDict = &*(mem.mem().as_ptr().add(usize::from(set.dict_pos)) as *const ShimDict);
-                    let entry_count = dict.entry_count as usize;
-                    let entries: &[DictEntry] = if entry_count == 0 {
+                    // An empty set has no backing dict allocated (dict_pos == 0).
+                    let entries: &[DictEntry] = if set.dict_pos == u24::from(0) {
                         &[]
                     } else {
-                        let entries_pos = usize::from(dict.entries);
-                        let u64_slice = &mem.mem()[entries_pos..entries_pos + 3 * entry_count];
-                        std::slice::from_raw_parts(
-                            u64_slice.as_ptr() as *const DictEntry,
-                            entry_count,
-                        )
+                        let dict: &ShimDict = &*(mem.mem().as_ptr().add(usize::from(set.dict_pos)) as *const ShimDict);
+                        let entry_count = dict.entry_count as usize;
+                        if entry_count == 0 {
+                            &[]
+                        } else {
+                            let entries_pos = usize::from(dict.entries);
+                            let u64_slice = &mem.mem()[entries_pos..entries_pos + 3 * entry_count];
+                            std::slice::from_raw_parts(
+                                u64_slice.as_ptr() as *const DictEntry,
+                                entry_count,
+                            )
+                        }
                     };
 
                     let mut count = 0;
@@ -1796,6 +1822,7 @@ impl ShimValue {
             ShimValue::String(..) => Ok(!self.expect_string(interpreter).is_empty()),
             ShimValue::List(_) => Ok(!self.list(interpreter)?.is_empty()),
             ShimValue::Dict(_) => Ok(self.dict(interpreter)?.len() != 0),
+            ShimValue::Set(_) => Ok(self.set(interpreter)?.len(interpreter) != 0),
             ShimValue::Tuple(len, _) => Ok(usize::from(*len) != 0),
             _ => Ok(true),
         }
@@ -1884,6 +1911,24 @@ impl ShimValue {
                     let item_a = a.get(&interpreter.mem, idx as isize)?;
                     let item_b = b.get(&interpreter.mem, idx as isize)?;
                     if !item_a.equal_inner(interpreter, &item_b)? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            }
+            (a @ ShimValue::Set(_), b @ ShimValue::Set(_)) => {
+                // Two sets are equal when they have the same length and every
+                // element of one is contained in the other.
+                let a_len = a.set(interpreter)?.len(interpreter);
+                let b_len = b.set(interpreter)?.len(interpreter);
+                if a_len != b_len {
+                    return Ok(false);
+                }
+                let entries = a.set(interpreter)?.entries(interpreter);
+                for key in entries {
+                    let b_set: &mut ShimSet =
+                        if let ShimValue::Set(pos) = b { unsafe { &mut *interpreter.mem.get_ptr_mut(*pos) } } else { unreachable!() };
+                    if !b_set.contains(interpreter, key)? {
                         return Ok(false);
                     }
                 }
@@ -2145,6 +2190,10 @@ impl ShimValue {
                 } else {
                     Ok(ShimValue::Bool(false))
                 }
+            }
+            ShimValue::Set(position) => {
+                let set: &mut ShimSet = unsafe { &mut *interpreter.mem.get_ptr_mut(*position) };
+                Ok(ShimValue::Bool(set.contains(interpreter, *some_key)?))
             }
             ShimValue::List(_) => {
                 let lst = self.list(interpreter)?;

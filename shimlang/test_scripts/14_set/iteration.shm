@@ -1,0 +1,26 @@
+// Iteration order is unspecified, so reduce to order-independent results.
+let s = {10, 20, 30, 40}
+
+let total = 0
+let count = 0
+for x in s {
+    total = total + x
+    count = count + 1
+}
+print(total)
+print(count)
+
+// .iter() can be called explicitly and reused
+let seen = 0
+for x in s.iter() {
+    seen = seen + 1
+}
+print(seen)
+
+// Iterating an empty set yields nothing
+let empty = set()
+let n = 0
+for x in empty {
+    n = n + 1
+}
+print(n)

@@ -954,8 +954,12 @@ impl<'a> GC<'a> {
                             mark_bit!(self.mask, idx, header_desc);
                         }
 
-                        // And mark the dict as normal
-                        vals.push(ShimValue::Dict(set.dict_pos));
+                        // And mark the dict as normal. An empty set has no
+                        // backing dict allocated yet (dict_pos == 0), so there
+                        // is nothing further to mark in that case.
+                        if set.dict_pos != u24::from(0) {
+                            vals.push(ShimValue::Dict(set.dict_pos));
+                        }
                     }
                     ShimValue::StructDef(pos) => {
                         let pos: usize = pos.into();
