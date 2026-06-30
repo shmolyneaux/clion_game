@@ -463,6 +463,20 @@ impl MMU {
         Ok(ShimValue::Dict(self.alloc_dict_raw()?))
     }
 
+    pub fn alloc_set_raw(&mut self) -> Result<u24, String> {
+        let word_count: u24 = (std::mem::size_of::<ShimSet>() as u32).div_ceil(8).into();
+        let position = alloc!(self, word_count, "Set")?;
+        unsafe {
+            let ptr: *mut ShimSet = &mut self.mem[usize::from(position)] as *mut u64 as *mut ShimSet;
+            ptr.write(ShimSet::new());
+        }
+        Ok(position)
+    }
+
+    pub fn alloc_set(&mut self) -> Result<ShimValue, String> {
+        Ok(ShimValue::Set(self.alloc_set_raw()?))
+    }
+
     pub fn alloc_tuple(&mut self, items: &[ShimValue]) -> Result<ShimValue, String> {
         let word_count: u24 = items.len().into();
         let position = alloc!(self, word_count, "tuple")?;
@@ -921,6 +935,27 @@ impl<'a> GC<'a> {
                         for idx in entries_pos..(entries_pos + dict.capacity() * 3) {
                             mark_bit!(self.mask, idx, entries_desc);
                         }
+                    }
+                    ShimValue::Set(pos) => {
+                        let pos: usize = pos.into();
+                        if self.mask.is_set(pos) {
+                            continue;
+                        }
+                        let set: &ShimSet = std::mem::transmute(&self.interpreter.mem.mem[pos]);
+
+                        // Mark the space for the ShimSet struct
+                        #[cfg(feature = "gc_debug")]
+                        let header_desc = MemDescriptor::other(
+                            pos,
+                            pos + std::mem::size_of::<ShimSet>().div_ceil(8),
+                            "set header",
+                        );
+                        for idx in pos..(pos + std::mem::size_of::<ShimSet>().div_ceil(8)) {
+                            mark_bit!(self.mask, idx, header_desc);
+                        }
+
+                        // And mark the dict as normal
+                        vals.push(ShimValue::Dict(set.dict_pos));
                     }
                     ShimValue::StructDef(pos) => {
                         let pos: usize = pos.into();

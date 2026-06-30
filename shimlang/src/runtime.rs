@@ -527,6 +527,7 @@ pub enum ShimValue {
     ),
     List(u24),
     Dict(u24),
+    Set(u24),
     StructDef(u24),
     // Struct type followed by struct data
     Struct(u24, u24),
@@ -1373,6 +1374,24 @@ impl ShimValue {
         self.list_from_mem(&interpreter.mem)
     }
 
+    pub fn set(&self, interpreter: &Interpreter) -> Result<&ShimSet, String> {
+        self.set_from_mem(&interpreter.mem)
+    }
+
+    pub fn set_mut(&self, interpreter: &Interpreter) -> Result<&ShimSet, String> {
+        self.set_from_mem(&interpreter.mem)
+    }
+
+    pub fn set_from_mem(&self, mem: &MMU) -> Result<&ShimSet, String> {
+        match self {
+            ShimValue::Set(position) => unsafe {
+                let ptr = mem.mem().as_ptr().add(usize::from(*position)) as *const ShimSet;
+                Ok(&*ptr)
+            },
+            _ => Err("Not a set".to_string()),
+        }
+    }
+
     pub fn struct_def<'a>(&self, interpreter: &'a Interpreter) -> Result<&'a StructDef, String> {
         match self {
             ShimValue::StructDef(def_pos) => unsafe {
@@ -1662,6 +1681,54 @@ impl ShimValue {
                     out.push('}');
                     out
                 };
+
+                visited.pop();
+                out
+            }
+            ShimValue::Set(position) => {
+                let pos = usize::from(*position);
+                if visited.contains(&pos) {
+                    return "...".to_string();
+                }
+                visited.push(pos);
+
+                let set: &ShimSet = unsafe { &*mem.get(*position) };
+
+                let mut out = "{".to_string();
+
+                unsafe {
+                    let dict: &ShimDict = &*(mem.mem().as_ptr().add(usize::from(set.dict_pos)) as *const ShimDict);
+                    let entry_count = dict.entry_count as usize;
+                    let entries: &[DictEntry] = if entry_count == 0 {
+                        &[]
+                    } else {
+                        let entries_pos = usize::from(dict.entries);
+                        let u64_slice = &mem.mem()[entries_pos..entries_pos + 3 * entry_count];
+                        std::slice::from_raw_parts(
+                            u64_slice.as_ptr() as *const DictEntry,
+                            entry_count,
+                        )
+                    };
+
+                    let mut count = 0;
+
+                    for entry in entries {
+                        if !entry.is_valid() {
+                            continue;
+                        }
+                        if count != 0 {
+                            out.push_str(", ");
+                        }
+                        out.push_str(&entry.key.to_string_mem_inner(mem, visited, true));
+                        count += 1;
+                    }
+
+                    if count == 0 || count == 1 {
+                        out.push(',');
+                    }
+
+                    out.push('}');
+                }
 
                 visited.pop();
                 out
@@ -3205,6 +3272,20 @@ impl Interpreter {
                     }
 
                     stack.push(dict_val);
+
+                    *pc += 2;
+                }
+                val if val == ByteCode::CreateSet as u8 => {
+                    let len = ((bytes[*pc + 1] as usize) << 8) + bytes[*pc + 2] as usize;
+
+                    let set_val = self.mem.alloc_set()?;
+                    let set_pos = match set_val { ShimValue::Set(p) => p, _ => unreachable!() };
+                    let set: &mut ShimSet = unsafe { &mut *self.mem.get_ptr_mut(set_pos) };
+                    for item in stack.drain(stack.len() - len..) {
+                        set.add(self, item)?;
+                    }
+
+                    stack.push(set_val);
 
                     *pc += 2;
                 }

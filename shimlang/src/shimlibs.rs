@@ -2848,6 +2848,7 @@ pub(crate) fn get_type_name(value: &ShimValue) -> &'static str {
         ShimValue::Tuple(..) => "tuple",
         ShimValue::List(_) => "list",
         ShimValue::Dict(_) => "dict",
+        ShimValue::Set(_) => "set",
         ShimValue::StructDef(_) => "struct definition",
         ShimValue::Struct(..) => "struct",
         ShimValue::Native(_, _) => "native object",
@@ -3544,5 +3545,53 @@ pub(crate) fn shim_max(
         (ShimValue::Float(v), ShimValue::Integer(m)) => Ok(ShimValue::Float(v.max(m as f32))),
         (ShimValue::Float(v), ShimValue::Float(m)) => Ok(ShimValue::Float(v.max(m))),
         _ => Err("pow: expected int or float arguments".to_string()),
+    }
+}
+
+#[derive(Debug)]
+pub struct ShimSet {
+    pub(crate) dict_pos: u24
+}
+
+impl ShimSet {
+    pub fn new() -> Self{
+        Self {
+            dict_pos: u24::from(0)
+        }
+    }
+
+    pub fn add(&mut self, interpreter: &mut Interpreter, item: ShimValue) -> Result<(), String> {
+        if self.dict_pos == u24::from(0) {
+            self.dict_pos = interpreter.mem.alloc_dict_raw()?;
+        }
+        let binding = ShimValue::Dict(self.dict_pos);
+        let d = binding.dict_mut(interpreter)?;
+        d.set(interpreter, item, ShimValue::None)
+    }
+
+    pub fn remove(&mut self, interpreter: &mut Interpreter, item: ShimValue) -> Result<(), String> {
+        if self.dict_pos == u24::from(0) {
+            Err(format!("Item {item:?} not found in set"))
+        } else {
+            let binding = ShimValue::Dict(self.dict_pos);
+            let d = binding.dict_mut(interpreter)?;
+            match d.pop(interpreter, item, None) {
+                Ok(_) => Ok(()),
+                Err(_) => Err(format!("Item {item:?} not found in set")),
+            }
+        }
+    }
+
+    pub fn contains(&mut self, interpreter: &mut Interpreter, item: ShimValue) -> Result<bool, String> {
+        if self.dict_pos == u24::from(0) {
+            Ok(false)
+        } else {
+            let binding = ShimValue::Dict(self.dict_pos);
+            let d = binding.dict_mut(interpreter)?;
+            match d.get(interpreter, item) {
+                Ok(_) => Ok(true),
+                Err(_) => Ok(false),
+            }
+        }
     }
 }
