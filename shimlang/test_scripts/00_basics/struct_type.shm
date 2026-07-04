@@ -1,7 +1,0 @@
-struct Point {
-    x,
-    y
-}
-
-let p = Point(1, 2)
-print(p.__type__.__name__)

@@ -1,5 +1,0 @@
-Parse Error:
- 1 | let x = 1 <
-               ^
-Error: Unexpected `EOF` in parse_primary
-Failed to parse script

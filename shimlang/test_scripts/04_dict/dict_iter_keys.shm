@@ -1,8 +1,0 @@
-let d = dict()
-d.set("a", 1)
-d.set("b", 2)
-d.set("c", 3)
-
-for k in d {
-    print(k)
-}

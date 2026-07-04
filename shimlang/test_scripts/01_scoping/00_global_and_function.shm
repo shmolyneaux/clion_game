@@ -1,9 +1,0 @@
-let foo = "global"
-
-fn test() {
-    let foo = "function"
-}
-
-print(foo)
-test()
-print(foo)

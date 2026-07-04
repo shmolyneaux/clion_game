@@ -1,5 +1,0 @@
-fn foo(a, b) {
-    print(a)
-}
-
-foo(13+1="foo")

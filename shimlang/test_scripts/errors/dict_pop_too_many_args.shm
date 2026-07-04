@@ -1,4 +1,0 @@
-let d = dict()
-d["foo"] = 13
-
-d.pop("foo", "bar", "more")

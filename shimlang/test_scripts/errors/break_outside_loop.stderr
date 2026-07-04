@@ -1,4 +1,0 @@
- 1 | print("before")
- 2 | break
-     ^^^^^
-Error: `break` outside of a loop

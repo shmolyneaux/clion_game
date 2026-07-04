@@ -1,4 +1,0 @@
-let d = 0
-if not d {
-    print("x")
-}

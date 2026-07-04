@@ -1,4 +1,0 @@
-let f = fn() { print("test") }
-f()
-f()
-f()
