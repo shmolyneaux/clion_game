@@ -5,6 +5,9 @@ steps:
 - name: test
   image: rust:1.93.0-trixie
   commands:
+    # shimlang is a git submodule; Drone's default clone doesn't recurse into
+    # submodules, so initialize it before running the tests.
+    - git submodule update --init --recursive
     - cd shimlang
     - python3 test_shimlang.py
 
