@@ -1,20 +1,10 @@
 use std::str::FromStr;
 
 use crate::*;
-use ::shimlang::{FreeBlock, Interpreter, fnv1a_hash, u24};
 
 #[derive(Facet, Default)]
 pub struct Navigation {
     memory_page: u32,
-}
-
-fn idx_in_free_block(idx: u24, free_list: &[FreeBlock]) -> bool {
-    for block in free_list {
-        if block.pos <= idx && idx < block.pos + block.size {
-            return true;
-        }
-    }
-    false
 }
 
 pub fn i32_to_rgb(i: i32) -> [u8; 3] {
@@ -107,11 +97,23 @@ impl Navigation {
                     .unwrap()
                     .as_ptr(),
             );
+            // NOTE: The free-list memory readouts that used to live here (the
+            // allocation "mask size" and the "last free block" line further
+            // down) were removed. shimlang's allocator was rewritten from an
+            // ordered `free_list: Vec<FreeBlock>` to a size-bucketed
+            // `free_blocks: BTreeMap<u32, Vec<u32>>`, so `MMU::free_list` no
+            // longer exists and these views were never ported to the new shape.
+            // The memory grid below still works: its end marker now comes from
+            // `MMU::mem_high_point()` (the allocation high-water mark) instead of
+            // the last free block's position.
             igText(
-                CString::new(format!(
-                    "Mask size is {}",
-                    usize::from(interpreter.mem.free_list[interpreter.mem.free_list.len() - 1].pos)
-                ))
+                CString::new(
+                    "[removed] Free-list readouts (allocation mask size and last \
+                     free block): the allocator moved from an ordered \
+                     free_list: Vec<FreeBlock> to a size-bucketed \
+                     free_blocks: BTreeMap, so these need reworking against the \
+                     new structure.",
+                )
                 .unwrap()
                 .as_ptr(),
             );
@@ -153,11 +155,7 @@ impl Navigation {
 
             let page_size: usize = 128;
 
-            let mem_end: usize = if let Some(block) = interpreter.mem.free_list.last() {
-                block.pos.into()
-            } else {
-                interpreter.mem.mem().len()
-            };
+            let mem_end: usize = interpreter.mem.mem_high_point() as usize;
 
             if (self.memory_page + 1) * (page_size as u32) < mem_end as u32 {
                 if igButton(CString::new("Next".to_string()).unwrap().as_ptr()) {
@@ -168,18 +166,6 @@ impl Navigation {
                 igButton(CString::new("Next".to_string()).unwrap().as_ptr());
                 igEndDisabled();
             }
-
-            igSameLine();
-
-            // TODO: disable "Next" button if it goes past the free_list last position
-            igText(
-                CString::new(format!(
-                    "Last block: {:?}",
-                    interpreter.mem.free_list.last()
-                ))
-                .unwrap()
-                .as_ptr(),
-            );
 
             let item_offset: usize = page_size * self.memory_page as usize;
             let index_description = interpreter.describe_memory(env);

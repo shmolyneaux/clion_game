@@ -1,3 +1,0 @@
-struct Foo { x }
-let f = Foo(1)
-f.nonexistent()

@@ -1,4 +1,0 @@
-let d = dict()
-for i in 0..40 {
-    d[i] = str(i)
-}

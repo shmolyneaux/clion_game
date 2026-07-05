@@ -1,3 +1,0 @@
- 1 | if true { undefined_var; }
-               ^^^^^^^^^^^^^
-Error: Unknown identifier "undefined_var"

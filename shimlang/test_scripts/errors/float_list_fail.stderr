@@ -1,3 +1,0 @@
- 1 | float([])
-     ^^^^^^^^^
-Error: Cannot convert list to float

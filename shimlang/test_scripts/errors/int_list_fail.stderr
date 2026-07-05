@@ -1,3 +1,0 @@
- 1 | int([])
-     ^^^^^^^
-Error: Cannot convert list to int

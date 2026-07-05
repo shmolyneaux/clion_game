@@ -1,4 +1,0 @@
-let d = dict()
-d.set("test", "foo")
-
-print(d["test"])

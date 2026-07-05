@@ -1,5 +1,0 @@
-let funcs = []
-for i in [1, 2, 3] {
-    let f = fn() { i }
-    funcs.append(f)
-}

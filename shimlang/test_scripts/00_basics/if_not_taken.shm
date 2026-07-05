@@ -1,4 +1,0 @@
-if false {
-    print("not printed")
-}
-print("printed")

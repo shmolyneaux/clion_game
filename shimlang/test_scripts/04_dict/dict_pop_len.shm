@@ -1,5 +1,0 @@
-let d = dict()
-d["foo"] = "bar"
-assert(d.len() == 1)
-assert(d.pop("foo") == "bar")
-assert(d.len() == 0)

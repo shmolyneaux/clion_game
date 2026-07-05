@@ -1,5 +1,0 @@
-Parse Error:
- 1 | + 5
-     ^
-Error: Unexpected `Plus` in parse_primary
-Failed to parse script

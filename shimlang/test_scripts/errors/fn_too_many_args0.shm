@@ -1,5 +1,0 @@
-fn test() {
-    print("test")
-}
-
-test(1, 2, 3, 4)
