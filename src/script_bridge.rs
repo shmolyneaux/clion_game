@@ -1773,6 +1773,9 @@ fn load_script(bytes: &[u8]) -> Result<(Interpreter, ShimValue), String> {
     let config = shimlang::Config { memory_space_bytes: 2 << 24 /* About 16 MB */ };
     let mut interpreter = shimlang::Interpreter::create(&config, program);
 
+    // TODO!!!!!!!!!!
+    // Use hot reloading rather than creating a new interpreter
+
     interpreter.add_native_fn(b"ig_begin", shim_ig_begin);
     interpreter.add_native_fn(b"ig_end", shim_ig_end);
     interpreter.add_native_fn(b"ig_text", shim_ig_text);
@@ -2253,8 +2256,12 @@ impl DebugHook for ShimDebugHook {
         self.channel.send(ScriptResponse::DebugStart(debug_to_client_rx, client_to_debug_tx)).unwrap();
         debug_to_client_tx.send(DebuggerToClient::Message(debug_msg)).unwrap();
         loop {
-            match client_to_debug_rx.recv().unwrap() {
-                ClientToDebugger::Continue => break,
+            match client_to_debug_rx.recv() {
+                Ok(ClientToDebugger::Continue) => break,
+                Err(err) => {
+                    dbg!(err);
+                    break;
+                }
             }
         }
         self.channel.send(ScriptResponse::DebugEnd).unwrap();
