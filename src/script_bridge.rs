@@ -730,7 +730,7 @@ pub enum ScriptResponse {
 /// Messages sent from the file watcher thread to the Engine
 #[cfg(not(target_arch = "wasm32"))]
 enum ScriptWatcherMessage {
-    Loaded(Interpreter, ShimValue),
+    ScriptData(Vec<u8>),
     Error(String),
 }
 
@@ -782,6 +782,8 @@ pub struct ScriptBridge {
     // on reload we can register a new debug hook
     #[cfg(not(target_arch = "wasm32"))]
     script_response_channel: Sender<ScriptResponse>,
+
+    pending_script_update: Vec<Vec<u8>>,
 }
 
 fn shim_ig_begin(interpreter: &mut Interpreter, args: &ArgBundle) -> Result<ShimValue, String> {
@@ -1893,7 +1895,7 @@ impl ScriptBridge {
             // and skip the file-watcher thread entirely: hot-reload is pointless in a
             // fixed-frame CI run, and its spurious initial reload would reset the
             // interpreter state mid-run.
-            let (interpreter, loop_fn) = if headless {
+            let (mut interpreter, loop_fn) = if headless {
                 fs::read(&script_path)
                     .ok()
                     .and_then(|bytes| load_script(&bytes).ok())
@@ -1906,6 +1908,11 @@ impl ScriptBridge {
                 (interpreter, loop_fn)
             };
 
+            let hook = ShimDebugHook {
+                channel: response_tx.clone(),
+            };
+            interpreter.set_debug_hook(Box::new(hook));
+
             Self {
                 state: BridgeState::Paused(Box::new(interpreter), loop_fn),
                 interpreter_errors: Vec::new(),
@@ -1917,7 +1924,8 @@ impl ScriptBridge {
                 rx: response_rx,
                 script_response_channel: response_tx,
                 watcher_rx,
-                debug_mode: false
+                debug_mode: false,
+                pending_script_update: Vec::new(),
             }
         }
 
@@ -1948,19 +1956,11 @@ impl ScriptBridge {
         let _zone = zone_scoped!("Run interpreter");
         #[cfg(not(target_arch = "wasm32"))]
         {
-            // Apply any script reloads from the watcher thread
+            // Gather any script reloads from the watcher thread
             while let Ok(msg) = self.watcher_rx.try_recv() {
                 match msg {
-                    // TODO: tell the script thread to stop using the old interpreter
-                    ScriptWatcherMessage::Loaded(mut interpreter, loop_fn) => {
-                        let hook = ShimDebugHook {
-                            channel: self.script_response_channel.clone(),
-                        };
-                        interpreter.set_debug_hook(Box::new(hook));
-
-                        self.state = BridgeState::Paused(Box::new(interpreter), loop_fn);
-                        self.interpreter_errors = Vec::new();
-                        crate::audio::submit(std::iter::once(SoundCmd::ResetAudio { fade_secs: 0.05 }));
+                    ScriptWatcherMessage::ScriptData(bytes) => {
+                        self.pending_script_update.push(bytes);
                     }
                     ScriptWatcherMessage::Error(msg) => {
                         self.interpreter_errors.push(msg);
@@ -1968,10 +1968,49 @@ impl ScriptBridge {
                 }
             }
 
+            if matches!(self.state, BridgeState::Paused(..)) {
+                let mut state = mem::replace(&mut self.state, BridgeState::Running);
+                if let BridgeState::Paused(mut interpreter, mut loop_fn) = state {
+                    for script_bytes in self.pending_script_update.drain(0..) {
+                        println!("Hot reloading");
+                        if let Err(msg) = interpreter.hot_reload_from_script(&script_bytes) {
+                            self.interpreter_errors.push(msg);
+                            continue;
+                        }
+
+                        loop_fn = match interpreter.get_from_root_env(b"loop") {
+                            Some(func @ ShimValue::Fn(_)) => func,
+                            None => {
+                                self.interpreter_errors.push("No loop function found".to_string());
+                                continue;
+                            }
+                            _ => {
+                                self.interpreter_errors.push("Identifier 'loop' is not a function".to_string());
+                                continue;
+                            }
+                        };
+
+                        self.interpreter_errors = Vec::new();
+                        crate::audio::submit(std::iter::once(SoundCmd::ResetAudio { fade_secs: 0.05 }));
+                    }
+
+                    println!("{}", interpreter.format_env(&interpreter.root_env));
+                    self.state = BridgeState::Paused(interpreter, loop_fn);
+                } else {
+                    panic!("Expected unreachable");
+                }
+            }
+
             if self.interpreter_errors.is_empty() {
                 let state = mem::replace(&mut self.state, BridgeState::Running);
                 match state {
                     BridgeState::Debug(mut debug_info) => {
+                        // If there's pending updates while we're in debug mode we need to
+                        // get out of debug mode to apply those updates
+                        if !self.pending_script_update.is_empty() {
+                            debug_info.tx.send(ClientToDebugger::Continue).unwrap();
+                        }
+
                         let window_title = CString::new("Script Debug").unwrap();
                         unsafe {
                             loop {
@@ -2160,12 +2199,7 @@ fn file_watcher_logic(script_path: String, tx: Sender<ScriptWatcherMessage>) {
                             mtime = time;
                             match fs::read(&script_path) {
                                 Ok(bytes) => {
-                                    let msg = match load_script(&bytes) {
-                                        Ok((interp, loop_fn)) => {
-                                            ScriptWatcherMessage::Loaded(interp, loop_fn)
-                                        }
-                                        Err(msg) => ScriptWatcherMessage::Error(msg),
-                                    };
+                                    let msg = ScriptWatcherMessage::ScriptData(bytes);
                                     if tx.send(msg).is_err() {
                                         break;
                                     }
@@ -2248,7 +2282,7 @@ impl DebugHook for ShimDebugHook {
 
         let mut debug_msg = msg.to_string();
         debug_msg.push('\n');
-        debug_msg.push_str(& interpreter.format_env(env));
+        debug_msg.push_str(&interpreter.format_env(env));
 
         let (debug_to_client_tx, debug_to_client_rx) = channel();
         let (client_to_debug_tx, client_to_debug_rx) = channel();
@@ -2296,6 +2330,7 @@ fn script_thread_logic(rx: Receiver<ScriptRequest>, tx: Sender<ScriptResponse>) 
                     ms.buttons = buttons;
                     *interpreter.fetch_mut::<PerfTimer>() = perf;
                     interpreter.fetch_mut::<SoundList>().finished.extend(finished.iter().copied());
+                    println!("update delta");
                     interpreter.update_in_root_env(b"delta", ShimValue::Float(delta)).expect("delta should be in env");
                     tx.send(match call_loop_fn(&mut interpreter, loop_fn) {
                         Ok(gc_time) => {

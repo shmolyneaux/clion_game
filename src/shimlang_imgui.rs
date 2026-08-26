@@ -118,12 +118,12 @@ impl Navigation {
                 .as_ptr(),
             );
 
-            igText(
-                CString::new(format!("Interpreter source: {:#?}", interpreter.source))
-                    .unwrap()
-                    .as_ptr(),
-            );
-            igText(cformat!("ANother test {}", 42).as_ptr());
+            // igText(
+            //     CString::new(format!("Interpreter source: {:#?}", interpreter.source))
+            //         .unwrap()
+            //         .as_ptr(),
+            // );
+            igText(cformat!("Another test {}", 42).as_ptr());
             igText(
                 CString::new(format!(
                     "Disassembly:\n{}",
