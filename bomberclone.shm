@@ -63,7 +63,12 @@ struct MainMenu {
         if key.Enter.just_pressed {
             let button = self.labels[self.selected_idx]
             if button.__type__ == PlayLabel {
-                debug_log("Starting game \(tick_count)\ntest newlien")
+                scene = game
+                game.reset()
+            }
+            if button.__type__ == OptionsLabel {
+                scene = options_menu
+                options_menu.reset()
             }
         }
     }
@@ -102,6 +107,10 @@ struct MainMenu {
             )
         }
     }
+
+    fn reset(self) {
+        self.selected_idx = 0
+    }
 }
 
 fn clear_screen() {
@@ -117,8 +126,6 @@ let window_h = 0
 let mouse_x = 0
 let mouse_y = 0
 
-let menu = MainMenu()
-
 struct MouseInput {}
 struct KeyboardInput {}
 
@@ -126,8 +133,14 @@ let input_display = None
 
 let debug_lines = []
 
+struct DebugMessage {
+    text=text,
+    tick=tick_count,
+}
+
 fn debug_log(msg) {
-    debug_lines.append("\(msg)")
+    let msg = DebugMessage("\(msg)")
+    debug_lines.append(msg)
 }
 
 let tick_fns = []
@@ -155,6 +168,7 @@ fn draw_console() {
 
     let pixels_remaining = line_height*10
     let message_spacing = 5
+    let gutter = 60
 
     draw_rect(
         0,
@@ -168,11 +182,17 @@ fn draw_console() {
     )
 
     while msg_idx >= 0 {
-        let lines = debug_lines[msg_idx].split_lines()
+        let msg = debug_lines[msg_idx]
+        let lines = msg.text.split_lines()
         pixels_remaining -= lines.len()*line_height
+        draw_text(
+            margin,
+            margin+pixels_remaining,
+            msg.tick,
+        )
         for idx, line in lines.enumerate() {
             draw_text(
-                margin,
+                margin+gutter,
                 margin+pixels_remaining + idx*line_height,
                 line,
             )
@@ -181,6 +201,190 @@ fn draw_console() {
         msg_idx -= 1
     }
 }
+
+struct VolumeUpLabel { fn format(self) { "Volume Up" } }
+struct VolumeDownLabel { fn format(self) { "Volume Down" } }
+struct BackLabel { fn format(self) { "Back" } }
+
+struct OptionsMenu {
+    selected_idx=0,
+    labels = [VolumeUpLabel(), VolumeDownLabel(), BackLabel()],
+
+    fn tick(self) {
+        if key.Down.just_pressed_with_repeat {
+            self.selected_idx += 1
+        }
+        if key.Up.just_pressed_with_repeat{
+            self.selected_idx -= 1
+        }
+
+        self.selected_idx %= self.labels.len()
+
+        if key.Enter.just_pressed {
+            let button = self.labels[self.selected_idx]
+            if button.__type__ == VolumeUpLabel {
+                debug_log("Volume Up")
+            }
+            if button.__type__ == VolumeDownLabel {
+                debug_log("Volume Down")
+            }
+            if button.__type__ == BackLabel {
+                scene = main_menu
+                main_menu.reset()
+            }
+        }
+    }
+
+    fn draw(self) {
+        let x = window_w/2
+        let padding_y = 10
+        let button_height = 50
+        let button_width = 120
+
+        let button_center_start = (
+            window_h - (button_height+padding_y)*(self.labels.len()-1)
+        )/2
+
+        let hovered_idx = None
+        for idx, label in self.labels.enumerate() {
+            let y = button_center_start+idx*(button_height+padding_y)
+            let color = if idx == self.selected_idx { BUTTON_FOCUS_COLOR } else { BUTTON_COLOR }
+            Button(
+                x,
+                y,
+                button_width,
+                button_height,
+                label=label,
+                color=color,
+                center=true,
+            ).draw()
+        }
+        if hovered_idx != None {
+            draw_rect(
+                x - button_width/2 - 15,
+                button_center_start+hovered_idx*(button_height+padding_y),
+                w=10,
+                h=10,
+                center=true
+            )
+        }
+    }
+
+    fn reset(self) {
+        self.selected_idx = 0
+    }
+}
+
+let HORIZONTAL = 0
+let VERTICAL = 1
+
+let NORTH = 0
+let EAST = 1
+let SOUTH = 2
+let WEST = 3
+
+fn move(distance, primary, secondary) {
+    let delta = secondary % TILE_SIZE
+    if delta == 0 {
+        primary -= distance
+    } else {
+        if delta < TILE_SIZE/2 {
+            if delta > distance {
+                secondary -= distance
+            } else {
+                secondary -= delta
+                distance -= delta
+                secondary -= distance
+            }
+        } else {
+            delta = TILE_SIZE - delta
+            if delta > distance {
+                secondary += distance
+            } else {
+                secondary += delta
+                distance -= delta
+                primary -= distance
+            }
+        }
+    }
+
+    (primary, secondary)
+}
+
+struct Player {
+    x=window_w/2,
+    y=window_h/2,
+    facing = EAST,
+
+    fn tick(self) {
+        //self.x = 50
+        //self.y = 50
+        let remaining = 5
+        if key.Up.pressed {
+            let (y, x) = move(remaining, self.y, self.x)
+            self.x = x
+            self.y = y
+        }
+        if key.Down.pressed {
+            let (y, x) = move(remaining, self.y, self.x)
+            self.x = x
+            self.y += self.y - y
+        }
+        if key.Left.pressed {
+            let (x, y) = move(remaining, self.x, self.y)
+            self.x = x
+            self.y = y
+        }
+        if key.Right.pressed {
+            let (x, y) = move(remaining, self.x, self.y)
+            self.x += self.x - x
+            self.y = y
+        }
+    }
+
+    fn draw(self) {
+        draw_rect(self.x, self.y, TILE_SIZE, TILE_SIZE, g=0, r=0)
+    }
+}
+
+let ROW_COUNT = 32
+let COLUMN_COUNT = 32
+
+let TILE_SIZE = 32
+let GRID_WIDTH = 4
+
+struct Game {
+    players = [Player()]
+
+    fn tick(self) {
+        for player in self.players {
+            player.tick()
+        }
+    }
+
+    fn draw(self) {
+        for row in 0..ROW_COUNT {
+            draw_rect(TILE_SIZE/2, (row+0.5)*TILE_SIZE-GRID_WIDTH/2, COLUMN_COUNT*TILE_SIZE-TILE_SIZE+GRID_WIDTH/2, GRID_WIDTH, r=0, g=1.0, b=0)
+        }
+
+        for col in 0..COLUMN_COUNT {
+            draw_rect((col+0.5)*TILE_SIZE-GRID_WIDTH/2, TILE_SIZE/2, GRID_WIDTH, ROW_COUNT*TILE_SIZE-TILE_SIZE+GRID_WIDTH/2, r=0, g=1.0, b=0)
+        }
+
+        for player in self.players {
+            player.draw()
+        }
+    }
+
+    fn reset(self) {
+    }
+}
+
+let main_menu = MainMenu()
+let options_menu = OptionsMenu()
+let game = Game()
+
+let scene = main_menu
 
 set_window_title("Bomberclone")
 
@@ -191,8 +395,11 @@ fn loop() {
 
     clear_screen()
 
-    menu.tick()
-    menu.draw()
+    // We might modify `scene` in `.tick()` so we take a local copy so that we
+    // don't `.draw()` the newly assigned scene
+    let current_scene = scene
+    current_scene.tick()
+    current_scene.draw()
 
     draw_console()
 

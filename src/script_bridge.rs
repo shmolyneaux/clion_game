@@ -593,6 +593,7 @@ impl ShimNative for KeyValue {
         let cur = ks.keys.get(self.scancode).copied().unwrap_or(0);
         let last = ks.last_keys.get(self.scancode).copied().unwrap_or(0);
         match ident {
+            b"scan_code" => Ok(ShimValue::Integer(self.scancode as i32)),
             b"pressed" => Ok(ShimValue::Bool(cur == 1)),
             b"released" => Ok(ShimValue::Bool(cur == 0)),
             b"just_pressed" => Ok(ShimValue::Bool(cur == 1 && cur != last)),
@@ -1994,7 +1995,6 @@ impl ScriptBridge {
                         crate::audio::submit(std::iter::once(SoundCmd::ResetAudio { fade_secs: 0.05 }));
                     }
 
-                    println!("{}", interpreter.format_env(&interpreter.root_env));
                     self.state = BridgeState::Paused(interpreter, loop_fn);
                 } else {
                     panic!("Expected unreachable");
@@ -2330,7 +2330,6 @@ fn script_thread_logic(rx: Receiver<ScriptRequest>, tx: Sender<ScriptResponse>) 
                     ms.buttons = buttons;
                     *interpreter.fetch_mut::<PerfTimer>() = perf;
                     interpreter.fetch_mut::<SoundList>().finished.extend(finished.iter().copied());
-                    println!("update delta");
                     interpreter.update_in_root_env(b"delta", ShimValue::Float(delta)).expect("delta should be in env");
                     tx.send(match call_loop_fn(&mut interpreter, loop_fn) {
                         Ok(gc_time) => {
