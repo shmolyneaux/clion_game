@@ -582,6 +582,7 @@ struct KeyValue {
     scancode: usize,
 }
 
+// TODO: Can this be made hashable?
 impl ShimNative for KeyValue {
     fn get_attr(
         &self,
@@ -626,6 +627,17 @@ impl ShimNative for KeyValue {
 
     fn gc_vals(&self) -> Vec<ShimValue> {
         Vec::new()
+    }
+}
+
+
+fn shim_key_from_scan_code(
+    interpreter: &mut Interpreter,
+    args: &ArgBundle,
+) -> Result<ShimValue, String> {
+    match args.args[0].integer()? {
+        n @ 0..=i32::MAX => Ok(interpreter.mem.alloc_native(KeyValue { scancode: n as usize })?),
+        n => Err(format!("{n} is not a valid scan code")),
     }
 }
 
@@ -1812,6 +1824,7 @@ fn load_script(bytes: &[u8]) -> Result<(Interpreter, ShimValue), String> {
     interpreter.add_native_fn(b"reset_audio", shim_reset_audio);
     interpreter.add_native_fn(b"save_data", shim_save_data);
     interpreter.add_native_fn(b"load_data", shim_load_data);
+    interpreter.add_native_fn(b"key_from_scan_code", shim_key_from_scan_code);
 
     let key_val = interpreter.mem.alloc_native(KeyMap)?;
     interpreter.insert_in_root_env(b"key", key_val);

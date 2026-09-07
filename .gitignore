@@ -10,3 +10,5 @@ shimlang/benchmark_scripts/*.py
 shimlang/benchmark_scripts/*.lua
 game.sav
 .claude/settings.local.json
+*.swp
+*.swo

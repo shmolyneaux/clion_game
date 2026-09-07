@@ -181,7 +181,7 @@ fn draw_console() {
         a=0.2,
     )
 
-    while msg_idx >= 0 {
+    while msg_idx >= 0 and pixels_remaining > 0 {
         let msg = debug_lines[msg_idx]
         let lines = msg.text.split_lines()
         pixels_remaining -= lines.len()*line_height
@@ -311,34 +311,61 @@ fn move(distance, primary, secondary) {
     (primary, secondary)
 }
 
+struct KeyTracker {
+    keys_to_track={
+        let s = set()
+        for k in [key.Up, key.Down, key.Left, key.Right] {
+            s.add(k.scan_code)
+        }
+        s
+    }
+    keys_down=set()
+    fn tick(self) {
+        for scan_code in self.keys_to_track {
+            if key_from_scan_code(scan_code).pressed {
+                self.keys_down.add(scan_code)
+            } else {
+                self.keys_down.discard(scan_code)
+            }
+        }
+    }
+}
+
 struct Player {
     x=window_w/2,
     y=window_h/2,
     facing = EAST,
 
     fn tick(self) {
+        let arrows = [key.Up.scan_code, key.Down.scan_code, key.Left.scan_code, key.Right.scan_code]
+        let keys_down = list(key_tracker.keys_down).filter(fn(code) {code in arrows})
+
         //self.x = 50
         //self.y = 50
+
         let remaining = 5
-        if key.Up.pressed {
-            let (y, x) = move(remaining, self.y, self.x)
-            self.x = x
-            self.y = y
-        }
-        if key.Down.pressed {
-            let (y, x) = move(remaining, self.y, self.x)
-            self.x = x
-            self.y += self.y - y
-        }
-        if key.Left.pressed {
-            let (x, y) = move(remaining, self.x, self.y)
-            self.x = x
-            self.y = y
-        }
-        if key.Right.pressed {
-            let (x, y) = move(remaining, self.x, self.y)
-            self.x += self.x - x
-            self.y = y
+        if keys_down {
+            let priority = keys_down[-1]
+            if priority == key.Up.scan_code {
+                let (y, x) = move(remaining, self.y, self.x)
+                self.x = x
+                self.y = y
+            }
+            if priority == key.Down.scan_code {
+                let (y, x) = move(remaining, self.y, self.x)
+                self.x = x
+                self.y += self.y - y
+            }
+            if priority == key.Left.scan_code {
+                let (x, y) = move(remaining, self.x, self.y)
+                self.x = x
+                self.y = y
+            }
+            if priority == key.Right.scan_code {
+                let (x, y) = move(remaining, self.x, self.y)
+                self.x += self.x - x
+                self.y = y
+            }
         }
     }
 
@@ -347,16 +374,22 @@ struct Player {
     }
 }
 
-let ROW_COUNT = 32
-let COLUMN_COUNT = 32
+let ROW_COUNT = 16
+let COLUMN_COUNT = 16
 
-let TILE_SIZE = 32
+let TILE_SIZE = 64
 let GRID_WIDTH = 4
 
 struct Game {
     players = [Player()]
 
     fn tick(self) {
+        if key.Escape.pressed {
+            scene = main_menu
+            main_menu.reset()
+            return
+        }
+
         for player in self.players {
             player.tick()
         }
@@ -377,6 +410,7 @@ struct Game {
     }
 
     fn reset(self) {
+        self.players = Game().players
     }
 }
 
@@ -388,6 +422,8 @@ let scene = main_menu
 
 set_window_title("Bomberclone")
 
+let key_tracker = KeyTracker()
+
 fn loop() {
     let window = window_size()
     window_w = window[0]
@@ -395,11 +431,36 @@ fn loop() {
 
     clear_screen()
 
+    key_tracker.tick()
+
     // We might modify `scene` in `.tick()` so we take a local copy so that we
     // don't `.draw()` the newly assigned scene
     let current_scene = scene
     current_scene.tick()
     current_scene.draw()
+
+    let perf_data = [
+        ("Script", perf.script),
+        ("GC    ", perf.gc),
+        ("Render", perf.render),
+        ("VSync ", perf.vsync),
+        ("Total ", perf.total),
+    ]
+    draw_rect(
+        0,
+        window_h-(perf_data.len()+1)*20+4,
+        400,
+        (perf_data.len()+1)*20+4,
+        r=0.0,
+        g=0.0,
+        b=0.0,
+        a=0.4,
+    )
+
+    for idx, lv in perf_data.reversed().enumerate() {
+        let (label, value) = lv
+        draw_text(4, window_h - (idx+1)*20, "\(label):    \(value*1000, width=7, precision=3, align="right") ms", size=2.0)
+    }
 
     draw_console()
 
