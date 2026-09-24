@@ -418,11 +418,11 @@ struct Game {
 
     fn draw(self) {
         for row in 0..ROW_COUNT {
-            draw_rect(TILE_SIZE/2, (row+0.5)*TILE_SIZE-GRID_WIDTH/2, COLUMN_COUNT*TILE_SIZE-TILE_SIZE+GRID_WIDTH/2, GRID_WIDTH, r=0, g=1.0, b=0)
+            draw_rect(TILE_SIZE/2, (row+0.5)*TILE_SIZE-GRID_WIDTH/2, COLUMN_COUNT*TILE_SIZE-TILE_SIZE+GRID_WIDTH/2, GRID_WIDTH, r=0.9, g=0.9, b=0.2)
         }
 
         for col in 0..COLUMN_COUNT {
-            draw_rect((col+0.5)*TILE_SIZE-GRID_WIDTH/2, TILE_SIZE/2, GRID_WIDTH, ROW_COUNT*TILE_SIZE-TILE_SIZE+GRID_WIDTH/2, r=0, g=1.0, b=0)
+            draw_rect((col+0.5)*TILE_SIZE-GRID_WIDTH/2, TILE_SIZE/2, GRID_WIDTH, ROW_COUNT*TILE_SIZE-TILE_SIZE+GRID_WIDTH/2, r=0.9, g=0.9, b=0.2)
         }
 
         for player in self.players {
@@ -560,7 +560,7 @@ struct TextureEditorUI {
         callback=fn() {}
     )
     initialized=false
-    
+
     fn reset(self) {
         self.editor.reset()
     }
@@ -606,11 +606,12 @@ struct TextureEditor {
     }
 
     fn tick(self) {
+        self.zoom = 16
     }
 
     fn draw(self) {
-        let text = if self.texture == None {
-            "No Texture Loaded"
+        if self.texture == None {
+            let text = "No Texture Loaded"
             draw_text(
                 window_w/2,
                 window_h/2,
@@ -619,15 +620,30 @@ struct TextureEditor {
                 center=true,
             )
         } else {
-            "Loaded texture \(self.texture.__type__.__name__)"
-            self.texture.set(13, 13, (255, 0, 255, 255))
+            let x = window_w/2-self.texture.data.w*self.zoom/2
+            let y = window_h/2-self.texture.data.h*self.zoom/2
             draw_rect(
-                window_w/2-self.texture.data.w*self.zoom/2,
-                window_h/2-self.texture.data.h*self.zoom/2,
+                x,
+                y,
                 self.texture.data.w*self.zoom,
                 self.texture.data.h*self.zoom,
                 texture=self.texture.texture,
             )
+            // Texture coordinates
+            let tx = ((mouse_x - x)/self.zoom).round()
+            let ty = ((mouse_y - y)/self.zoom).round()
+            draw_rect(
+                x+tx*self.zoom,
+                y+ty*self.zoom,
+                self.zoom,
+                self.zoom,
+                r=255,
+                g=0,
+                b=255,
+            )
+            if mouse_just_pressed(MOUSE_LEFT) and 0 <= tx < self.texture.data.w and 0 <= ty < self.texture.data.h{
+                self.texture.set(tx, ty, (255, 0, 255, 255))
+            }
         }
     }
 }
@@ -659,7 +675,152 @@ let scene = main_menu
 
 set_window_title("Bomberclone")
 
+fn fill(item, count) {
+    let out = []
+    for _ in 0..count {
+        out.append(item)
+    }
+    out
+}
+
+struct PerfWindow {
+    idx=0
+    script=fill(0, 60)
+    gc=fill(0, 60)
+    render=fill(0, 60)
+    vsync=fill(0, 60)
+    total=fill(0, 60)
+
+    fn tick(self) {
+        self.script[self.idx] = perf.script
+        self.gc[self.idx] = perf.gc
+        self.render[self.idx] = perf.render
+        self.vsync[self.idx] = perf.vsync
+        self.total[self.idx] = perf.total
+        self.idx += 1
+        self.idx %= 60
+    }
+}
+
+fn draw_perf_graph() {
+    let BAR_WIDTH = 12
+    let frame = perf_window.idx
+    frame %= perf_window.script.len()
+    for pos in 0..perf_window.script.len() {
+        let y = window_h
+        let h = 0
+
+        h = (perf_window.script[frame]*10000).round()
+        draw_rect(
+            pos*BAR_WIDTH,
+            y - h,
+            BAR_WIDTH,
+            h,
+            r=0,
+            g=1.0,
+            b=0,
+        )
+
+        y -= h
+        h = (perf_window.gc[frame]*10000).round()
+        draw_rect(
+            pos*BAR_WIDTH,
+            y - h,
+            BAR_WIDTH,
+            h,
+            r=1.0,
+            g=0,
+            b=0,
+        )
+
+        y -= h
+        h = (perf_window.render[frame]*10000).round()
+        draw_rect(
+            pos*BAR_WIDTH,
+            y - h,
+            BAR_WIDTH,
+            h,
+            r=0,
+            g=0,
+            b=1.0,
+        )
+
+        frame += 1
+        frame %= perf_window.script.len()
+    }
+}
+
+let perf_window = PerfWindow()
+
 let key_tracker = KeyTracker()
+
+fn draw_perf_info() {
+    draw_rect(
+        0,
+        window_h-166,
+        12*60,
+        166,
+        r=0.0,
+        g=0.0,
+        b=0.0,
+        a=0.5,
+    )
+    draw_perf_graph()
+
+    let perf_data = [
+        ("Script", perf_window.script.average()),
+        ("GC    ", perf_window.gc.average()),
+        ("Render", perf_window.render.average()),
+        ("VSync ", perf_window.vsync.average()),
+        ("Total ", perf_window.total.average()),
+    ]
+
+    for idx, lv in perf_data.reversed().enumerate() {
+        let (label, value) = lv
+        draw_text(8, window_h - (idx+1)*20-56, "\(label):    \(value*1000, width=7, precision=3, align="right") ms", size=2.0)
+    }
+}
+
+fn build_key_char_pairs() {
+    let key_char_pairs = []
+    let lower_alpha = "abcdefghijklmnopqrstuvwxyz"
+    let upper_alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    for idx in 0..lower_alpha.len() {
+        let lower = lower_alpha[idx]
+        let upper = upper_alpha[idx]
+        key_char_pairs.append((key_from_scan_code(idx+4), lower, upper))
+    }
+    key_char_pairs.append((key.Space, " ", " "))
+
+    key_char_pairs
+}
+
+let key_char_pairs = build_key_char_pairs()
+
+struct KeyInput {
+    char
+}
+
+struct BackspaceInput {}
+
+fn text_input() {
+    key_char_pairs = build_key_char_pairs()
+    let chars = []
+    for keyval, lower, upper in key_char_pairs {
+        if keyval.just_pressed_with_repeat {
+            chars.append(KeyInput(if key.LeftShift.pressed or key.RightShift.pressed { upper } else { lower }))
+        }
+    }
+    if key.Backspace.just_pressed_with_repeat {
+        chars.append(BackspaceInput())
+    }
+    chars
+}
+
+let show_perf_window = false
+let show_console_window = true
+
+let label = ""
 
 fn loop() {
     let window = window_size()
@@ -669,6 +830,7 @@ fn loop() {
     clear_screen()
 
     key_tracker.tick()
+    perf_window.tick()
 
     (mouse_x, mouse_y) = {
         let p = mouse_pos()
@@ -681,30 +843,38 @@ fn loop() {
     current_scene.tick()
     current_scene.draw()
 
-    let perf_data = [
-        ("Script", perf.script),
-        ("GC    ", perf.gc),
-        ("Render", perf.render),
-        ("VSync ", perf.vsync),
-        ("Total ", perf.total),
-    ]
-    draw_rect(
+    for c in text_input() {
+        if c.__type__ == KeyInput {
+            label += c.char
+        } else if c.__type__ == BackspaceInput {
+            label = label[0..-1]
+        }
+    }
+    draw_text(
         0,
-        window_h-(perf_data.len()+1)*20+4,
-        400,
-        (perf_data.len()+1)*20+4,
-        r=0.0,
-        g=0.0,
-        b=0.0,
-        a=0.4,
+        200,
+        label,
     )
 
-    for idx, lv in perf_data.reversed().enumerate() {
-        let (label, value) = lv
-        draw_text(4, window_h - (idx+1)*20, "\(label):    \(value*1000, width=7, precision=3, align="right") ms", size=2.0)
+    if key.U.just_pressed {
+        debug_log(9.3 % 2.5)
     }
 
-    draw_console()
+    if key.P.just_pressed {
+        show_perf_window = !show_perf_window
+    }
+
+    if key.GraveAccent.just_pressed {
+        show_console_window = !show_console_window
+    }
+
+    if show_console_window {
+        draw_console()
+    }
+
+    if show_perf_window {
+        draw_perf_info()
+    }
 
     tick_count += 1
 }
