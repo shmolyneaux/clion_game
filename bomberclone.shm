@@ -8,32 +8,48 @@ fn in_rect(pos, x, y, w, h, center=false) {
 }
 
 struct Button {
-    x,
-    y,
-    w,
-    h,
-    label,
-    color=(1.0, 1.0, 1.0),
-    center=false,
+    x
+    y
+    w
+    h
+    label
+    color=(1.0, 1.0, 1.0)
+    hover_color={
+        (color[0]*0.8, color[1]*0.8, color[2]*0.8)
+    }
+    center=false
 
-    fn clicked(self) {
+    fn hovered(self) {
+        self.h=40
+        draw_text(
+            30,
+            200,
+            "\(self.x) \(mouse_x) \(self.x+self.w)\n\(self.y) \(mouse_y) \(self.y+self.h)",
+        )
+        self.x <= mouse_x < self.x+self.w and
+        self.y <= mouse_y < self.y+self.h
+    }
+
+    fn just_pressed(self) {
+        self.hovered() and mouse_just_pressed(MOUSE_LEFT)
     }
 
     fn draw(self) {
+        let color = if self.hovered() { self.hover_color } else { self.color }
         draw_rect(
             self.x,
             self.y,
             self.w,
             self.h,
-            r=self.color[0],
-            g=self.color[1],
-            b=self.color[2],
-            center=true,
+            r=color[0],
+            g=color[1],
+            b=color[2],
         )
         draw_text(
-            self.x,
-            self.y,
+            self.x+self.w/2,
+            self.y+self.h/2,
             "\(self.label)",
+            // TODO: centering
             center=true,
         )
     }
@@ -45,10 +61,11 @@ let BUTTON_FOCUS_COLOR = (0.8, 0.5, 0.5)
 struct PlayLabel { fn format(self) { "Play" } }
 struct OptionsLabel { fn format(self) { "Options" } }
 struct CreditsLabel { fn format(self) { "Credits" } }
+struct TextureEditorLabel { fn format(self) { "Texture Editor" } }
 
 struct MainMenu {
-    selected_idx=0,
-    labels = [PlayLabel(), OptionsLabel(), CreditsLabel()],
+    selected_idx=0
+    labels = [PlayLabel(), OptionsLabel(), CreditsLabel(), TextureEditorLabel()]
 
     fn tick(self) {
         if key.Down.just_pressed_with_repeat {
@@ -64,11 +81,15 @@ struct MainMenu {
             let button = self.labels[self.selected_idx]
             if button.__type__ == PlayLabel {
                 scene = game
-                game.reset()
+                scene.reset()
             }
             if button.__type__ == OptionsLabel {
                 scene = options_menu
-                options_menu.reset()
+                scene.reset()
+            }
+            if button.__type__ == TextureEditorLabel {
+                scene = texture_editor
+                scene.reset()
             }
         }
     }
@@ -134,8 +155,8 @@ let input_display = None
 let debug_lines = []
 
 struct DebugMessage {
-    text=text,
-    tick=tick_count,
+    text=text
+    tick=tick_count
 }
 
 fn debug_log(msg) {
@@ -207,8 +228,8 @@ struct VolumeDownLabel { fn format(self) { "Volume Down" } }
 struct BackLabel { fn format(self) { "Back" } }
 
 struct OptionsMenu {
-    selected_idx=0,
-    labels = [VolumeUpLabel(), VolumeDownLabel(), BackLabel()],
+    selected_idx=0
+    labels = [VolumeUpLabel(), VolumeDownLabel(), BackLabel()]
 
     fn tick(self) {
         if key.Down.just_pressed_with_repeat {
@@ -332,9 +353,9 @@ struct KeyTracker {
 }
 
 struct Player {
-    x=window_w/2,
-    y=window_h/2,
-    facing = EAST,
+    x=window_w/2
+    y=window_h/2
+    facing = EAST
 
     fn tick(self) {
         let arrows = [key.Up.scan_code, key.Down.scan_code, key.Left.scan_code, key.Right.scan_code]
@@ -414,9 +435,225 @@ struct Game {
     }
 }
 
+struct TextureData {
+    w
+    h
+    data
+    nearest=true
+    __check=assert(w*h*4 == data.len())
+
+    fn create_texture(self) {
+        create_texture(
+            self.w,
+            self.h,
+            self.data,
+            nearest=self.nearest,
+        )
+    }
+}
+
+// TODO: Some sort of eviction?
+let texture_data_cache = {}
+let texture_cache = {}
+
+fn get_texture_data(name) {
+    if name in texture_data_cache {
+        texture_data_cache.get(name)
+    } else {
+        let tex_data = load_data(
+            TextureData,
+            "texture/\(name)",
+            default_fn=fn() {
+                let w = 16
+                let h = 16
+                let data = []
+                for _ in w*h {
+                    data.append(1.0)
+                    data.append(1.0)
+                    data.append(1.0)
+                    data.append(1.0)
+                }
+                TextureData(w, h, data)
+            }
+        )
+        texture_data_cache[name] = tex_data
+        tex_data
+    }
+}
+
+fn get_texture(name) {
+    if name in texture_cache {
+        texture_cache.get(name)
+    } else {
+        let tex_data = get_texture_data(name)
+        let tex = create_texture(
+            tex_data.w,
+            tex_data.h,
+            tex_data.data,
+            nearest=tex_data.nearest,
+        )
+        texture_cache[name] = tex
+        tex
+    }
+}
+
+struct EditableTexture {
+    data={
+        let w = 16
+        let h = 16
+        let data = []
+        for _ in 0..w*h {
+            data.append(1.0)
+            data.append(1.0)
+            data.append(1.0)
+            data.append(1.0)
+        }
+        TextureData(w, h, data)
+    }
+    texture=create_texture(data.w, data.h, data.data, nearest=data.nearest)
+
+    fn set(self, x, y, c) {
+        if 0 <= x < self.data.w and 0 <= y < self.data.h {
+            self.data.data[x*4+y*self.data.w*4+0] = c[0]
+            self.data.data[x*4+y*self.data.w*4+1] = c[1]
+            self.data.data[x*4+y*self.data.w*4+2] = c[2]
+            self.data.data[x*4+y*self.data.w*4+3] = c[3]
+            self.texture = create_texture(
+                self.data.w,
+                self.data.h,
+                self.data.data,
+                nearest=self.data.nearest,
+            )
+        } else {
+            debug_log("\((x, y)) outside of bounds \((self.data.w, self.data.h))")
+        }
+    }
+}
+
+struct CallbackButton {
+    btn
+    callback
+
+    fn tick(self) {
+        if self.btn.just_pressed() {
+            self.callback()
+        }
+    }
+
+    fn draw(self) {
+        self.btn.draw()
+    }
+}
+
+struct TextureEditorUI {
+    editor=TextureEditor()
+    new_texture_btn=CallbackButton(
+        Button(
+            50,
+            300,
+            60,
+            60,
+            "New Texture",
+            color=(200, 0, 0),
+            hover_color=(100, 0, 0),
+        ),
+        callback=fn() {}
+    )
+    initialized=false
+    
+    fn reset(self) {
+        self.editor.reset()
+    }
+
+    fn tick(self) {
+        if key.Escape.just_pressed {
+            scene = main_menu
+            scene.reset()
+        }
+
+        if !self.initialized {
+            self.new_texture_btn.callback = fn() {
+                editor.texture = EditableTexture()
+                debug_log("callback button pressed")
+            }
+            self.initialized = true
+            debug_log("ui inited")
+        }
+
+        self.editor.tick()
+        self.new_texture_btn.tick()
+        draw_text(
+            100,
+            100,
+            "test",
+        )
+    }
+
+    fn draw(self) {
+        self.editor.draw()
+        self.new_texture_btn.draw()
+    }
+}
+
+struct TextureEditor {
+    current_color=(255, 0, 0, 255)
+    texture=None // EditableTexture
+    texture_list=[]
+    zoom=6.0
+
+    fn reset(self) {
+        self.texture = EditableTexture()
+    }
+
+    fn tick(self) {
+    }
+
+    fn draw(self) {
+        let text = if self.texture == None {
+            "No Texture Loaded"
+            draw_text(
+                window_w/2,
+                window_h/2,
+                text,
+                size=2.0,
+                center=true,
+            )
+        } else {
+            "Loaded texture \(self.texture.__type__.__name__)"
+            self.texture.set(13, 13, (255, 0, 255, 255))
+            draw_rect(
+                window_w/2-self.texture.data.w*self.zoom/2,
+                window_h/2-self.texture.data.h*self.zoom/2,
+                self.texture.data.w*self.zoom,
+                self.texture.data.h*self.zoom,
+                texture=self.texture.texture,
+            )
+        }
+    }
+}
+
+let checkerboard = {
+    let width = 16
+    let height = 16
+    let checkerboard_data = []
+    let light = (200, 200, 200, 255)
+    let dark = (100, 100, 100, 255)
+    for y in 0..height {
+        for x in 0..width {
+            let color = if (x+y) % 2 == 0 {light} else {dark}
+            checkerboard_data.append(color[0])
+            checkerboard_data.append(color[1])
+            checkerboard_data.append(color[2])
+            checkerboard_data.append(color[3])
+        }
+    }
+    create_texture(width, height, checkerboard_data, nearest=true)
+}
+
 let main_menu = MainMenu()
 let options_menu = OptionsMenu()
 let game = Game()
+let texture_editor = TextureEditorUI()
 
 let scene = main_menu
 
@@ -432,6 +669,11 @@ fn loop() {
     clear_screen()
 
     key_tracker.tick()
+
+    (mouse_x, mouse_y) = {
+        let p = mouse_pos()
+        (p[0], p[1])
+    }
 
     // We might modify `scene` in `.tick()` so we take a local copy so that we
     // don't `.draw()` the newly assigned scene
