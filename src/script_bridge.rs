@@ -25,6 +25,7 @@ impl ShimNative for TextureHandle {
     fn gc_vals(&self) -> Vec<ShimValue> {
         Vec::new()
     }
+    // TODO: Needs to implement the shim drop method
 }
 
 /// A UV rectangle with all values in the range [0.0, 1.0], (0,0) = top-left.
@@ -720,7 +721,7 @@ impl DrawList {
 /// Messages sent from the Engine (Main Thread) to the Script Thread
 #[cfg(not(target_arch = "wasm32"))]
 pub enum ScriptRequest {
-    ExecuteLoop(Interpreter, ShimValue, Vec<u8>, Vec<u8>, f32, PerfTimer, Vec<u32>),
+    ExecuteLoop(Interpreter, ShimValue, bool, Vec<u8>, Vec<u8>, f32, PerfTimer, Vec<u32>),
 }
 
 /// Messages sent from the Script Thread to the Engine
@@ -768,12 +769,18 @@ impl DebugInfo {
     }
 }
 
+struct PausedInfo {
+    interpreter: Box<Interpreter>,
+    loop_fn: ShimValue,
+    just_reloaded: bool
+}
+
 enum BridgeState {
     #[cfg(not(target_arch = "wasm32"))]
     Running,
     #[cfg(not(target_arch = "wasm32"))]
     Debug(DebugInfo),
-    Paused(Box<Interpreter>, ShimValue),
+    Paused(PausedInfo),
 }
 
 pub struct ScriptBridge {
@@ -1785,7 +1792,7 @@ fn load_script(bytes: &[u8]) -> Result<(Interpreter, ShimValue), String> {
     #[cfg(not(target_arch = "wasm32"))]
     let config = shimlang::Config::default();
     #[cfg(target_arch = "wasm32")]
-    let config = shimlang::Config { memory_space_bytes: 2 << 24 /* About 16 MB */ };
+    let config = shimlang::Config { memory_space_bytes: 2 << 28 /* About 64 MB */ };
     let mut interpreter = shimlang::Interpreter::create(&config, program);
 
     // TODO!!!!!!!!!!
@@ -1851,11 +1858,11 @@ fn load_script(bytes: &[u8]) -> Result<(Interpreter, ShimValue), String> {
     Ok((interpreter, loop_fn))
 }
 
-fn call_loop_fn(
+fn call_shim_fn(
     interpreter: &mut Interpreter,
-    loop_fn: ShimValue,
+    func: ShimValue,
 ) -> Result<f32, String> {
-    match loop_fn.call(interpreter, &mut shimlang::ArgBundle::new()) {
+    match func.call(interpreter, &mut shimlang::ArgBundle::new()) {
         Ok(CallResult::ReturnValue(_)) => {
             let gc_start = std::time::Instant::now();
             interpreter.gc();
@@ -1928,7 +1935,7 @@ impl ScriptBridge {
             interpreter.set_debug_hook(Box::new(hook));
 
             Self {
-                state: BridgeState::Paused(Box::new(interpreter), loop_fn),
+                state: BridgeState::Paused(PausedInfo{interpreter: Box::new(interpreter), loop_fn, just_reloaded: false}),
                 interpreter_errors: Vec::new(),
                 draw_list: Vec::new(),
                 sound_list: Vec::new(),
@@ -1984,9 +1991,11 @@ impl ScriptBridge {
 
             if matches!(self.state, BridgeState::Paused(..)) {
                 let mut state = mem::replace(&mut self.state, BridgeState::Running);
-                if let BridgeState::Paused(mut interpreter, mut loop_fn) = state {
+                if let BridgeState::Paused(PausedInfo{mut interpreter, mut loop_fn, ..}) = state {
+                    let mut just_reloaded = false;
                     for script_bytes in self.pending_script_update.drain(0..) {
                         println!("Hot reloading");
+                        self.interpreter_errors = Vec::new();
                         if let Err(msg) = interpreter.hot_reload_from_script(&script_bytes) {
                             self.interpreter_errors.push(msg);
                             continue;
@@ -2004,11 +2013,12 @@ impl ScriptBridge {
                             }
                         };
 
-                        self.interpreter_errors = Vec::new();
+                        just_reloaded = true;
+
                         crate::audio::submit(std::iter::once(SoundCmd::ResetAudio { fade_secs: 0.05 }));
                     }
 
-                    self.state = BridgeState::Paused(interpreter, loop_fn);
+                    self.state = BridgeState::Paused(PausedInfo{interpreter, loop_fn, just_reloaded});
                 } else {
                     panic!("Expected unreachable");
                 }
@@ -2061,11 +2071,12 @@ impl ScriptBridge {
                     },
                     // If we're in the Running state the assumption is that we're coming out of debug mode
                     BridgeState::Running | BridgeState::Paused(..) => {
-                        if let BridgeState::Paused(interpreter, loop_fn) = state {
+                        if let BridgeState::Paused(PausedInfo{interpreter, loop_fn, just_reloaded}) = state {
                             self.tx
                                 .send(ScriptRequest::ExecuteLoop(
                                     *interpreter,
                                     loop_fn,
+                                    just_reloaded,
                                     keys.to_vec(),
                                     last_keys.to_vec(),
                                     delta,
@@ -2079,11 +2090,11 @@ impl ScriptBridge {
                         // TODO: we probably want some sort of timeout here so we can start debugging
                         match self.rx.recv() {
                             Ok(ScriptResponse::Error(interpreter, loop_fn, msg)) => {
-                                self.state = BridgeState::Paused(Box::new(interpreter), loop_fn);
+                                self.state = BridgeState::Paused(PausedInfo{interpreter: Box::new(interpreter), loop_fn, just_reloaded: false});
                                 self.interpreter_errors.push(msg);
                             }
                             Ok(ScriptResponse::LoopComplete(interpreter, loop_fn, draw_list, sound_list, gc_time)) => {
-                                self.state = BridgeState::Paused(Box::new(interpreter), loop_fn);
+                                self.state = BridgeState::Paused(PausedInfo{interpreter: Box::new(interpreter), loop_fn, just_reloaded: false});
                                 self.draw_list = draw_list;
                                 self.sound_list = sound_list;
                                 self.last_gc_time = gc_time;
@@ -2155,7 +2166,7 @@ impl ScriptBridge {
                     *interpreter.fetch_mut::<PerfTimer>() = perf;
                     interpreter.fetch_mut::<SoundList>().finished.extend(finished.iter().copied());
                     interpreter.update_in_root_env(b"delta", ShimValue::Float(delta)).expect("delta should be in env");
-                    match call_loop_fn(interpreter, loop_fn) {
+                    match call_shim_fn(interpreter, loop_fn) {
                         Ok(gc_time) => self.last_gc_time = gc_time,
                         Err(msg) => self.interpreter_errors.push(msg),
                     }
@@ -2185,7 +2196,7 @@ impl ScriptBridge {
             BridgeState::Running => {}
             #[cfg(not(target_arch = "wasm32"))]
             BridgeState::Debug(..) => {}
-            BridgeState::Paused(interpreter, _loop_fn) => {
+            BridgeState::Paused(PausedInfo{interpreter, ..}) => {
                 let env = std::mem::take(&mut interpreter.root_env);
                 shimlang_debug_window.debug_window(interpreter, &env);
                 interpreter.root_env = env;
@@ -2322,7 +2333,7 @@ fn script_thread_logic(rx: Receiver<ScriptRequest>, tx: Sender<ScriptResponse>) 
     loop {
         if let Ok(request) = rx.recv() {
             match request {
-                ScriptRequest::ExecuteLoop(mut interpreter, loop_fn, keys, last_keys, delta, perf, finished) => {
+                ScriptRequest::ExecuteLoop(mut interpreter, loop_fn, just_reloaded, keys, last_keys, delta, perf, finished) => {
                     let ks = interpreter.fetch_mut::<KeyState>();
                     ks.held_time.resize(keys.len(), 0.0);
                     for (i, &pressed) in keys.iter().enumerate() {
@@ -2344,18 +2355,51 @@ fn script_thread_logic(rx: Receiver<ScriptRequest>, tx: Sender<ScriptResponse>) 
                     *interpreter.fetch_mut::<PerfTimer>() = perf;
                     interpreter.fetch_mut::<SoundList>().finished.extend(finished.iter().copied());
                     interpreter.update_in_root_env(b"delta", ShimValue::Float(delta)).expect("delta should be in env");
-                    tx.send(match call_loop_fn(&mut interpreter, loop_fn) {
+
+                    let (mut draw_list, mut sound_list): (Vec<DrawListItem>, Vec<SoundCmd>) = match (just_reloaded, interpreter.get_from_root_env(b"on_reload")) {
+                        (true, Some(reload_fn)) => {
+                            println!("Calling on_reload fn");
+                            match call_shim_fn(&mut interpreter, reload_fn) {
+                                Ok(_) => {
+                                    (
+                                        interpreter
+                                            .fetch_mut::<DrawList>()
+                                            .items
+                                            .drain(..)
+                                            .collect(),
+                                        interpreter
+                                            .fetch_mut::<SoundList>()
+                                            .items
+                                            .drain(..)
+                                            .collect()
+                                    )
+                                }
+                                Err(msg) => {
+                                    tx.send(ScriptResponse::Error(interpreter, loop_fn, msg)).unwrap();
+                                    continue;
+                                }
+                            }
+                        },
+                        _ => (Vec::new(), Vec::new())
+                    };
+
+
+                    tx.send(match call_shim_fn(&mut interpreter, loop_fn) {
                         Ok(gc_time) => {
-                            let draw_list = interpreter
+                            for draw_cmd in interpreter
                                 .fetch_mut::<DrawList>()
                                 .items
                                 .drain(..)
-                                .collect();
-                            let sound_list = interpreter
+                            {
+                                draw_list.push(draw_cmd)
+                            }
+                            for sound_cmd in interpreter
                                 .fetch_mut::<SoundList>()
                                 .items
                                 .drain(..)
-                                .collect();
+                            {
+                                sound_list.push(sound_cmd);
+                            }
                             ScriptResponse::LoopComplete(interpreter, loop_fn, draw_list, sound_list, gc_time)
                         }
                         Err(msg) => ScriptResponse::Error(interpreter, loop_fn, msg),
